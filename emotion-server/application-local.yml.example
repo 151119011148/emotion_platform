@@ -1,0 +1,10 @@
+# 复制成同目录的 application-local.yml 再填真值；那份不入库（见仓库根 .gitignore）。
+# application.yml 里 spring.profiles.active=local，所以这个文件名不能改。
+# 放在 emotion-server/ 这一层（模块根），IDE 与 `java -jar` 的工作目录都是它；
+# 刻意不放 src/main/resources —— 那样 Maven 会把它抄进 target/classes 和打出来的 jar。
+spring:
+  datasource:
+    password: <你的 MySQL root 口令>
+
+jwt:
+  secret: <至少 256 bit 的签名密钥；泄露等于任何人都能伪造 token>

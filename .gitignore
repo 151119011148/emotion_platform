@@ -1,0 +1,22 @@
+# 构建产物与依赖
+target/
+node_modules/
+dist/
+
+# 本地凭据。application.yml 里只有 ${MYSQL_PASSWORD:} / ${JWT_SECRET:} 两个占位，
+# 真值在这一份；文件名不带路径，将来换目录也不漏。填法见 application-local.yml.example。
+application-local.yml
+
+# IDE
+.idea/
+*.iml
+
+# 系统垃圾
+.DS_Store
+*.log
+
+# 整份内容是把 root 口令写死再 sed 进 application.yml；它自己的存在就是泄露。
+mysql-reinstall.sh
+
+# 放手记的目录，不是代码。
+复盘/

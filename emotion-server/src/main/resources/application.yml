@@ -1,0 +1,61 @@
+server:
+  port: 8080
+
+spring:
+  # 真实口令在同模块根的 application-local.yml（未入库，见 application-local.yml.example）。
+  # 走 profile 文档而不是 spring.config.import：导入的那份优先级低于本文件，占位会反过来盖掉真值。
+  profiles:
+    active: local
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/emotion_dashboard?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+
+jwt:
+  # 签名密钥一旦公开等于任何人都能伪造合法 token，所以真值只在未入库的 application-local.yml 里
+  secret: ${JWT_SECRET:}
+  expiration: 86400000
+
+# 行情源。全部走 http 明文：本机 JDK 8u201 的 cacerts 早于 Let's Encrypt 根证书普及，
+# https 会在信任链上随机翻车，而这些接口 http/https 返回的字节完全一致。
+market:
+  # 一次拉取的总预算，超时就把手上的部分结果返回，不再等
+  budget-ms: 12000
+  connect-timeout-ms: 1500
+  read-timeout-ms: 3500
+  retries: 1
+  pool-size: 5
+  intraday-ttl-ms: 60000
+  cache-max-entries: 256
+  tencent:
+    base: http://qt.gtimg.cn
+    chunk-size: 50
+    sh-index: sh000001
+    sz-index: sz399001
+    # 实时快照只给最新一天，历史交易日的成交额靠这根日 K 回溯。
+    # http 版只会 302 到 https，所以直接配 https（本机 JDK 8 信任其证书，已实测 200）
+    kline-url: https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get
+    # 回看根数：只要覆盖到请求日即可，2026-09-04 往前 12 根能到 08-21
+    day-amount-bars: 12
+    # 五大指数收盘的取数清单：gtimg 码 → t_index_close.index_code。
+    # 右边那五个必须和 ReviewImportParser.KNOWN_INDEXES 一致，否则导入器认得的名字和这里存的对不上。
+    # 北证50 只能 bj 前缀：实测 sh899050 回空数组，bj899050 才有 9/4 的收盘。
+    index-close-codes: sh000001:000001,sz399001:399001,sz399006:399006,sh000688:000688,bj899050:899050
+  eastmoney:
+    # 只有三个池子接口可用；日K主机（push2his/push2/92.push2his）本机实测全部空响应
+    pool-base: http://push2ex.eastmoney.com
+    # 上游 tc 是真实家数，rows 会被这个值截断；截断时会给出警告而不是静默少算
+    pool-size: 200
+    # A股代码总表：只有 delay 子域在本机通（push2 / 1.push2 / 80.push2 全是空响应）
+    list-base: http://push2delay.eastmoney.com
+    # 异动监管公告：必须带 ann_type=A，且服务端过滤参数一律被静默忽略，判类别只能在客户端按类目码
+    ann-base: https://np-anotice-stock.eastmoney.com
