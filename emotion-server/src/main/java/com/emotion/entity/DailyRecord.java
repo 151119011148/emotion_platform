@@ -147,8 +147,9 @@ public class DailyRecord {
     /** 整篇复盘原文，含 ```meta 围栏块本身——md 是唯一真相，库里这份要能原样导回编辑器改完再导入。 */
     private String reviewMd;
     /**
-     * 各节判断文字的 JSON 原文，键见 {@code ReviewDocFormatter.NOTE_KEYS}。
-     * 只有「导出复盘文档」那条只读链路会用它，打分和 md 导入契约都不认它。
+     * <b>已停用</b>：各节判断文字（复盘页那块编辑口 + 导出回填）这一整套已经下线，
+     * 页面不再写它，导出也一律留 {@code ✍️ 判断} 占位让他直接写在 md 里。
+     * 列和历史值都原样留着，但<b>不要</b>在没有新需求的情况下把它接回任何一条读写链路。
      */
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String docNotes;

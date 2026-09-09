@@ -25,6 +25,7 @@ import com.emotion.util.ScoreInputs;
 import com.emotion.util.TemperatureCalculator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
  * 16 个真实交易日的全链路重算基线：把库里「人工填的那几列 + 当日公开输入」倒进内存，
@@ -39,16 +40,27 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * 档位溢价走 {@link MarketMetrics.TierPremium#ofStored} 重建，与 {@code PremiumTierStore.read}
  * 同一条路，所以基线里的分和卡面上的分是同一个数。
  *
- * <p>重新生成：见同目录 {@code recalc-14d.dump.sql}。改了判据就要重新 dump，
- * 并在提交说明里写清哪几天的哪一列动了、为什么动。
+ * <p>重新生成：库已经跟着新口径重算过 → 见同目录 {@code recalc-14d.dump.sql} 重新 dump；
+ * 判据刚改、库还是旧的 → 用下面那个 {@code golden.bless}。两种都要在提交说明里写清
+ * 哪几天的哪一列动了、为什么动。
  */
 class RecalcGoldenTest {
 
     private static final String FIXTURE = "golden/recalc-14d.jsonl";
     private static final int LOOKBACK = 5;
+    /** 重立基线的开关，值是要覆写的 jsonl 路径。 */
+    private static final String BLESS = "golden.bless";
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    /**
+     * 口径**是有意改掉**的时候用它重立基线：{@code -Dgolden.bless=<jsonl 路径>}。
+     * 它只换每行的 expected（输入、池子、档位表一律原样留着），并把每一处改动打到 stdout。
+     *
+     * <p>为什么不直接手改 fixture：这 16 天的结论是九维耦合出来的，手改一处温度就会漏改它的
+     * stageSeq，基线一旦自己不一致，以后再也抓不出真漂移。也不把它做成常开：
+     * 不带这个属性时下面那条断言必须照旧在任何一处不一致时变红。
+     */
     @Test
     void replayingTheStoredDaysReproducesEveryDerivedColumn() throws Exception {
         List<Day> days = load();
@@ -91,9 +103,27 @@ class RecalcGoldenTest {
         for (int i = 0; i < days.size(); i++) {
             days.get(i).diff(records.get(i), diffs);
         }
-        if (!diffs.isEmpty()) {
-            fail("重算结果与库里存的结论不一致（" + diffs.size() + " 处）：\n" + join(diffs));
+        String blessTo = System.getProperty(BLESS);
+        if (blessTo == null) {
+            if (!diffs.isEmpty()) {
+                fail("重算结果与库里存的结论不一致（" + diffs.size() + " 处）：\n" + join(diffs));
+            }
+            return;
         }
+        rewrite(days, records, blessTo);
+        System.out.println("[golden.bless] 已写回 " + blessTo + "，本次共 " + diffs.size() + " 处结论变动：");
+        System.out.println(join(diffs));
+    }
+
+    /** 每行只换 expected，输入侧（盘面/池子/档位表/第 8、9 维那三列）逐字留原样。 */
+    private static void rewrite(List<Day> days, List<DailyRecord> records, String path) throws IOException {
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < days.size(); i++) {
+            Day day = days.get(i);
+            day.raw.set("expected", day.expectedOf(records.get(i)));
+            text.append(MAPPER.writeValueAsString(day.raw)).append('\n');
+        }
+        java.nio.file.Files.write(java.nio.file.Paths.get(path), text.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     private static String join(List<String> lines) {
@@ -115,7 +145,7 @@ class RecalcGoldenTest {
             String line;
             while ((line = reader.readLine()) != null) {
                 if (!line.trim().isEmpty()) {
-                    days.add(Day.read(MAPPER.readTree(line)));
+                    days.add(Day.read((com.fasterxml.jackson.databind.node.ObjectNode) MAPPER.readTree(line)));
                 }
             }
         }
@@ -126,6 +156,8 @@ class RecalcGoldenTest {
     /** 一天的全部输入与"库里当初算出来的结论"。 */
     private static final class Day {
         private LocalDate tradeDate;
+        /** 整行的原始解析结果：重立基线时按它写回，输入侧一个字节都不动。 */
+        private ObjectNode raw;
         private JsonNode inputs;
         private PoolCounts poolCounts;
         private MarketMetrics.PremiumTiers tiers;
@@ -136,8 +168,9 @@ class RecalcGoldenTest {
         private String survNote;
         private JsonNode expected;
 
-        static Day read(JsonNode node) {
+        static Day read(ObjectNode node) {
             Day day = new Day();
+            day.raw = node;
             day.tradeDate = LocalDate.parse(node.get("tradeDate").asText());
             day.inputs = node.get("inputs");
             day.poolCounts = poolCounts(node.get("poolCounts"));
@@ -189,6 +222,51 @@ class RecalcGoldenTest {
                 diffText(diffs, column, text(expected.get(column)), textGetter(actual, column));
             }
             diffInteger(diffs, "stageSeq", integer(expected.get("stageSeq")), actual.getStageSeq());
+        }
+
+        /**
+         * 重算结果 → expected 那一块。键的集合必须与 {@code recalc-14d.dump.sql} 里那个
+         * {@code JSON_OBJECT} 一字不差（24 个），否则下次真从库里 re-dump 会满屏假差异。
+         *
+         * <p>小数按库里的存储刻度补齐：温度两列 1 位、其余百分数 2 位（DECIMAL(5,2)）。
+         * 比对本身是 {@code compareTo}，补零不影响判定，影响的只是这份文件的可读性。
+         */
+        ObjectNode expectedOf(DailyRecord actual) {
+            ObjectNode node = MAPPER.createObjectNode();
+            for (String column : SCORE_COLUMNS) {
+                putInt(node, column, getter(actual, column));
+            }
+            for (String column : DECIMAL_COLUMNS) {
+                BigDecimal value = decimalGetter(actual, column);
+                if (value == null) {
+                    node.putNull(column);
+                } else {
+                    int scale = "temperature".equals(column) || "prevTemperature".equals(column) ? 1 : 2;
+                    node.put(column, value.setScale(scale, java.math.RoundingMode.HALF_UP).toPlainString());
+                }
+            }
+            for (String column : TEXT_COLUMNS) {
+                putText(node, column, textGetter(actual, column));
+            }
+            putInt(node, "stageSeq", actual.getStageSeq());
+            return node;
+        }
+
+        /** 整数写成 JSON number，与 {@code JSON_OBJECT} 直接给出整数列时的形状一致。 */
+        private static void putInt(ObjectNode node, String column, Integer value) {
+            if (value == null) {
+                node.putNull(column);
+            } else {
+                node.put(column, value.intValue());
+            }
+        }
+
+        private static void putText(ObjectNode node, String column, String value) {
+            if (value == null) {
+                node.putNull(column);
+            } else {
+                node.put(column, value);
+            }
         }
 
         private void diffInteger(List<String> diffs, String column, Integer want, Integer got) {

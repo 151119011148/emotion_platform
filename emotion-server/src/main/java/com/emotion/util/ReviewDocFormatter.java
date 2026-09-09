@@ -13,9 +13,6 @@ import java.math.RoundingMode;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -31,17 +28,6 @@ import java.util.Map;
  * 所有字段可空，空一律渲染成 {@code —} 或「无」的说明行，绝不 NPE、绝不抛给调用方。
  */
 public final class ReviewDocFormatter {
-
-    /**
-     * 八个小节的判断文字键，<b>顺序必须和 {@link #render} 里的小节顺序一致</b>。
-     *
-     * <p>这一份是唯一定义处：{@code t_daily_record.doc_notes} 的 JSON 键、复盘页那八个输入框、
-     * 以及导出文档里"有原文就放原文、没有就留写作提示"的判断行，全都读它。
-     * 新增小节却忘了在这儿登记，结果是他写的字会被静默丢掉——所以 {@code ReviewDocFormatterTest}
-     * 里有一条断言把键清单和渲染出的小节标题一一对起来。
-     */
-    public static final List<String> NOTE_KEYS = Collections.unmodifiableList(Arrays.asList(
-            "index", "theme", "emotion", "position", "answer", "plan", "anchor", "strategy"));
 
     private ReviewDocFormatter() {
     }
@@ -62,8 +48,6 @@ public final class ReviewDocFormatter {
         public List<Anchor> anchors = new ArrayList<>();
         /** 只有那天导入过 md 才带得出题材（无日粒度）。空 = 无从带出。 */
         public List<ThemeRow> themes = new ArrayList<>();
-        /** 小节键 → 他写的判断原文（含从元宝/豆包贴来的答案）。平台不解析内容。 */
-        public Map<String, String> notes = new LinkedHashMap<>();
     }
 
     public static String render(Model m) {
@@ -80,10 +64,6 @@ public final class ReviewDocFormatter {
         parts.add(sectionPlan(m));
         parts.add(sectionAnchor(m));
         parts.add(sectionStrategy(m));
-        String orphans = orphanNotes(m);
-        if (orphans != null) {
-            parts.add(orphans);
-        }
         parts.add(disclaimer());
         return String.join("\n\n", parts).trim() + "\n";
     }
@@ -132,7 +112,7 @@ public final class ReviewDocFormatter {
             sb.append("- **连板高度**：").append(plain(r.getMaxConsecutiveLimit())).append(" 板\n");
             sb.append("\n").append(tempLine(r)).append("\n");
         }
-        return prompt(m, "index", sb, "核心定性：这波是转强、弱修复还是退潮？指数和个股背离吗？量能与家数支持你的定性吗？");
+        return prompt(sb, "核心定性：这波是转强、弱修复还是退潮？指数和个股背离吗？量能与家数支持你的定性吗？");
     }
 
     private static String tempLine(DailyRecord r) {
@@ -180,7 +160,7 @@ public final class ReviewDocFormatter {
             sb.append("- **题材**：这天没导入过带 `题材:` 的原文，无从带出（题材无日粒度）。"
                     + "要写主线强度请在复盘里补，或看仪表盘涨停池的行业分布。\n");
         }
-        return prompt(m, "theme", sb, "每条主线一句「翻译」：是板块合力还是个股穿越？一字独食还是换手？");
+        return prompt(sb, "每条主线一句「翻译」：是板块合力还是个股穿越？一字独食还是换手？");
     }
 
     // ---- 【三、情绪与连板生态】 ----
@@ -209,7 +189,7 @@ public final class ReviewDocFormatter {
                     .append(ReviewMdFormatter.dimTable(m.today)).append("\n");
         }
         sb.append(ladder(m.stocks));
-        return prompt(m, "emotion", sb, "今日最关键的变化是什么？情绪是修复还是退潮？");
+        return prompt(sb, "今日最关键的变化是什么？情绪是修复还是退潮？");
     }
 
     private static String ladder(MarketStocksVO s) {
@@ -254,7 +234,7 @@ public final class ReviewDocFormatter {
         StringBuilder sb = head("【四、持仓处理评价】");
         if (m.positions == null || m.positions.isEmpty()) {
             sb.append("（这天没有导入过持仓台账）\n");
-            return prompt(m, "position", sb, "有持仓就逐只写「实际动作 vs 应做动作 vs 纪律」；空仓写为什么空。");
+            return prompt(sb, "有持仓就逐只写「实际动作 vs 应做动作 vs 纪律」；空仓写为什么空。");
         }
         sb.append("| 标的 | 成本 | 现价 | 浮动 | 动作 | 应做 | 纪律 |\n|---|---|---|---|---|---|---|\n");
         for (Position p : m.positions) {
@@ -266,7 +246,7 @@ public final class ReviewDocFormatter {
                     .append(cell(p.getPlannedAction())).append(" | ")
                     .append(cell(p.getDiscipline())).append(" |\n");
         }
-        return prompt(m, "position", sb, "连续「应做未做」是这块最该沉淀的东西——写清楚为什么没执行。");
+        return prompt(sb, "连续「应做未做」是这块最该沉淀的东西——写清楚为什么没执行。");
     }
 
     // ---- 【五、对答案与兑现】 ----
@@ -276,7 +256,7 @@ public final class ReviewDocFormatter {
         List<Prediction> answers = filter(m.predictions, true);
         if (answers.isEmpty()) {
             sb.append("（今天没有登记 `对答案`——即没有回填上一交易日的同名预判）\n");
-            return prompt(m, "answer", sb, "错在定位 / 选股 / 执行哪一层？");
+            return prompt(sb, "错在定位 / 选股 / 执行哪一层？");
         }
         sb.append("| 昨日预判 | 兑现 | 说明 |\n|---|---|---|\n");
         for (Prediction a : answers) {
@@ -284,7 +264,7 @@ public final class ReviewDocFormatter {
                     .append(cell(a.getResult())).append(" | ")
                     .append(cell(a.getResultNote())).append(" |\n");
         }
-        return prompt(m, "answer", sb, "命中/落空背后的原因，一句话。");
+        return prompt(sb, "命中/落空背后的原因，一句话。");
     }
 
     // ---- 【六、次日预期 · 三路径】 ----
@@ -296,7 +276,7 @@ public final class ReviewDocFormatter {
         List<Prediction> plans = filter(m.predictions, false);
         if (plans.isEmpty()) {
             sb.append("（没有登记的明日预判）\n");
-            return prompt(m, "plan", sb, "写核心定性 + 三路径的概率、触发条件、每路径仓位上限。");
+            return prompt(sb, "写核心定性 + 三路径的概率、触发条件、每路径仓位上限。");
         }
         for (Prediction p : plans) {
             sb.append("- **").append(dash(p.getName())).append("**：");
@@ -308,7 +288,7 @@ public final class ReviewDocFormatter {
             }
             sb.append("\n");
         }
-        return prompt(m, "plan", sb, "这三条路径你各押多少仓？触发信号看哪个？");
+        return prompt(sb, "这三条路径你各押多少仓？触发信号看哪个？");
     }
 
     // ---- 【七、关键锚点】 ----
@@ -317,7 +297,7 @@ public final class ReviewDocFormatter {
         StringBuilder sb = head("【七、关键锚点】");
         if (m.anchors == null || m.anchors.isEmpty()) {
             sb.append("（这天没有在册的周期阵眼/总龙——去「主线龙头」页登记）\n");
-            return prompt(m, "anchor", sb, "这一轮的阵眼是谁？它今天给了什么信号？");
+            return prompt(sb, "这一轮的阵眼是谁？它今天给了什么信号？");
         }
         for (Anchor a : m.anchors) {
             sb.append("- **").append(dash(a.getStockName())).append("（").append(dash(a.getStockCode()))
@@ -327,7 +307,7 @@ public final class ReviewDocFormatter {
             }
             sb.append("\n");
         }
-        return prompt(m, "anchor", sb, "这些锚点今天各给了什么信号？断板/跌破的有没有？");
+        return prompt(sb, "这些锚点今天各给了什么信号？断板/跌破的有没有？");
     }
 
     // ---- 【八、仓位与总策略】 ----
@@ -343,7 +323,7 @@ public final class ReviewDocFormatter {
         } else {
             sb.append("- **我的仓位 / 明日计划**：—\n");
         }
-        return prompt(m, "strategy", sb, "综合上面的判断，明天总仓位上限多少？单票上限？绝对回避哪些？");
+        return prompt(sb, "综合上面的判断，明天总仓位上限多少？单票上限？绝对回避哪些？");
     }
 
     private static String disclaimer() {
@@ -360,60 +340,14 @@ public final class ReviewDocFormatter {
     }
 
     /**
-     * 收一节：他写过判断就放他的原文（含从元宝/豆包贴来的答案），没写过才留一行写作提示。
+     * 收一节：固定留一行写作提示。
      *
-     * <p>原文一律并进同一个引用块：贴进来的东西段落数不可控，
-     * 空行不补 {@code >} 会让引用块断掉、后半截变成裸正文，排版就散了。
+     * <p>这里<b>不</b>回填他写过的判断原文——{@code t_daily_record.doc_notes} 那一列已经不再有任何读写方，
+     * 判断就写在这份 md 的小节里，下次导入由 {@code ReviewImportParser} 认。
      */
-    private static String prompt(Model m, String key, StringBuilder sb, String hint) {
-        String text = m == null || m.notes == null ? null : m.notes.get(key);
-        if (text != null && !text.trim().isEmpty()) {
-            sb.append("\n").append(blockquote("判断", text)).append("\n");
-        } else {
-            sb.append("\n> ✍️ 判断：").append(hint).append("\n");
-        }
+    private static String prompt(StringBuilder sb, String hint) {
+        sb.append("\n> ✍️ 判断：").append(hint).append("\n");
         return trim(sb);
-    }
-
-    /** 一段可能多行的文字，包成一个 markdown 引用块。 */
-    private static String blockquote(String label, String text) {
-        StringBuilder out = new StringBuilder();
-        String[] lines = text.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
-        for (int i = 0; i < lines.length; i++) {
-            String line = lines[i].trim();
-            if (i == 0) {
-                out.append("> **").append(label).append("**：").append(line);
-            } else {
-                out.append(line.isEmpty() ? ">" : "> " + line);
-            }
-            if (i < lines.length - 1) {
-                out.append("\n");
-            }
-        }
-        return out.toString();
-    }
-
-    /**
-     * 键不在 {@link #NOTE_KEYS} 里的正文。渲染器不猜它该进哪一节，但也绝不把它变没——
-     * 单列一节挂到免责声明前面，让人一眼看到"这份存了一段挂不上号的字"。
-     */
-    private static String orphanNotes(Model m) {
-        if (m.notes == null || m.notes.isEmpty()) {
-            return null;
-        }
-        StringBuilder sb = new StringBuilder();
-        for (Map.Entry<String, String> entry : m.notes.entrySet()) {
-            String text = entry.getValue();
-            if (entry.getKey() == null || text == null || text.trim().isEmpty()
-                    || NOTE_KEYS.contains(entry.getKey())) {
-                continue;
-            }
-            if (sb.length() == 0) {
-                sb.append("## 【附、未归节的文字】\n\n");
-            }
-            sb.append(blockquote(entry.getKey(), text)).append("\n\n");
-        }
-        return sb.length() == 0 ? null : trim(sb);
     }
 
     private static String trim(StringBuilder sb) {

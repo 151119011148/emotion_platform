@@ -16,18 +16,27 @@ public class NodeService {
         this.nodeEventMapper = nodeEventMapper;
     }
 
+    /**
+     * 历史节点：<b>按 D0 倒排</b>，最新那个节点在最上面。
+     *
+     * <p>他记一个节点记的是"哪一天起的"，按 {@code created_at} 排会把几个月前补录的最老节点顶到第一行。
+     * D0 相同的（同一天建了好几个）再按创建时间倒排；D0 还没填的空壳在 MySQL 的 DESC 下自然落最后。
+     */
     public List<NodeEvent> listByUser(Long userId) {
         return nodeEventMapper.selectList(
                 new LambdaQueryWrapper<NodeEvent>()
                         .eq(NodeEvent::getUserId, userId)
+                        .orderByDesc(NodeEvent::getD0Date)
                         .orderByDesc(NodeEvent::getCreatedAt));
     }
 
+    /** 待验证的那一个：同样以 D0 为准挑最近，不能挑到一条 D0 更老的。 */
     public NodeEvent getCurrent(Long userId) {
         return nodeEventMapper.selectOne(
                 new LambdaQueryWrapper<NodeEvent>()
                         .eq(NodeEvent::getUserId, userId)
                         .eq(NodeEvent::getStatus, "待验证")
+                        .orderByDesc(NodeEvent::getD0Date)
                         .orderByDesc(NodeEvent::getCreatedAt)
                         .last("LIMIT 1"));
     }

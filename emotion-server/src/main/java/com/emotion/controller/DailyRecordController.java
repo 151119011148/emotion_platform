@@ -1,5 +1,6 @@
 package com.emotion.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.emotion.dto.DailyRecordRequest;
 import com.emotion.dto.ImportRequest;
 import com.emotion.dto.PredictionRequest;
@@ -26,6 +27,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/records")
@@ -36,32 +38,44 @@ public class DailyRecordController {
     private final ReviewImportService reviewImportService;
     private final ReviewExportService reviewExportService;
     private final ReviewLedgerService reviewLedgerService;
+    private final ObjectMapper json;
 
     public DailyRecordController(DailyRecordService dailyRecordService,
                                  CycleService cycleService,
                                  ReviewImportService reviewImportService,
                                  ReviewExportService reviewExportService,
-                                 ReviewLedgerService reviewLedgerService) {
+                                 ReviewLedgerService reviewLedgerService,
+                                 ObjectMapper json) {
         this.dailyRecordService = dailyRecordService;
         this.cycleService = cycleService;
         this.reviewImportService = reviewImportService;
         this.reviewExportService = reviewExportService;
         this.reviewLedgerService = reviewLedgerService;
+        this.json = json;
     }
 
     @PostMapping
     public ApiResponse<DailyRecord> create(Authentication auth,
-                                           @RequestBody DailyRecordRequest req) {
+                                           @RequestBody Map<String, Object> raw) {
         Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(dailyRecordService.createOrUpdate(userId, req));
+        return ApiResponse.ok(dailyRecordService.createOrUpdate(userId, toRequest(raw), raw.keySet()));
     }
 
     @PutMapping("/{id}")
     public ApiResponse<DailyRecord> update(Authentication auth,
                                            @PathVariable Long id,
-                                           @RequestBody DailyRecordRequest req) {
+                                           @RequestBody Map<String, Object> raw) {
         Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(dailyRecordService.createOrUpdate(userId, req));
+        return ApiResponse.ok(dailyRecordService.createOrUpdate(userId, toRequest(raw), raw.keySet()));
+    }
+
+    /**
+     * 同一份 body 用两遍：DTO 管类型，{@code keySet} 管「这一格你到底发没发」。
+     * 后者没法从 DTO 反推——键缺席和键发 null 解出来都是 null，而 ALWAYS 列上
+     * 「发 null」是清回未填、「不发」是一个字都不动，差的是整整一列数据。
+     */
+    private DailyRecordRequest toRequest(Map<String, Object> raw) {
+        return json.convertValue(raw, DailyRecordRequest.class);
     }
 
     @GetMapping("/today")
@@ -183,8 +197,9 @@ public class DailyRecordController {
     }
 
     /**
-     * 复盘页下方那块明细：持仓 / 预判与兑现 / 指数 / 涨跌家数 / 我的仓位 / 各节判断文字。
-     * 涨跌家数、我的仓位、判断文字跟着表单存（{@code PUT /{id}}），两张台账存走下面两个端点。
+     * 复盘页下方那块明细：持仓 / 预判与兑现 / 指数 / 涨跌家数 / 我的仓位 / 对照 / 当日题材快照。
+     * 这一页现在只有<b>对照</b>跟表单一起存（{@code PUT /{id}}）、<b>持仓</b>走下面的端点，其余都是只读展示；
+     * 涨跌家数、我的仓位、预判与兑现的唯一作者是那天导入的复盘 md。
      */
     @GetMapping("/import/detail")
     public ApiResponse<ReviewDetailVO> importDetail(Authentication auth, @RequestParam String date) {
@@ -204,7 +219,10 @@ public class DailyRecordController {
         return ApiResponse.ok(reviewLedgerService.savePositions(userId, parse(date), rows));
     }
 
-    /** 整日替换当天预判与对答案，PLAN + ANSWER 两批一起发、一起换（少发一种就是把它清掉）。 */
+    /**
+     * 整日替换当天预判与对答案，PLAN + ANSWER 两批一起发、一起换（少发一种就是把它清掉）。
+     * <b>复盘页已经没有这块编辑口</b>：这两批行现在只由那天导入的 md 写，这个入口留作同一套语义的手工口。
+     */
     @PutMapping("/predictions")
     public ApiResponse<Integer> savePredictions(Authentication auth,
                                                 @RequestParam String date,

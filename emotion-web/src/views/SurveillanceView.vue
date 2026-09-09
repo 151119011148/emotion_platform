@@ -111,7 +111,7 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { marketApi, recordApi } from '../api/modules'
-import { bandOf, signed } from '../utils/scores'
+import { survivalBandOf, signed } from '../utils/scores'
 import SurvCurve from '../components/SurvCurve.vue'
 
 /** 逐日那一屏放多少行；再多就滚，不翻页——这一格是来看趋势拐点的。 */
@@ -161,7 +161,7 @@ const avgSub = computed(() => {
 
 const survScore = computed(() => {
   if (!surv.value || !surv.value.count) return null
-  return bandOf(surv.value.avgPct)
+  return survivalBandOf(surv.value.avgPct)
 })
 
 /**
@@ -179,7 +179,7 @@ const dailyRows = computed(() => records.value.map((r) => ({
   date: r.tradeDate,
   count: r.survCount,
   avg: r.survPremium,
-  score: r.survCount > 0 && r.survPremium != null ? bandOf(r.survPremium) : null,
+  score: r.survCount > 0 && r.survPremium != null ? survivalBandOf(r.survPremium) : null,
   note: r.survNote || ''
 })))
 

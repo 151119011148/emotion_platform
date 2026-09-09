@@ -38,7 +38,7 @@ export function topSignals(record) {
   if (anchor !== null && anchor <= 0) out.push(`阵眼 ${anchor} 分`)
   const survCount = num(record.survCount)
   const surv = num(record.survPremium)
-  if (survCount > 0 && surv !== null && surv <= -2) out.push(`监管股均值 ${surv.toFixed(2)}%`)
+  if (survCount > 0 && surv !== null && surv <= -2) out.push(`异动监管均值 ${surv.toFixed(2)}%`)
   const broken = num(record.brokenBoardRate)
   if (broken !== null && broken >= 70) out.push(`炸板率 ${broken}%`)
   return out

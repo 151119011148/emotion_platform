@@ -4,20 +4,22 @@
       <el-tooltip
         placement="bottom"
         :show-after="150"
-        :disabled="!item.lines && !item.note"
         popper-class="card-tip"
       >
         <template #content>
-          <div v-if="item.lines || item.note" class="tip">
-            <div class="tip-title">{{ item.tipTitle }}</div>
-            <div v-for="(line, i) in item.lines" :key="i" class="tip-line">
-              <span class="tip-main">{{ line.main }}</span>
-              <span class="tip-sub">{{ line.sub }}</span>
-            </div>
-            <div v-if="item.note" class="tip-note">{{ item.note }}</div>
+          <div class="tip">
+            <div class="tip-score">{{ item.scoreLine }}</div>
+            <template v-if="item.lines || item.note">
+              <div class="tip-title">{{ item.tipTitle }}</div>
+              <div v-for="(line, i) in item.lines" :key="i" class="tip-line">
+                <span class="tip-main">{{ line.main }}</span>
+                <span class="tip-sub">{{ line.sub }}</span>
+              </div>
+              <div v-if="item.note" class="tip-note">{{ item.note }}</div>
+            </template>
           </div>
         </template>
-        <div class="card-inner" :class="{ hoverable: item.lines || item.note }">
+        <div class="card-inner hoverable">
           <div class="card-label">{{ item.label }}</div>
           <div class="card-value">{{ item.value }}</div>
           <div class="card-trend" :class="item.trend">
@@ -39,7 +41,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { bandOf, signed } from '../utils/scores'
+import { CARD_ORDER, survivalBandOf, signed, dimScoreLine } from '../utils/scores'
 
 const props = defineProps({
   record: { type: Object, default: null },
@@ -54,17 +56,24 @@ const props = defineProps({
 /** 名单超过这么长就截断：tooltip 是给人扫一眼的，不是给人翻页的。 */
 const MAX_LINES = 15
 
-const CARDS = [
-  { key: 'volume', label: '成交额(亿)' },
-  { key: 'breadth', label: '涨停/跌停' },
-  { key: 'height', label: '连板高度' },
-  { key: 'premium', label: '分档溢价' },
-  { key: 'surv', label: '监管股溢价' },
-  { key: 'theme', label: '主线明确度' },
-  { key: 'anchor', label: '阵眼当日' },
-  { key: 'loss', label: '大面数' },
-  { key: 'broken', label: '炸板率' }
-]
+/**
+ * 卡面标题只有这一份（带单位，是给这一屏看的短名）；<b>顺序不在这里</b>，
+ * 那份在 {@code utils/scores} 的 CARD_ORDER，复盘页九维用的是同一个数组。
+ * tooltip 首行那个「第 N 维」才是引擎维序——它是这张卡和复盘页同一行对得上的编号，
+ * 所以扫过去编号会跳（6、3、1、2…），那是刻意的。
+ */
+const CARD_LABELS = {
+  volume: '成交额(亿)',
+  breadth: '涨停/跌停',
+  height: '连板高度',
+  premium: '分档溢价',
+  surv: '异动监管',
+  theme: '主线明确度',
+  anchor: '阵眼当日',
+  loss: '大面数',
+  broken: '炸板率'
+}
+const CARDS = CARD_ORDER.map((key) => ({ key, label: CARD_LABELS[key] }))
 
 function stockNames(list, limit = MAX_LINES) {
   const shown = list.slice(0, limit).map((s) => s.name)
@@ -205,7 +214,7 @@ function anchorTip(anchor, r) {
 }
 
 function survTip(r) {
-  return { surv: { title: '监管股今日溢价', lines: null, note: r?.survNote || '' } }
+  return { surv: { title: '异动监管 · 今日进分溢价', lines: null, note: r?.survNote || '' } }
 }
 
 function themeTip(r) {
@@ -223,7 +232,7 @@ function themeTip(r) {
   if (r?.scoreTheme != null) parts.push(labels[r.scoreTheme] || '')
   return {
     theme: {
-      title: '第 6 维 · 人工判断',
+      title: '第 7 维 · 人工判断',
       lines: null,
       note: parts.filter(Boolean).join('；') || '未评'
     }
@@ -250,64 +259,67 @@ const indicators = computed(() => {
     ...survTip(r),
     ...themeTip(r)
   }
-  const card = (key, label, extra) => ({
-    key, label, trend: '', score: 0, unscored: false,
+  const card = (key, extra) => ({
+    key, label: CARD_LABELS[key], trend: '', score: 0, unscored: false, raw: null,
     tipTitle: tips[key]?.title, lines: tips[key]?.lines, note: tips[key]?.note,
     ...extra
   })
+  const withScoreLine = (item) => ({ ...item, scoreLine: dimScoreLine(item.key, item.raw) })
 
   if (!r) {
-    return CARDS.map((c) => card(c.key, c.label, { value: '--' }))
+    return CARDS.map((c) => card(c.key, { value: '--' })).map(withScoreLine)
   }
 
-  const scored = (value) => ({ score: value ?? 0, unscored: value == null })
+  const scored = (value) => ({ score: value ?? 0, unscored: value == null, raw: value ?? null })
   const sign = (v) => (Number(v) > 0 ? 'up' : Number(v) < 0 ? 'down' : '')
   const anchorItem = worstAnchor(props.anchor?.items || [])
-  // 第 9 维的分没有单独入库（它由 surv_premium 现算），所以这里按同一套七档现算一次
-  const survScore = r.survCount > 0 ? bandOf(r.survPremium) : null
+  // 第 9 维的分没有单独入库（它由 surv_premium 现算），走接力那套五档，不是溢价七档
+  const survScore = r.survCount > 0 ? survivalBandOf(r.survPremium) : null
 
-  return [
-    card('volume', '成交额(亿)', {
-      value: r.totalVolume ?? '--', ...scored(r.scoreVolume)
-    }),
-    card('breadth', '涨停/跌停', {
-      value: `${r.limitUpCount ?? 0} / ${r.limitDownCount ?? 0}`, ...scored(r.scoreBreadth)
-    }),
-    card('height', '连板高度', {
+  // 出卡顺序由 CARDS 排，这里只写每一维的读数
+  const byKey = {
+    height: card('height', {
       value: r.maxConsecutiveLimit ?? '--', ...scored(r.scoreHeight)
     }),
-    card('premium', '分档溢价', {
+    premium: card('premium', {
       value: r.premiumWeighted != null ? `${r.premiumWeighted}%`
         : (r.yesterdayLimitPremium != null ? `${r.yesterdayLimitPremium}%` : '--'),
       trend: sign(r.premiumWeighted ?? r.yesterdayLimitPremium),
       ...scored(r.scorePremium)
     }),
-    card('surv', '监管股溢价', {
-      value: r.survPremium != null ? `${r.survPremium}%`
-        : (r.survCount === 0 ? '无在列' : '--'),
-      trend: r.survCount > 0 ? sign(r.survPremium) : '',
-      ...scored(survScore)
+    breadth: card('breadth', {
+      value: `${r.limitUpCount ?? 0} / ${r.limitDownCount ?? 0}`, ...scored(r.scoreBreadth)
     }),
-    card('theme', '主线明确度', {
-      value: r.scoreTheme != null ? r.scoreTheme : '--',
-      ...scored(r.scoreTheme)
+    broken: card('broken', {
+      value: r.brokenBoardRate != null ? `${r.brokenBoardRate}%` : '--',
+      trend: Number(r.brokenBoardRate) < 30 ? 'up' : Number(r.brokenBoardRate) > 50 ? 'down' : '',
+      ...scored(r.scoreBroken)
     }),
-    card('anchor', '阵眼当日', {
-      value: anchorItem ? `${signed(anchorItem.pct)}%` : (r.anchorScore == null ? '未设' : '无行情'),
-      trend: sign(anchorItem?.pct),
-      ...scored(r.anchorScore)
-    }),
-    card('loss', '大面数', {
+    loss: card('loss', {
       value: r.bigLossCount ?? '--',
       trend: (r.bigLossCount ?? 0) <= 1 ? 'up' : (r.bigLossCount ?? 0) > 4 ? 'down' : '',
       ...scored(r.scoreLoss)
     }),
-    card('broken', '炸板率', {
-      value: r.brokenBoardRate != null ? `${r.brokenBoardRate}%` : '--',
-      trend: Number(r.brokenBoardRate) < 30 ? 'up' : Number(r.brokenBoardRate) > 50 ? 'down' : '',
-      ...scored(r.scoreBroken)
+    volume: card('volume', {
+      value: r.totalVolume ?? '--', ...scored(r.scoreVolume)
+    }),
+    theme: card('theme', {
+      value: r.scoreTheme != null ? r.scoreTheme : '--',
+      ...scored(r.scoreTheme)
+    }),
+    anchor: card('anchor', {
+      value: anchorItem ? `${signed(anchorItem.pct)}%` : (r.anchorScore == null ? '未设' : '无行情'),
+      trend: sign(anchorItem?.pct),
+      ...scored(r.anchorScore)
+    }),
+    surv: card('surv', {
+      value: r.survPremium != null ? `${r.survPremium}%`
+        : (r.survCount === 0 ? '无在列' : '--'),
+      trend: r.survCount > 0 ? sign(r.survPremium) : '',
+      ...scored(survScore)
     })
-  ]
+  }
+  return CARDS.map((c) => withScoreLine(byKey[c.key]))
 })
 </script>
 
@@ -388,6 +400,12 @@ const indicators = computed(() => {
 /* popper 挂在 body 下，scoped 选择器到不了，所以这段故意不加 scoped */
 .card-tip {
   max-width: 340px;
+}
+.card-tip .tip-score {
+  font-weight: 700;
+  /* 和卡片上那颗进分点同色：一眼对得上"这就是这一维的那几分" */
+  color: #f59e0b;
+  margin-bottom: 8px;
 }
 .card-tip .tip-title {
   font-weight: 700;

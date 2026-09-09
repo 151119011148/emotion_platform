@@ -24,7 +24,10 @@ import com.emotion.market.PremiumGroup;
 
 /**
  * 温度计打分与阶段判定的口径。这些断言直接决定仪表盘给出什么操作建议，
- * 所以覆盖的重点不是"算得对"，而是"原文每一档都能被算到、缺数据不会被算成分数"。
+ * 所以覆盖的重点不是"算得对"，而是"每一档都能被算到、缺数据不会被算成一个读数"。
+ *
+ * <p>加权口径分母固定 39（= 九个权重之和 13.0 × 3），未评的维只是少加它那一份，所以在温度上<b>与 0 分不可区分</b>——
+ * 未评靠 {@code scored_dims} 和卡面上的"—"表达，别把这个特性当成 bug 改回去。
  */
 class TemperatureCalculatorTest {
 
@@ -45,8 +48,11 @@ class TemperatureCalculatorTest {
         return r;
     }
 
-    /** 只有低位档、均值 +2.20% 的一天：单档时权重不起作用，分数就是这一档的 2 分。 */
-    private static final ScoreInputs LOW_ONLY = inputsOf("2:2.20", "3:2.20");
+    /**
+     * 只有一组在场的一天：最高 3 板 → M=2，2/3 板都算<b>中位</b>（低档在结构上是空的），
+     * 均值 +2.20% 判 0 分。单组时权重不起作用。
+     */
+    private static final ScoreInputs MID_ONLY = inputsOf("2:2.20", "3:2.20");
 
     /** 造一日档位溢价：每对 "连板数:涨幅%" 一只票。 */
     private static MarketMetrics.PremiumTiers tiersOf(String... boardAndPct) {
@@ -90,7 +96,7 @@ class TemperatureCalculatorTest {
         return inputs;
     }
 
-    /** 成交额与连板的历史基准：三日均量 18000 亿、最高 4 板，让量能 ratio=1、连板"创新高"成立。 */
+    /** 造一份三天历史喂给签名：这一版高度/量能都不读它，喂与不喂是同一个数。 */
     private static List<DailyRecord> history(String... volumes) {
         List<DailyRecord> list = new ArrayList<>();
         for (String v : volumes) {
@@ -102,27 +108,47 @@ class TemperatureCalculatorTest {
         return list;
     }
 
-    // ---------- 未评的维度必须整维剔出分母 ----------
+    // ---------- 未评的维度整维不进分子，也不许被兜底造出一个分 ----------
+
+    /**
+     * 分母是九个权重现算出来的 13.0 × 3 = <b>39.0</b>，不是 {@code MAX_POSSIBLE} 那句注释写的
+     * 12.5 × 3 = 37.5。这条断言存在的意义就是把两个数钉在一起：改任何一个权重都会在这里变红，
+     * 而不是悄悄让温度尺子和注释各说一套。
+     */
+    @Test
+    void maxPossibleFollowsTheWeightsNotTheirComment() {
+        double sum = TemperatureCalculator.W_VOLUME + TemperatureCalculator.W_BREADTH
+                + TemperatureCalculator.W_HEIGHT + TemperatureCalculator.W_PREMIUM
+                + TemperatureCalculator.W_BROKEN + TemperatureCalculator.W_THEME
+                + TemperatureCalculator.W_ANCHOR + TemperatureCalculator.W_LOSS
+                + TemperatureCalculator.W_SURVIVAL;
+        assertEquals(13.0, sum, 0.0001);
+        assertEquals(sum * TemperatureCalculator.DIM_MAX, TemperatureCalculator.MAX_POSSIBLE, 0.0001);
+    }
 
     @Test
-    void absentAnchorAndSurveillanceKeepTheDenominatorAtSeven() {
+    void absentAnchorAndSurveillanceStayOutOfTheNumerator() {
         DailyRecord r = full();
-        TemperatureCalculator.calculate(r, history("18000", "18000", "18000"), LOW_ONLY);
-        // 3(高度)+2(溢价)+3(涨跌停比)+2(炸板)+3(大面)+3(量能)+3(明确度) = 19；第 8/9 维没取到，不进分母
+        TemperatureCalculator.calculate(r, history("18000", "18000", "18000"), MID_ONLY);
+        // 七维：高度1(5板) + 溢价0(中位+2.2%) + 涨跌停比2 + 炸板-1 + 大面2 + 量能0 + 明确度3
+        // 加权 1×1 + 0×1 + 2×2 + (−1)×1.5 + 2×1 + 0×2 + 3×2 = 11.5
+        // 分母 = 九个权重之和 13.0 × 3 = 39 → (11.5+39)/78 = 64.7°
         assertEquals(7, dim(r));
-        assertEquals(14, total(r));
-        // temperature will be recalculated based on weighted formula
+        assertEquals(12, total(r));
+        assertEquals(0, new BigDecimal("64.7").compareTo(r.getTemperature()));
+        // 第 8/9 维没取到：整维不进分子。分母不再跟着已评维数缩放，缺维只是"不加分"，
+        // 不像旧口径那样按 3 分把总分顶上去。
         assertNull(r.getAnchorScore());
         assertNull(r.getSurvCount());
     }
 
     // ---------- 第 8 维 阵眼、第 9 维 监管股今日溢价 ----------
 
-    /** 九维齐全：同样 19 分，在 27 分制下只剩 70.4°——这就是"哨兵进分"的分量。 */
+    /** 九维齐全：分母恒为 39，两维进分只往分子上加减，不再像旧口径那样把分母撑大。 */
     @Test
-    void nineCompleteDimsUseTwentySevenAsDenominator() {
+    void nineCompleteDimsScoreIntoAFixedDenominator() {
         DailyRecord r = full();
-        // 不能改 LOW_ONLY：它是共享常量，改一次就污染后面每一个用例
+        // 不能改 MID_ONLY：它是共享常量，改一次就污染后面每一个用例
         ScoreInputs in = inputsOf("2:2.20", "3:2.20");
         in.setAnchorScore(0);
         in.setAnchorNote("0 分｜哈药股份 盘中触板 -7.47%（最低 -9.96%） · 跨度第 40 日 · 最高 5 板");
@@ -132,9 +158,10 @@ class TemperatureCalculatorTest {
         TemperatureCalculator.calculate(r, history("18000", "18000", "18000"), in);
 
         assertEquals(9, dim(r));
-        // 两维各 0 分不动总分，只是把分母从 21 撑到 27：90.5° → 70.4°，一个 0 分吃掉 10°
-        assertEquals(12, total(r));
-        // temperature will be recalculated based on weighted formula
+        // 七维那 11.5 不动，阵眼 0×1.5 不加分、第 9 维 -3% 判 -2 → 9.5
+        // 缺维时也是同一个 39 做分母：所以"哨兵进分"只按它自己的分数说话，不再稀释别人
+        assertEquals(10, total(r));
+        assertEquals(0, new BigDecimal("62.2").compareTo(r.getTemperature()));
         assertEquals(0, r.getAnchorScore().intValue());
         assertEquals(-2, TemperatureCalculator.calcSurvivalScore(2, new BigDecimal("-3.00")).intValue());
         // 依据串必须跟着落库：界面上要能追问这个 0 分是谁给的
@@ -158,7 +185,9 @@ class TemperatureCalculatorTest {
 
         assertEquals(0, r.getSurvCount().intValue());
         assertEquals(7, dim(r));
-        // temperature updated based on new weighted formula
+        // 家数 0 = 整维不进分子，读数与"没接上监管数据"那天完全一样：64.7°
+        assertEquals(12, total(r));
+        assertEquals(0, new BigDecimal("64.7").compareTo(r.getTemperature()));
     }
 
     @Test
@@ -179,11 +208,14 @@ class TemperatureCalculatorTest {
     void unfilledThemeIsExcludedInsteadOfScoringZero() {
         DailyRecord r = full();
         r.setScoreTheme(null);
-        TemperatureCalculator.calculate(r, history("18000", "18000", "18000"), LOW_ONLY);
+        TemperatureCalculator.calculate(r, history("18000", "18000", "18000"), MID_ONLY);
         assertNull(r.getScoreTheme());
         assertEquals(6, dim(r));
-        // 旧口径是 16/21=76.2°：一个"还没判断"就凭空吃掉 14.3°
-        // temperature updated based on new weighted formula
+        // 分母固定 39，未评只是少加它那一份（11.5 − 3×2 = 5.5 → 57.1°）：
+        // 旧口径"按已评维数摊分"会让一个还没判断凭空吃掉 14.3°，现在这个后果没有了。
+        // 代价是未评与 0 分在温度上不可区分，未评只能靠 scored_dims 和卡面上的"—"表达。
+        assertEquals(6, total(r));
+        assertEquals(0, new BigDecimal("57.1").compareTo(r.getTemperature()));
     }
 
     @Test
@@ -202,44 +234,72 @@ class TemperatureCalculatorTest {
         DailyRecord r = full();
         r.setBigLossCount(0);
         r.setBrokenBoardRate(null);
-        TemperatureCalculator.calculate(r, history("18000", "18000", "18000"), LOW_ONLY);
+        TemperatureCalculator.calculate(r, history("18000", "18000", "18000"), MID_ONLY);
         assertEquals(3, TemperatureCalculator.calcLossScore(r).intValue());
         assertNull(r.getScoreBroken());
         assertEquals(6, dim(r));
     }
 
-    // ---------- 无历史 = 没有趋势可言，不兜底造一个中性分 ----------
+    // ---------- 高度/量能都是绝对刻度：没有历史照样出分 ----------
 
     @Test
-    void trendDimsAreUnscoredWithoutHistory() {
+    void absoluteDimsStillScoreWithoutHistory() {
         DailyRecord r = full();
-        TemperatureCalculator.calculate(r, new ArrayList<>(Arrays.asList(new DailyRecord())), LOW_ONLY);
-        // Neither height nor volume depends on history anymore - both are absolute
-        // With full() data: height=5->2, volume=18000->0, all 7 dims scored
+        TemperatureCalculator.calculate(r, new ArrayList<>(Arrays.asList(new DailyRecord())), MID_ONLY);
+        // full()：5 板 → 1 分、18000 亿 → 0 分，七维全部有读数。
+        // 这一维不再拿近期均量/近期最高板做基准，所以"回补第一天"和"跑了一年"给的是同一个数。
         assertEquals(7, dim(r));
     }
 
+    /**
+     * 连板高度是绝对刻度：7 板以上才给 3，塌到 2 板以下一律判到底。
+     * 近期历史已经不参与这一维，所以同一份"塌回首板"在两种池子里必须是同一个数。
+     */
     @Test
-    void boardBreakScoresZeroEvenWithoutHistory() {
+    void heightTiersAreAbsoluteAndHistoryFree() {
+        assertEquals(3, height(8));
+        assertEquals(3, height(7));
+        assertEquals(1, height(6));
+        assertEquals(1, height(5));
+        assertEquals(-1, height(4));
+        assertEquals(-1, height(3));
+        assertEquals(-3, height(2));
+        assertEquals(-3, height(1));
+        assertEquals(-3, height(0));
+
         DailyRecord r = full();
         r.setMaxConsecutiveLimit(1);
-        TemperatureCalculator.calculate(r, new ArrayList<DailyRecord>());
-        assertEquals(-1, r.getScoreHeight().intValue());
+        assertEquals(-3, TemperatureCalculator.calcHeightScore(r, history("18000", "18000", "18000")).intValue());
+        assertEquals(-3, TemperatureCalculator.calcHeightScore(r, lowHistory(3)).intValue());
+        assertNull(TemperatureCalculator.calcHeightScore(new DailyRecord(), history("18000")));
     }
 
-    // ---------- 负档：只在"原文最低档是个大桶"的维度上开 ----------
+    private static int height(int board) {
+        DailyRecord r = new DailyRecord();
+        r.setMaxConsecutiveLimit(board);
+        return TemperatureCalculator.calcHeightScore(r, new ArrayList<DailyRecord>()).intValue();
+    }
 
-    /** 第 2/9 维共用这组阈值：-2%~-4% 仍是原文的"差"，跌破 -4% 才算崩。 */
+    // ---------- 负档：这一版九维全部开到 -3 ----------
+
+    /**
+     * 溢价七档：>5%=3, >3%=2, >1%=0, >=0%=-1, >=-3%=-2, >=-5%=-3, 其余=-3。
+     * 这一版把正档整体下移一格，压线的 5.00 / 3.00 / 1.00 各自落在哪一档必须钉住——
+     * ">" 与 ">=" 混用，差一个符号就是差两分。
+     */
     @Test
     void premiumSevenTiers() {
         assertEquals(3, TemperatureCalculator.bandPremium(new BigDecimal("5.01")));
+        assertEquals(2, TemperatureCalculator.bandPremium(new BigDecimal("5.00")));
         assertEquals(2, TemperatureCalculator.bandPremium(new BigDecimal("3.50")));
-        assertEquals(1, TemperatureCalculator.bandPremium(new BigDecimal("1.50")));
-        assertEquals(0, TemperatureCalculator.bandPremium(new BigDecimal("0.00")));
-        assertEquals(-1, TemperatureCalculator.bandPremium(new BigDecimal("-2.00")));
-        assertEquals(-1, TemperatureCalculator.bandPremium(new BigDecimal("-3.00")));
-        assertEquals(-2, TemperatureCalculator.bandPremium(new BigDecimal("-3.01")));
-        assertEquals(-2, TemperatureCalculator.bandPremium(new BigDecimal("-5.00")));
+        assertEquals(0, TemperatureCalculator.bandPremium(new BigDecimal("3.00")));
+        assertEquals(0, TemperatureCalculator.bandPremium(new BigDecimal("1.50")));
+        assertEquals(-1, TemperatureCalculator.bandPremium(new BigDecimal("1.00")));
+        assertEquals(-1, TemperatureCalculator.bandPremium(new BigDecimal("0.00")));
+        assertEquals(-2, TemperatureCalculator.bandPremium(new BigDecimal("-2.00")));
+        assertEquals(-2, TemperatureCalculator.bandPremium(new BigDecimal("-3.00")));
+        assertEquals(-3, TemperatureCalculator.bandPremium(new BigDecimal("-3.01")));
+        assertEquals(-3, TemperatureCalculator.bandPremium(new BigDecimal("-5.00")));
         assertEquals(-3, TemperatureCalculator.bandPremium(new BigDecimal("-5.01")));
         assertEquals(-3, TemperatureCalculator.bandPremium(new BigDecimal("-10.73")));
     }
@@ -247,26 +307,19 @@ class TemperatureCalculatorTest {
     @Test
     void breadthNegativeOnlyForOneSidedSlaughter() {
         assertEquals(0, TemperatureCalculator.calcBreadthScore(breadth(3, 6)).intValue());
-        assertEquals(-1, TemperatureCalculator.calcBreadthScore(breadth(20, 39)).intValue());
+        assertEquals(-2, TemperatureCalculator.calcBreadthScore(breadth(20, 39)).intValue());
         assertEquals(-3, TemperatureCalculator.calcBreadthScore(breadth(5, 40)).intValue());
         assertEquals(-2, TemperatureCalculator.calcBreadthScore(breadth(15, 25)).intValue());
         assertEquals(3, TemperatureCalculator.calcBreadthScore(breadth(81, 0)).intValue());
         assertEquals(2, TemperatureCalculator.calcBreadthScore(breadth(65, 2)).intValue());
-        assertEquals(1, TemperatureCalculator.calcBreadthScore(breadth(45, 4)).intValue());
+        assertEquals(1, TemperatureCalculator.calcBreadthScore(breadth(50, 4)).intValue());
+        // 45 家涨停配 4 家跌停：没够到 ">=50 且 <5"，落进 "40~50 家" 那个持平格
+        assertEquals(0, TemperatureCalculator.calcBreadthScore(breadth(45, 4)).intValue());
     }
 
+    /** 量能/主线两维的负档是新加的刻度，但 0 仍是"持平"这一格，没有被挪位。 */
     @Test
-    void trueBoardBreakScoresMinusOne() {
-        DailyRecord r = full();
-        r.setMaxConsecutiveLimit(1);
-        // 近期最高 4 板 → 塌回首板是真断龙；近期最高才 3 板的池子塌到首板只是低位循环，仍算 0
-        assertEquals(-1, TemperatureCalculator.calcHeightScore(r, history("18000", "18000", "18000")).intValue());
-        assertEquals(-1, TemperatureCalculator.calcHeightScore(r, lowHistory(3)).intValue());
-    }
-
-    /** 量能/主线/阵眼刻意不开负档：原文在这三维上判到 0 已经是最重，再往下就是发明。 */
-    @Test
-    void volumeAndThemeStillBottomAtZero() {
+    void zeroIsStillTheFlatReadingForVolumeAndTheme() {
         assertEquals(0, volume("18000"));
         assertEquals(0, theme(0));
     }
@@ -275,18 +328,21 @@ class TemperatureCalculatorTest {
 
     @Test
     void highTierOutweighsLowTierOnTheSameDay() {
-        // 低位 +5% / 高位 -5% 与反向：三组分数不对称（-5% 已是 -1 档），只有权重能定出方向
-        assertEquals(-1, TemperatureCalculator.calcPremiumScore(tiersOf("2:5.00", "7:-5.00")).intValue());
+        // 低位 +5% 判 2、高位 -5% 判 -3：(1×2 + 2.5×−3)/3.5 = −1.57 → -2
+        // 同一组数反过来摆：(1×−3 + 2.5×2)/3.5 = 0.57 → 1 —— 只有权重能定出这个方向
+        assertEquals(-2, TemperatureCalculator.calcPremiumScore(tiersOf("2:5.00", "7:-5.00")).intValue());
         assertEquals(1, TemperatureCalculator.calcPremiumScore(tiersOf("2:-5.00", "7:5.00")).intValue());
     }
 
     @Test
     void absentTierRenormalizesInsteadOfDiluting() {
-        // 低位 2 分 + 高位 3 分，中位那天根本没有票：(1×2+2.5×3)/3.5 = 2.71 → 3
+        // 低位 +2.2% 判 0、高位 +5% 判 2，中位那天根本没有票：(1×0 + 2.5×2)/3.5 = 1.43 → 1
         MarketMetrics.PremiumTiers tiers = tiersOf("2:2.20", "5:5.00");
         assertNull(TemperatureCalculator.scoreGroup(tiers, PremiumGroup.MID));
-        assertEquals(2, TemperatureCalculator.calcPremiumScore(tiers).intValue());
-        // 把缺席的中位按 0 分计入分母会得到 (2+0+7.5)/5 = 1.9 → 2，凭空掉一分
+        assertEquals(1, TemperatureCalculator.calcPremiumScore(tiers).intValue());
+        // 上面这组按 0 计入缺席中位也是 (0+0+5)/5 = 1，看不出差别。换低位也在赚钱的一天：
+        // 摊回 = (1×2 + 2.5×2)/3.5 = 2；按 0 计入分母 = (2+0+5)/5 = 0.9 → 1，凭空掉一分。
+        assertEquals(2, TemperatureCalculator.calcPremiumScore(tiersOf("2:5.00", "5:5.00")).intValue());
     }
 
     @Test
@@ -298,12 +354,15 @@ class TemperatureCalculatorTest {
         TemperatureCalculator.calculate(r, history("18000", "18000", "18000"), inputsOf());
         assertNull(r.getScorePremium());
         assertEquals(6, dim(r));
-        // temperature updated based on new weighted formula
+        // 这一天恰好：溢价自动分本就是 0，未评少加的是 0×1 → 与七维那条逐字相同的 64.7°。
+        // 换句话说在温度上"未评"和"0 分"是同一个数，只能在 scored_dims 和卡面上分开。
+        assertEquals(12, total(r));
+        assertEquals(0, new BigDecimal("64.7").compareTo(r.getTemperature()));
     }
 
     @Test
     void pooledScalarIsDisplayOnly() {
-        // 含首板整池 +9.99% 看着像 3 分，但分档后在亏钱的两档合成 -5.50% → 跌破 -4%，进分的是 -1
+        // 含首板整池 +9.99% 看着像 3 分，但分档后在亏钱的两档合成 -5.50% → 跌破 -5%，进分的是 -3
         DailyRecord r = full();
         r.setYesterdayLimitPremium(new BigDecimal("9.99"));
         TemperatureCalculator.calculate(r, history("18000", "18000", "18000"), inputsOf("2:-5.00", "3:-6.00"));
@@ -340,22 +399,29 @@ class TemperatureCalculatorTest {
     void absentHighTierWithWeakLowIsAFaultLine() {
         assertEquals("高位断层", TemperatureCalculator.premiumStructure(
                 tiersWithBlindTop("2:-1.94", "4:1.19", "7:")));
-        // 同一块盘面在写死口径下读"高位断层"；5 板以下没有独立高位了，它改口成中位吹哨
-        assertEquals("中位负反馈吹哨", TemperatureCalculator.premiumStructure(tiersOf("2:-1.94", "4:1.19")));
-        // 低位还在赚钱时高位断档只是接力换到腰部，不是断层
-        assertEquals("无显著结构", TemperatureCalculator.premiumStructure(tiersOf("2:3.00", "4:9.99")));
+        // 同一块盘面（顶端价取到了）：中位 -1.94% 判 -2、高位 +1.19% 只判 0，
+        // 没够到"高位还在赚钱"那个 >=2 的门槛，所以只是无显著结构，不吹哨
+        assertEquals("无显著结构", TemperatureCalculator.premiumStructure(tiersOf("2:-1.94", "4:1.19")));
+        // 反过来：高位 +9.99% 判 3、中位 +3.00% 恰好没越过 ">3" 那条线判 0——腰部先不赚钱了，
+        // 这才是这一维要报的顶部形态
+        assertEquals("中位负反馈吹哨", TemperatureCalculator.premiumStructure(tiersOf("2:3.00", "4:9.99")));
     }
 
-    // ---------- 量能：原文只有三档，持平归 3、背离用溢价判 ----------
+    // ---------- 量能：绝对七档，持平落在 18000 亿那一格 ----------
 
     @Test
     void volumeAbsoluteThresholds() {
-        assertEquals(3, volume("22001"));
-        assertEquals(2, volume("20000"));
+        assertEquals(3, volume("30001"));
+        assertEquals(2, volume("30000"));
+        assertEquals(2, volume("25000"));
+        assertEquals(1, volume("22001"));
+        assertEquals(1, volume("20000"));
         assertEquals(1, volume("19000"));
         assertEquals(0, volume("18000"));
-        assertEquals(-1, volume("15000"));
-        assertEquals(-2, volume("10000"));
+        assertEquals(-1, volume("17000"));
+        assertEquals(-2, volume("16000"));
+        assertEquals(-2, volume("15000"));
+        assertEquals(-3, volume("10000"));
         assertEquals(-3, volume("9999"));
     }
 
@@ -373,7 +439,7 @@ class TemperatureCalculatorTest {
     void brokenDimAveragesThreeBranches() {
         TemperatureCalculator.BrokenDim dim =
                 TemperatureCalculator.calcBrokenDim(broken("84.7"), poolsOf(39, 48, 21));
-        // 0(炸板率 84.7%) + 0(家数封板 44.8%，落在 ≥40 档) + 0(回封 30.4%，落在 ≥30 档) → 0
+        // −3(炸板率 84.7%，>70% 那一格) + 0(家数封板 44.8%，落在 >=40 档) + 0(回封 30.4%，落在 >=30 档) → -1
         assertEquals(-1, dim.getScore().intValue());
         assertEquals(0, new BigDecimal("44.8").compareTo(dim.getSealedHomeRate()));
         assertEquals(0, new BigDecimal("30.4").compareTo(dim.getResealRate()));
@@ -394,24 +460,28 @@ class TemperatureCalculatorTest {
     @Test
     void brokenDimPrintsEveryFormula() {
         String note = TemperatureCalculator.calcBrokenDim(broken("84.7"), poolsOf(39, 48, 21)).getNote();
-        // 09-04：三个子项全部判到最低档，连平均都没有余量
-        assertTrue(note.contains("炸板率(次数) 84.7% → 0 分"));
+        // 09-04：只有次数口径那一条判到底（>70% → -3），两个家数口径都刚好踩在持平格上
+        assertTrue(note.contains("炸板率(次数) 84.7% → -3 分"));
         assertTrue(note.contains("家数封板率 39÷(39+48)=44.8% → 0 分"));
         assertTrue(note.contains("回封率 21÷(21+48)=30.4% → 0 分"));
-        assertTrue(note.contains("三分支平均 0 → 0 分"));
+        assertTrue(note.contains("三分支平均 -1 → -1 分"));
         assertTrue(note.length() <= 300, "note 要落进 VARCHAR(300)");
 
         String partial = TemperatureCalculator.calcBrokenDim(broken("42.2"), poolsOf(0, 0, 0)).getNote();
         assertTrue(partial.contains("缺 2 项，按在场子项平均"));
     }
 
-    /** 09-03：1 + 1 + 0 → 0.67，远离 0 取整成 1。平均不做这一步就会被读成"比在场子项都差"。 */
+    /** 09-03：−2 + 1 + 0 → −0.33，取整回 0。平均不做这一步就会被读成"比在场子项都差"。 */
     @Test
     void brokenDimRoundsFractionalAverageAwayFromZero() {
         TemperatureCalculator.BrokenDim dim =
                 TemperatureCalculator.calcBrokenDim(broken("65.1"), poolsOf(44, 33, 26));
         assertEquals(0, dim.getScore().intValue());
-        assertTrue(dim.getNote().contains("三分支平均 0.67 → 1 分"));
+        assertTrue(dim.getNote().contains("三分支平均 -0.33 → 0 分"));
+        // 三分支的分母是 3，永远踩不到 .5 这个平局；两分支才踩得到。
+        // BigDecimal HALF_UP 往远离 0 的方向走，Math.round(-0.5) 会把它抬回 0——负档白开。
+        assertEquals(-1, TemperatureCalculator.average(Arrays.asList(-1, 0)).intValue());
+        assertEquals(1, TemperatureCalculator.average(Arrays.asList(1, 0)).intValue());
     }
 
     /** 三个子项都落进 record：卡片要能直接显示两个新率，不必再问后端要一次。 */
@@ -527,10 +597,11 @@ class TemperatureCalculatorTest {
 
     // ---------- 大面数档位 ----------
 
+    /** 大面数六档：0=3, 1~3=2, 4~7=1, 8~12=-1, 13~20=-2, 21 以上=-3。压线的四个边界各留一个。 */
     @Test
     void lossTiers() {
-        for (int[] pair : new int[][]{{0, 3}, {1, 2}, {2, 2}, {3, 1}, {4, 1}, {5, -1}, {9, -1},
-                {10, -2}, {20, -2}, {21, -3}, {100, -3}}) {
+        for (int[] pair : new int[][]{{0, 3}, {1, 2}, {3, 2}, {4, 1}, {7, 1}, {8, -1}, {12, -1},
+                {13, -2}, {20, -2}, {21, -3}, {100, -3}}) {
             DailyRecord r = full();
             r.setBigLossCount(pair[0]);
             assertEquals(pair[1], TemperatureCalculator.calcLossScore(r).intValue(), "loss " + pair[0]);

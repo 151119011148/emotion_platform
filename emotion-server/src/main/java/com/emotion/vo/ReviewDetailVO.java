@@ -5,16 +5,14 @@ import lombok.Data;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
- * 复盘页下方那块明细：持仓 / 预判与兑现 / 指数 / 涨跌家数 / 我的仓位 / 各节判断文字 / 当日题材快照。
+ * 复盘页下方那块明细：持仓 / 预判与兑现 / 指数 / 涨跌家数 / 我的仓位 / 对照 / 当日题材快照。
  *
- * <p>这一份既要能读也要能改：涨跌家数、我的仓位、各节判断文字走 {@code PUT /api/records/{id}}，
- * 持仓与预判走 {@code PUT /api/records/positions|predictions}（整日替换语义）。
- * 只有<b>题材</b>仍然只有 md 导入一个写入口——它绑在原文的 {@code 题材:} 行上，没有自己的表。
+ * <p>除<b>对照</b>（走 {@code PUT /api/records/{id}}）和<b>持仓</b>（走 {@code PUT /api/records/positions}，
+ * 整日替换）之外，这一份是纯展示：涨跌家数、我的仓位、预判与兑现、题材都只有那天导入的 md 一个写入口，
+ * 页面上不再给编辑口。
  *
  * <p>题材几行是从 {@code review_md} 现读回来的，<b>不读 t_theme</b>：那张表没有日粒度，
  * 按 (user, 题材名) 最后一次导入赢，拿它当"当天的题材"会让上周的强度出现在今天的格子里。
@@ -31,8 +29,6 @@ public class ReviewDetailVO {
     private Integer upCount;
     private Integer downCount;
     private BigDecimal myPositionPct;
-    /** 小节键 → 判断正文，原样回填（键序见 {@code ReviewDocFormatter.NOTE_KEYS}）。没填过的键不出现。 */
-    private Map<String, String> docNotes = new LinkedHashMap<String, String>();
 
     private List<PositionItem> positions = new ArrayList<PositionItem>();
     /** 当天写的路径预判。 */

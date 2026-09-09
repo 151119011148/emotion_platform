@@ -122,10 +122,10 @@ public class TemperatureCalculator {
             return null;
         }
         if (h >= 7) return 3;
-        if (h >= 5) return 2;
-        if (h >= 3) return 1;
-        if (h == 2) return 0;
-        if (h == 1) return -1;
+        if (h >= 5) return 1;
+        if (h >= 3) return -1;
+        if (h == 2) return -3;
+        if (h == 1) return -3;
         return -3;
     }
 
@@ -237,10 +237,10 @@ public class TemperatureCalculator {
         double v = pct.doubleValue();
         if (v > 5) return 3;
         if (v > 3) return 2;
-        if (v > 1) return 1;
-        if (v >= 0) return 0;
-        if (v >= -3) return -1;
-        if (v >= -5) return -2;
+        if (v > 1) return 0;
+        if (v >= 0) return -1;
+        if (v >= -3) return -2;
+        if (v >= -5) return -3;
         return -3;
     }
 
@@ -389,12 +389,12 @@ public class TemperatureCalculator {
         if (up == null || down == null) {
             return null;
         }
-        if (up < 10 && down >= 40) return -3;
-        if (up < 20 && down >= 20) return -2;
+        if (up < 20 && down >= 40) return -3;
+        if (up < 30 && down >= 20) return -2;
         if (up > 80 && down == 0) return 3;
         if (up >= 60 && down < 3) return 2;
-        if (up >= 40 && down < 5) return 1;
-        if ((up >= 30 && up < 40) || (down >= 5 && down <= 10)) return 0;
+        if (up >= 50 && down < 5) return 1;
+        if ((up >= 40 && up < 50) || (down >= 5 && down <= 10)) return 0;
         return -1;
     }
 
@@ -604,9 +604,9 @@ public class TemperatureCalculator {
             return null;
         }
         if (c == 0) return 3;
-        if (c <= 2) return 2;
-        if (c <= 4) return 1;
-        if (c <= 9) return -1;
+        if (c <= 3) return 2;
+        if (c <= 7) return 1;
+        if (c <= 12) return -1;
         if (c <= 20) return -2;
         return -3;
     }
@@ -619,12 +619,12 @@ public class TemperatureCalculator {
             return null;
         }
         double v = vol.doubleValue();
-        if (v > 22000) return 3;
-        if (v >= 20000) return 2;
+        if (v > 30000) return 3;
+        if (v >= 25000) return 2;
         if (v >= 19000) return 1;
         if (v >= 18000) return 0;
-        if (v >= 15000) return -1;
-        if (v >= 10000) return -2;
+        if (v >= 17000) return -1;
+        if (v >= 15000) return -2;
         return -3;
     }
 

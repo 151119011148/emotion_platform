@@ -56,11 +56,12 @@ class ManualOverrideTest {
         assertTrue(ManualOverride.used(0));
     }
 
-    /** 第 8 维的分是唯一直接进分子的覆盖值，越界会把温度推出 -33.3~100 这把尺子。 */
+    /** 第 8 维的分是唯一直接进分子的覆盖值，越界会把温度推出 0~100 这把尺子。 */
     @Test
     void anchorScoreClampsIntoTheBand() {
         assertEquals(Integer.valueOf(3), ManualOverride.clampScore(9));
-        assertEquals(Integer.valueOf(0), ManualOverride.clampScore(-2));
+        assertEquals(Integer.valueOf(-3), ManualOverride.clampScore(-5));
+        assertEquals(Integer.valueOf(-2), ManualOverride.clampScore(-2));
         assertEquals(Integer.valueOf(2), ManualOverride.clampScore(2));
         assertNull(ManualOverride.clampScore(null));
     }
@@ -77,9 +78,9 @@ class ManualOverrideTest {
         manual.setManualSealedHomeRate(n("90"));
         TemperatureCalculator.BrokenDim dim = TemperatureCalculator.calcBrokenDim(manual, pools(39, 48, 21));
 
-        assertEquals(0, base.getScore().intValue());
-        // 90% 封板落在 ≥80 档=3 分：(0 炸板率 + 3 封板 + 0 回封)/3 = 1
-        assertEquals(1, dim.getScore().intValue());
+        assertEquals(-1, base.getScore().intValue());
+        // 90% 封板落在 ≥80 档=3 分：(-3 炸板率 + 3 封板 + 0 回封)/3 = 0
+        assertEquals(0, dim.getScore().intValue());
         assertEquals(0, n("90").compareTo(dim.getSealedHomeRate()));
         assertEquals(0, n("30.4").compareTo(dim.getResealRate()));
     }
@@ -96,7 +97,7 @@ class ManualOverrideTest {
 
         assertTrue(note.contains("家数封板率 90.0% → 3 分（人工）"), note);
         assertTrue(note.contains("回封率 21÷(21+48)=30.4% → 0 分"), note);
-        assertTrue(note.contains("炸板率(次数) 84.7% → 0 分"), note);
+        assertTrue(note.contains("炸板率(次数) 84.7% → -3 分"), note);
     }
 
     /**
@@ -108,7 +109,7 @@ class ManualOverrideTest {
         String typed = TemperatureCalculator.calcBrokenDim(rate("84.7"), pools(39, 48, 21)).getNote();
         String loaded = TemperatureCalculator.calcBrokenDim(rate("84.70"), pools(39, 48, 21)).getNote();
         assertEquals(typed, loaded);
-        assertTrue(loaded.contains("炸板率(次数) 84.7% → 0 分"), loaded);
+        assertTrue(loaded.contains("炸板率(次数) 84.7% → -3 分"), loaded);
     }
 
     /** 清空即回退：人工列一旦回到 NULL，串和分都必须和"从没改过"一字不差。 */
@@ -153,10 +154,11 @@ class ManualOverrideTest {
         manual.setManualPremiumHighPct(n("5.00"));
 
         // 自动：最高板 7 → M=round(7/2)=4，于是 2 板在低档、7 板在高档、中档那天没票（权重摊回）。
-        // 低档 +5% 判 3 分（权重 1），高档 -5% 判 -1（权重 2.5）→ (3 − 2.5)/3.5 = 0.14 → 0
-        assertEquals(0, TemperatureCalculator.calcPremiumScore(auto, in).intValue());
-        // 手改高位组为 +5%：两档都是 3 分，合成仍是 3
-        assertEquals(3, TemperatureCalculator.calcPremiumScore(manual, in).intValue());
+        // 低档 +5% 判 2 分（">5" 没过去、">3" 过去，权重 1），高档 -5% 判 -3（">= -5" 那一格，权重 2.5）
+        // → (2 − 7.5)/3.5 = −1.57 → -2
+        assertEquals(-2, TemperatureCalculator.calcPremiumScore(auto, in).intValue());
+        // 手改高位组为 +5%：两档都是 2 分，合成仍是 2
+        assertEquals(2, TemperatureCalculator.calcPremiumScore(manual, in).intValue());
         // 自动的合成溢价 = (1×5 + 2.5×−5)/3.5 = −2.14：负数，人工那版必须明显高于它
         assertTrue(n("5.00").compareTo(TemperatureCalculator.compositePremiumPct(auto, in)) > 0);
         assertEquals(0, n("5.00").compareTo(TemperatureCalculator.compositePremiumPct(manual, in)));
@@ -173,7 +175,8 @@ class ManualOverrideTest {
 
         DailyRecord r = new DailyRecord();
         r.setManualPremiumLowPct(n("1.50"));
-        assertEquals(2, TemperatureCalculator.calcPremiumScore(r, empty).intValue());
+        // 重定标后 +1.5% 落在 ">1" 那一档 = 0 分：想拿 2 分得 >3%，>5% 才是 3 分。
+        assertEquals(0, TemperatureCalculator.calcPremiumScore(r, empty).intValue());
         assertEquals(0, n("1.50").compareTo(TemperatureCalculator.compositePremiumPct(r, empty)));
         assertNotNull(TemperatureCalculator.calcPremiumScore(r, null));
     }
@@ -195,10 +198,11 @@ class ManualOverrideTest {
         DailyRecord r = new DailyRecord();
         r.setManualPremiumMidPct(n("-6.00"));
 
-        // 自动：最高板 4 → M=2，于是 2 板在中档、4 板在高档、低档没票。两组都 +1.00 判 2 分 → 仍是 2
-        assertEquals(2, TemperatureCalculator.calcPremiumScore(new DailyRecord(), in).intValue());
-        // 中位手改成 -6%：判 -1 分，(1.5×−1 + 2.5×2)/4 = 0.875 → 1
-        assertEquals(1, TemperatureCalculator.calcPremiumScore(r, in).intValue());
+        // 自动：最高板 4 → M=2，于是 2 板在中档、4 板在高档、低档没票。+1.00 没越过 ">1" 那条线，
+        // 落到 ">=0" 档判 -1 分（权重 1.5 + 2.5），两档同分 → 合成仍是 -1
+        assertEquals(-1, TemperatureCalculator.calcPremiumScore(new DailyRecord(), in).intValue());
+        // 中位手改成 -6%：判 -3 分，(1.5×−3 + 2.5×−1)/4 = −1.75 → -2
+        assertEquals(-2, TemperatureCalculator.calcPremiumScore(r, in).intValue());
     }
 
     private static MarketMetrics.PremiumTiers tiers(String... boardAndPct) {

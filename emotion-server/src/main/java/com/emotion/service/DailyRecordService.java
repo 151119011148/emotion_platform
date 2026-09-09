@@ -5,7 +5,6 @@ import com.emotion.dto.DailyRecordRequest;
 import com.emotion.entity.DailyRecord;
 import com.emotion.mapper.DailyRecordMapper;
 import com.emotion.util.CycleStageMachine;
-import com.emotion.util.SectionNotes;
 import com.emotion.util.TemperatureCalculator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +15,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
 
 @Service
@@ -38,13 +38,13 @@ public class DailyRecordService {
         this.scoreContext = scoreContext;
     }
 
-    public DailyRecord createOrUpdate(Long userId, DailyRecordRequest req) {
+    public DailyRecord createOrUpdate(Long userId, DailyRecordRequest req, Set<String> present) {
         LocalDate date = req.getTradeDate() != null ? req.getTradeDate() : today();
 
         DailyRecord existing = getByDate(userId, date);
         DailyRecord record = existing != null ? existing : blank(userId, date);
 
-        copyFields(record, req);
+        copyFields(record, req, present);
         scoreAndPlace(userId, date, record);
 
         save(userId, date, record, existing);
@@ -53,8 +53,8 @@ public class DailyRecordService {
 
     /**
      * 复盘 md 导入专用。刻意不走 {@link #createOrUpdate}：
-     * {@code copyFields} 是 {@code if (req.getX() != null)} 的空值守卫，
-     * 走它就没法表达「这一格我写了空 = 清掉」，而 md 里「键没写」和「键写了空」是两回事。
+     * {@code copyFields} 的守卫要么看值非 null、要么看 JSON 键在不在场，
+     * 而 md 的「键没写」和「键写了空」是两回事——走它就没法表达「这一格我写了空 = 清掉」。
      *
      * <p>mutator 拿到的是<b>从库里读出来的整行</b>，只允许改它点名的那几个字段——
      * 「键没写 = 不动」因此天然成立。派生列一律 ALWAYS 策略，
@@ -239,7 +239,21 @@ public class DailyRecordService {
                         .last("LIMIT " + days));
     }
 
-    private void copyFields(DailyRecord record, DailyRecordRequest req) {
+    /**
+     * 表单 → 这一行。三套语义，分界是列的更新策略：
+     *
+     * <p>① 上面那七格行情读数是空值守卫：发 null 和不发一样，都不动。
+     *
+     * <p>② 中间这十二格（涨跌家数、我的仓位、对照、八格 {@code manual_*}）列都是 ALWAYS 策略，
+     * 所以<b>看的是键在不在场，不是值是不是 null</b>：在场就照发（发 null 是「这格我清回未填 /
+     * 退回自动值」，那是真意图），不在场一个字都不动。这两种从 DTO 上分不出来——反序列化出来
+     * 都是 null——所以键集合只能从原始 body 拿。少了这道守卫，页面上一删块，
+     * md 导入存进去的涨跌家数就会在下一次「更新记录」时被半截请求洗成 NULL。
+     *
+     * <p>③ 下面那几串（主线 / 龙头 / 轮动 / 明日计划 / 复盘笔记）是 md 导入作者的地盘，
+     * 保持空值守卫：页面不发这个键 = 不动它已经写进去的值。
+     */
+    static void copyFields(DailyRecord record, DailyRecordRequest req, Set<String> present) {
         if (req.getMaxConsecutiveLimit() != null) record.setMaxConsecutiveLimit(req.getMaxConsecutiveLimit());
         if (req.getLimitUpCount() != null) record.setLimitUpCount(req.getLimitUpCount());
         if (req.getLimitDownCount() != null) record.setLimitDownCount(req.getLimitDownCount());
@@ -249,22 +263,20 @@ public class DailyRecordService {
         if (req.getTotalVolume() != null) record.setTotalVolume(req.getTotalVolume());
         if (req.getScoreTheme() != null) record.setScoreTheme(req.getScoreTheme());
 
-        // 这十二格是"表单也能写"的那几格（原先只有 md 导入会写涨跌家数）。列都是 ALWAYS 策略，
-        // 所以表单留空必须是"清回未填"——这里不能再加 null 守卫，否则那几格永远清不掉。
-        // 下面八格 manual_* 同理：留空的意思是"这格我不再覆盖，退回自动值"，不是"别动"。
-        // 反向的坑（半截请求把已存的数洗成空）由前端挡：没读回这天的行就不会发这批键。
-        record.setUpCount(req.getUpCount());
-        record.setDownCount(req.getDownCount());
-        record.setMyPositionPct(req.getMyPositionPct());
-        record.setCompareNote(isBlank(req.getCompareNote()) ? null : req.getCompareNote());
-        record.setManualSealedHomeRate(req.getManualSealedHomeRate());
-        record.setManualResealRate(req.getManualResealRate());
-        record.setManualPremiumLowPct(req.getManualPremiumLowPct());
-        record.setManualPremiumMidPct(req.getManualPremiumMidPct());
-        record.setManualPremiumHighPct(req.getManualPremiumHighPct());
-        record.setManualAnchorScore(req.getManualAnchorScore());
-        record.setManualSurvCount(req.getManualSurvCount());
-        record.setManualSurvPremium(req.getManualSurvPremium());
+        if (present.contains("upCount")) record.setUpCount(req.getUpCount());
+        if (present.contains("downCount")) record.setDownCount(req.getDownCount());
+        if (present.contains("myPositionPct")) record.setMyPositionPct(req.getMyPositionPct());
+        if (present.contains("compareNote")) {
+            record.setCompareNote(isBlank(req.getCompareNote()) ? null : req.getCompareNote());
+        }
+        if (present.contains("manualSealedHomeRate")) record.setManualSealedHomeRate(req.getManualSealedHomeRate());
+        if (present.contains("manualResealRate")) record.setManualResealRate(req.getManualResealRate());
+        if (present.contains("manualPremiumLowPct")) record.setManualPremiumLowPct(req.getManualPremiumLowPct());
+        if (present.contains("manualPremiumMidPct")) record.setManualPremiumMidPct(req.getManualPremiumMidPct());
+        if (present.contains("manualPremiumHighPct")) record.setManualPremiumHighPct(req.getManualPremiumHighPct());
+        if (present.contains("manualAnchorScore")) record.setManualAnchorScore(req.getManualAnchorScore());
+        if (present.contains("manualSurvCount")) record.setManualSurvCount(req.getManualSurvCount());
+        if (present.contains("manualSurvPremium")) record.setManualSurvPremium(req.getManualSurvPremium());
 
         if (req.getMainTheme() != null) record.setMainTheme(req.getMainTheme());
         if (req.getLeadingStock() != null) record.setLeadingStock(req.getLeadingStock());
@@ -274,8 +286,6 @@ public class DailyRecordService {
         if (req.getRotationNote() != null) record.setRotationNote(req.getRotationNote());
         if (req.getReviewNote() != null) record.setReviewNote(req.getReviewNote());
         if (req.getTomorrowPlan() != null) record.setTomorrowPlan(req.getTomorrowPlan());
-        // 只有请求真的带了这个键才动：不带键的提交（比如只改阶段改判）不该把他存的判断文字洗掉。
-        if (req.getDocNotes() != null) record.setDocNotes(SectionNotes.toJson(req.getDocNotes()));
 
         if (req.getStageOverridden() != null && req.getStageOverridden() == 1
                 && req.getStage() != null) {

@@ -14,9 +14,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -300,77 +298,23 @@ class ReviewDocFormatterTest {
         assertTrue(ReviewDocFormatter.render(without).contains("无从带出"));
     }
 
-    // ---- 判断文字（doc_notes）----
-
-    /** 【一】…【八】那八节的"起标题、止标题"，顺序即 NOTE_KEYS 的顺序。 */
-    private static final String[][] NOTE_SLOT_HEADINGS = {
-            {"【一、", "【二、"}, {"【二、", "【三、"}, {"【三、", "【四、"}, {"【四、", "【五、"},
-            {"【五、", "【六、"}, {"【六、", "【七、"}, {"【七、", "【八、"}, {"【八、", "【九、"}
-    };
-
     /**
-     * 键清单和小节必须一一对得上：新增小节忘了登记，表现是他写的字挂不上号、
-     * 下次导出看不见了——所以这条断言按位置逐节验，而不是只数个数。
+     * 判断文字不再从库里回填（{@code doc_notes} 已停用）：列里存着历史值也不许漏进这份文档。
+     * 表现必须是八节各一行 {@code ✍️ 判断} 占位，而不是原文——他会在这份 md 里现写，写完导入。
      */
     @Test
-    void eachNoteKeyLandsInItsOwnSectionOnly() {
-        assertEquals(NOTE_SLOT_HEADINGS.length, ReviewDocFormatter.NOTE_KEYS.size(),
-                "小节数和键数对不上：" + ReviewDocFormatter.NOTE_KEYS);
-
-        for (int i = 0; i < ReviewDocFormatter.NOTE_KEYS.size(); i++) {
-            String key = ReviewDocFormatter.NOTE_KEYS.get(i);
-            Model m = new Model();
-            m.date = FRIDAY;
-            m.notes = singleNote(key, "哨兵·" + key);
-
-            String md = ReviewDocFormatter.render(m);
-            String own = section(md, NOTE_SLOT_HEADINGS[i][0], NOTE_SLOT_HEADINGS[i][1]);
-            assertTrue(own.contains("> **判断**：哨兵·" + key), key + " 的正文没进自己那节\n----\n" + md);
-            assertTrue(own.indexOf("✍️ 判断") < 0, key + " 那节该换成原文，不该还留占位\n----\n" + md);
-
-            for (int j = 0; j < NOTE_SLOT_HEADINGS.length; j++) {
-                if (j == i) {
-                    continue;
-                }
-                String other = section(md, NOTE_SLOT_HEADINGS[j][0], NOTE_SLOT_HEADINGS[j][1]);
-                assertFalse(other.contains("哨兵·" + key), key + " 串进了第 " + (j + 1) + " 节\n----\n" + md);
-                assertTrue(other.contains("✍️ 判断"), "没填的节该仍是占位：" + key + "\n----\n" + md);
-            }
-        }
-    }
-
-    /** 贴进来的东西段落数不可控：空行也得带 > ，否则引用块断掉、后半截变成裸正文。 */
-    @Test
-    void multiLineNoteStaysOneBlockquote() {
+    void storedDocNotesAreNeverRenderedBack() {
         Model m = new Model();
         m.date = FRIDAY;
-        m.notes = singleNote("plan", "路径一 60%：竞价高开\n\n路径二 30%：低开不破 5 日线\r\n尾部一个空行\n");
-
-        String md = section(ReviewDocFormatter.render(m), "【六、", "【七、");
-        assertTrue(md.contains("> **判断**：路径一 60%：竞价高开\n>\n> 路径二 30%：低开不破 5 日线\n> 尾部一个空行\n"),
-                "多行正文没并成一个引用块\n----\n" + md);
-        assertFalse(md.contains("✍️"), md);
-    }
-
-    /** 改了名的键：不猜它该进哪一节，但绝不把字变没——单列一节露出来才改得回来。 */
-    @Test
-    void unregisteredKeyIsSurfacedNotDropped() {
-        Model m = new Model();
-        m.date = FRIDAY;
-        m.notes = singleNote("旧主线", "这段字找不着小节，但不能没");
+        m.today = record("退潮", 2, "22.00", "1580.50", 1846, 2900, 22, 45, 4);
+        m.today.setDocNotes("{\"index\":\"哨兵定性\",\"theme\":\"哨兵翻译\",\"旧主线\":\"挂了个不相干键的正文\"}");
 
         String md = ReviewDocFormatter.render(m);
-        assertTrue(md.contains("## 【附、未归节的文字】"), md);
-        assertTrue(md.contains("> **旧主线**：这段字找不着小节，但不能没"), md);
-        // 没归节不等于可以顺带改写别的节
-        assertEquals(8, countOf(md, "✍️ 判断"), md);
-        assertTrue(md.indexOf("【附、未归节的文字】") < md.indexOf("【九、免责声明】"), "附录得在免责声明之前");
-    }
 
-    private static Map<String, String> singleNote(String key, String text) {
-        Map<String, String> notes = new LinkedHashMap<>();
-        notes.put(key, text);
-        return notes;
+        assertEquals(8, countOf(md, "✍️ 判断"), "每节都该是占位：\n----\n" + md);
+        assertFalse(md.contains("哨兵"), "存过的判断文字漏进导出了\n----\n" + md);
+        assertFalse(md.contains("**判断**"), md);
+        assertFalse(md.contains("未归节"), md);
     }
 
     // ---- 幂等 ----

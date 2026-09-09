@@ -12,7 +12,6 @@ import com.emotion.util.ReviewDoc;
 import com.emotion.util.ReviewDocFormatter;
 import com.emotion.util.ReviewImportParser;
 import com.emotion.util.ReviewMdFormatter;
-import com.emotion.util.SectionNotes;
 import com.emotion.vo.ReviewExportVO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -112,8 +111,8 @@ public class ReviewExportService {
     /**
      * 只读<b>复盘文档</b>：把那天库里的系统取数按用户手写的版式（【一】…【九】）排成一份给人读、
      * 给人补判断的 md。与 {@link #template} 不同——那份是喂回导入器的可再导入格式，这份不写 meta、
-     * 不承诺可导入。判断文字平台造不出：{@code doc_notes} 里存了就原样带回去，
-     * 没存的那一节留一行 {@code ✍️ 判断} 占位。
+     * 不承诺可导入。判断文字平台造不出，也不从库里回填（{@code doc_notes} 已停用）：
+     * 每节固定留一行 {@code ✍️ 判断} 占位，他写完的那份就是当天的 md。
      */
     public ReviewExportVO reviewDoc(Long userId, LocalDate date) {
         DailyRecord today = dailyRecordService.getByDate(userId, date);
@@ -128,7 +127,6 @@ public class ReviewExportService {
         m.positions = positionStore.read(userId, date);
         m.predictions = predictionStore.read(userId, date);
         m.anchors = anchorService.listInPosition(userId, date);
-        m.notes = SectionNotes.fromJson(today == null ? null : today.getDocNotes());
         // 题材无日粒度，只有那天导入过 md 才解析得回来。
         if (today != null && notBlank(today.getReviewMd())) {
             m.themes = ReviewImportParser.parse(today.getReviewMd(), date).getThemes();

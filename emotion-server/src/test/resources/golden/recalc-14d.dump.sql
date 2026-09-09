@@ -14,6 +14,14 @@
 --
 -- 换了账号或改了判据要重新 dump：基线的意义是"这份真实输入 → 这组结论"，
 -- 输入过期了，断言就只是在保护一个已经不存在的世界。
+--
+-- 但判据刚改、库还没重算的那几天里，dump 出来的 expected 是旧结论，基线会自己把自己测红。
+-- 那时候走另一条路：RecalcGoldenTest 的 bless 模式拿 fixture 里现成的输入重算一遍，
+-- 只重写 expected 那一块，输入与列名一字不动。
+--   mvn -o -B test -Dtest=RecalcGoldenTest -DfailIfNoSpecifiedTests=false \
+--       -Dgolden.bless=src/test/resources/golden/recalc-14d.jsonl
+-- bless 完必须接着把库重算（recalcAll），否则基线是引擎的、库是旧的，
+-- 下一次 dump 会把结论倒回上一个口径。
 SELECT JSON_OBJECT(
  'tradeDate', DATE_FORMAT(r.trade_date,'%Y-%m-%d'),
  'inputs', JSON_OBJECT('maxConsecutiveLimit',r.max_consecutive_limit,'limitUpCount',r.limit_up_count,

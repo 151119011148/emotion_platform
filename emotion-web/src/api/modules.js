@@ -21,12 +21,10 @@ export const recordApi = {
   // 只读复盘文档：把那天系统取数按手写版式排成 md（【一】…【九】），供下载补判断
   reviewDoc: (date) => api.get('/records/review-doc', { params: { date }, timeout: 30000 }),
   /**
-   * 两张内联台账：body 是那天的<b>全部</b>行，服务端整日替换。
-   * 所以调用方必须把行发全 —— 少发一行就是删掉一行；预判那边 PLAN 与 ANSWER 一起换，
-   * 只发一种 kind 等于把另一种清光。
+   * 持仓台账：body 是这天的<b>全部</b>行，服务端整日替换，所以调用方必须把行发全——少发一行就是删掉一行。
+   * 预判与对答案没有编辑口了：{@code t_prediction} 只由那天导入的 md 整日替换（PLAN 与 ANSWER 一起换）。
    */
-  savePositions: (date, rows) => api.put('/records/positions', rows, { params: { date } }),
-  savePredictions: (date, rows) => api.put('/records/predictions', rows, { params: { date } })
+  savePositions: (date, rows) => api.put('/records/positions', rows, { params: { date } })
 }
 
 export const themeApi = {

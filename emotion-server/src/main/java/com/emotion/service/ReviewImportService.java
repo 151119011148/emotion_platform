@@ -10,7 +10,6 @@ import com.emotion.mapper.StockMapper;
 import com.emotion.mapper.ThemeMapper;
 import com.emotion.util.ReviewDoc;
 import com.emotion.util.ReviewImportParser;
-import com.emotion.util.SectionNotes;
 import com.emotion.vo.ImportPreviewVO;
 import com.emotion.vo.ReviewDetailVO;
 import org.slf4j.Logger;
@@ -128,7 +127,6 @@ public class ReviewImportService {
             vo.setUpCount(record.getUpCount());
             vo.setDownCount(record.getDownCount());
             vo.setMyPositionPct(record.getMyPositionPct());
-            vo.setDocNotes(SectionNotes.fromJson(record.getDocNotes()));
             vo.setCompareNote(blankToNull(record.getCompareNote()));
             if (record.getReviewMd() != null && !record.getReviewMd().isEmpty()) {
                 vo.setHasMd(true);

@@ -20,6 +20,9 @@ import com.emotion.util.TemperatureCalculator;
  * 阵眼跨度的判据。主力用例喂的是 600664 哈药股份 08-12~09-04 的<b>真实前复权日 K 存档</b>，
  * 因为这一维的全部风险都在"复权价做不了绝对价比较"和"触板没触板"这两个细节上，
  * 手造的漂亮数据测不出来的恰恰是它们。
+ *
+ * <p>档位是 2026-09-09 之后的那一套（{@code ≥9.5%=3 / 收红=2 / 平盘与收绿=0 / 断板=-1 /
+ * ≤-5%=-2 / 跌停·盘中触板=-3}），权威实现是 {@code TemperatureCalculator#calcAnchorScore}。
  */
 class AnchorMetricsTest {
 
@@ -56,11 +59,11 @@ class AnchorMetricsTest {
         assertEquals(0, new BigDecimal("-9.96").compareTo(span.getLowPct()));
         assertTrue(span.isTouchedLimitDown());
         assertFalse(span.isCloseLimitDown());
-        assertEquals(Integer.valueOf(0), TemperatureCalculator.calcAnchorScore(span));
+        assertEquals(Integer.valueOf(-3), TemperatureCalculator.calcAnchorScore(span));
         assertEquals(17, span.getTradeDays());
     }
 
-    /** 09-04：收 -9.01% 没到主板跌停线，但最低 -9.82% 还是触板 ⇒ 仍然 0 分。 */
+    /** 09-04：收 -9.01% 没到主板跌停线，但最低 -9.82% 还是触板 ⇒ 照样按跌停档 -3 分。 */
     @Test
     void closingAboveTheLineStillCountsWhenTheLowTouchedIt() {
         AnchorMetrics.Span span = AnchorMetrics.measure(haiyao(), START, null,
@@ -68,7 +71,7 @@ class AnchorMetricsTest {
 
         assertFalse(span.isCloseLimitDown());
         assertTrue(span.isTouchedLimitDown());
-        assertEquals(Integer.valueOf(0), TemperatureCalculator.calcAnchorScore(span));
+        assertEquals(Integer.valueOf(-3), TemperatureCalculator.calcAnchorScore(span));
         assertEquals(18, span.getTradeDays());
     }
 
@@ -79,7 +82,7 @@ class AnchorMetricsTest {
                 LocalDate.of(2026, 8, 21), AnchorMetrics.LIMIT_MAIN);
 
         assertTrue(span.isCloseLimitDown());
-        assertEquals(Integer.valueOf(0), TemperatureCalculator.calcAnchorScore(span));
+        assertEquals(Integer.valueOf(-3), TemperatureCalculator.calcAnchorScore(span));
         assertEquals(0, new BigDecimal("9.12").compareTo(span.getPeakClose()));
         assertTrue(span.getDrawdownPct().signum() < 0);
         assertFalse(span.isNewSpanHigh());
@@ -106,23 +109,38 @@ class AnchorMetricsTest {
         assertEquals(5, span.getTradeDays());
     }
 
-    /** 收红且创跨度内最高收盘 = 3、收红但没创新高 = 2、收绿 = 1、平盘按"没涨"落 1。 */
+    /**
+     * 新梯只有 3/2/0/-1/-2/-3 六个读数，<b>1 分这一档不存在</b>，别再按"每档都有"去读它。
+     *
+     * <p>{@code isNewSpanHigh} 这一位<b>不再加分</b>：+5.66% 那条确实创了跨度内最高收盘，
+     * 可它仍然只算"收红"。创新高现在只是展示字段，谁以后要把它请回打分，得先改这里的断言。
+     */
     @Test
-    void scoresRedGreenAndFlat() {
+    void scoresStrongRedRedGreenAndFlat() {
         List<DayBar> climb = Arrays.asList(
                 bar("2026-07-13", "5.40", "1.00", "0.20"),
                 bar("2026-07-14", "5.30", "-1.85", "-2.60"),
-                bar("2026-07-15", "5.60", "5.66", "0.10"));
+                bar("2026-07-15", "5.83", "10.00", "10.00"));
 
-        AnchorMetrics.Span redHigh = AnchorMetrics.measure(climb, LocalDate.of(2026, 7, 13), null,
+        AnchorMetrics.Span strongRed = AnchorMetrics.measure(climb, LocalDate.of(2026, 7, 13), null,
                 LocalDate.of(2026, 7, 15), AnchorMetrics.LIMIT_MAIN);
-        assertTrue(redHigh.isNewSpanHigh());
-        assertEquals(Integer.valueOf(3), TemperatureCalculator.calcAnchorScore(redHigh));
+        assertTrue(strongRed.isNewSpanHigh());
+        assertEquals(Integer.valueOf(3), TemperatureCalculator.calcAnchorScore(strongRed));
+
+        // 同一个位置换成 +5.66%：照样创新高，但没到 9.5% 那条强涨停线。
+        List<DayBar> mildClimb = Arrays.asList(
+                bar("2026-07-13", "5.40", "1.00", "0.20"),
+                bar("2026-07-14", "5.30", "-1.85", "-2.60"),
+                bar("2026-07-15", "5.60", "5.66", "0.10"));
+        AnchorMetrics.Span mildHigh = AnchorMetrics.measure(mildClimb, LocalDate.of(2026, 7, 13), null,
+                LocalDate.of(2026, 7, 15), AnchorMetrics.LIMIT_MAIN);
+        assertTrue(mildHigh.isNewSpanHigh());
+        assertEquals(Integer.valueOf(2), TemperatureCalculator.calcAnchorScore(mildHigh));
 
         AnchorMetrics.Span green = AnchorMetrics.measure(climb, LocalDate.of(2026, 7, 13), null,
                 LocalDate.of(2026, 7, 14), AnchorMetrics.LIMIT_MAIN);
         assertFalse(green.isBrokeToday());
-        assertEquals(Integer.valueOf(1), TemperatureCalculator.calcAnchorScore(green));
+        assertEquals(Integer.valueOf(0), TemperatureCalculator.calcAnchorScore(green));
 
         AnchorMetrics.Span redNotHigh = AnchorMetrics.measure(Arrays.asList(
                         bar("2026-07-13", "9.50", "1.00", "0.50"),
@@ -136,19 +154,31 @@ class AnchorMetricsTest {
                         bar("2026-07-13", "9.00", "1.00", "0.50"),
                         bar("2026-07-14", "9.00", "0.00", "-1.00")), LocalDate.of(2026, 7, 13), null,
                 LocalDate.of(2026, 7, 14), AnchorMetrics.LIMIT_MAIN);
-        assertEquals(Integer.valueOf(1), TemperatureCalculator.calcAnchorScore(flat));
+        assertEquals(Integer.valueOf(0), TemperatureCalculator.calcAnchorScore(flat));
     }
 
-    /** 昨日涨停、今日未涨停 = 断板 = 0 分，哪怕今天收红：断板本身就是这一维最硬的负反馈。 */
+    /** 昨日涨停、今日未涨停 = 断板 = -1 分，哪怕今天收红：断板本身就是这一维最硬的负反馈。 */
     @Test
-    void brokenStreakIsZeroEvenOnARedDay() {
+    void brokenStreakIsNegativeEvenOnARedDay() {
         AnchorMetrics.Span span = AnchorMetrics.measure(Arrays.asList(
                         bar("2026-07-13", "5.50", "10.00", "10.00"),
                         bar("2026-07-14", "5.60", "1.82", "0.20")), LocalDate.of(2026, 7, 13), null,
                 LocalDate.of(2026, 7, 14), AnchorMetrics.LIMIT_MAIN);
 
         assertTrue(span.isBrokeToday());
-        assertEquals(Integer.valueOf(0), TemperatureCalculator.calcAnchorScore(span));
+        assertEquals(Integer.valueOf(-1), TemperatureCalculator.calcAnchorScore(span));
+    }
+
+    /** 断板又跌 6%：{@code ≤-5%} 那一支走在断板前面，所以读 -2 而不是 -1。 */
+    @Test
+    void aCrashOnABrokenStreakReadsTheCrashNotTheBreak() {
+        AnchorMetrics.Span span = AnchorMetrics.measure(Arrays.asList(
+                        bar("2026-07-13", "5.50", "10.00", "10.00"),
+                        bar("2026-07-14", "5.17", "-6.00", "-6.50")), LocalDate.of(2026, 7, 13), null,
+                LocalDate.of(2026, 7, 14), AnchorMetrics.LIMIT_MAIN);
+
+        assertTrue(span.isBrokeToday());
+        assertEquals(Integer.valueOf(-2), TemperatureCalculator.calcAnchorScore(span));
     }
 
     /** 停牌那天没有柱子：未评，不是 0 分。跨度长度只数已到的柱子，不能顺带报成 0 天。 */
@@ -180,7 +210,7 @@ class AnchorMetricsTest {
         assertNull(TemperatureCalculator.calcAnchorScore(span));
     }
 
-    /** 第一天没有前收：跨度能出，但那天涨跌无从判起 ⇒ 未评，而不是"平盘 1 分"。 */
+    /** 第一天没有前收：跨度能出，但那天涨跌无从判起 ⇒ 未评，而不是"平盘 0 分"。 */
     @Test
     void firstDayWithoutPreviousCloseIsNotRated() {
         AnchorMetrics.Span span = AnchorMetrics.measure(
@@ -209,10 +239,12 @@ class AnchorMetricsTest {
         AnchorMetrics.Span growth = AnchorMetrics.measure(bars, LocalDate.of(2026, 9, 2), null,
                 LocalDate.of(2026, 9, 3), AnchorMetrics.limitOf("创业板"));
 
+        // 主板：盘中触到 -9.8% ⇒ 跌停档。
         assertTrue(main.isTouchedLimitDown());
-        assertEquals(Integer.valueOf(0), TemperatureCalculator.calcAnchorScore(main));
+        assertEquals(Integer.valueOf(-3), TemperatureCalculator.calcAnchorScore(main));
+        // 创业板：-9.96% 连 19.8% 的一半都不到，可 -7.47% 的收盘已经过了"按核"那条 -5% 线。
         assertFalse(growth.isTouchedLimitDown());
-        assertEquals(Integer.valueOf(1), TemperatureCalculator.calcAnchorScore(growth));
+        assertEquals(Integer.valueOf(-2), TemperatureCalculator.calcAnchorScore(growth));
     }
 
     /** 多只在位取最差：阵眼是哨兵，一只崩了这轮就是负反馈，取平均正好把它稀释掉。 */
@@ -223,9 +255,9 @@ class AnchorMetricsTest {
         AnchorMetrics.Span noBar = AnchorMetrics.measure(new ArrayList<DayBar>(), START, null,
                 LocalDate.of(2026, 9, 4), AnchorMetrics.LIMIT_MAIN);
 
-        assertEquals(Integer.valueOf(0), TemperatureCalculator.worstAnchorScore(
+        assertEquals(Integer.valueOf(-3), TemperatureCalculator.worstAnchorScore(
                 Arrays.asList(red, crash)));
-        assertEquals(Integer.valueOf(0), TemperatureCalculator.worstAnchorScore(
+        assertEquals(Integer.valueOf(-3), TemperatureCalculator.worstAnchorScore(
                 Arrays.asList(red, noBar, crash)));
         assertEquals(Integer.valueOf(2), TemperatureCalculator.worstAnchorScore(
                 Arrays.asList(red, noBar)));
