@@ -32,7 +32,7 @@ mysql -uroot -p --default-character-set=utf8mb4 < emotion-server/src/main/resour
 
 ```bash
 cd emotion-server
-cp application-local.yml.example application-local.yml
+cp application-local.yml application-local.yml
 # 改里面的 datasource.password 与 jwt.secret
 ```
 

@@ -26,7 +26,7 @@
             <span v-else-if="item.unscored" class="unscored">未评</span>
           </div>
           <div class="card-score">
-            <span v-if="item.score < 0" class="minus">-1</span>
+            <span v-if="item.score < 0" class="minus">{{ item.score }}</span>
             <template v-else>
               <span v-for="n in 3" :key="n" class="dot" :class="{ active: n <= item.score }"></span>
             </template>
@@ -55,14 +55,15 @@ const props = defineProps({
 const MAX_LINES = 15
 
 const CARDS = [
-  { key: 'height', label: '连板高度' },
-  { key: 'breadth', label: '涨停/跌停' },
-  { key: 'premium', label: '分档溢价' },
-  { key: 'broken', label: '炸板率' },
-  { key: 'loss', label: '大面数' },
   { key: 'volume', label: '成交额(亿)' },
+  { key: 'breadth', label: '涨停/跌停' },
+  { key: 'height', label: '连板高度' },
+  { key: 'premium', label: '分档溢价' },
+  { key: 'surv', label: '监管股溢价' },
+  { key: 'theme', label: '主线明确度' },
   { key: 'anchor', label: '阵眼当日' },
-  { key: 'surv', label: '监管股溢价' }
+  { key: 'loss', label: '大面数' },
+  { key: 'broken', label: '炸板率' }
 ]
 
 function stockNames(list, limit = MAX_LINES) {
@@ -207,6 +208,28 @@ function survTip(r) {
   return { surv: { title: '监管股今日溢价', lines: null, note: r?.survNote || '' } }
 }
 
+function themeTip(r) {
+  const labels = {
+    3: '有清晰主线 + 龙头',
+    2: '有主线但龙头不明确',
+    1: '有热点无主线',
+    0: '无主线',
+    '-1': '热点散乱',
+    '-2': '无明显热点',
+    '-3': '全面退潮'
+  }
+  const parts = []
+  if (r?.mainTheme) parts.push(`主线：${r.mainTheme}`)
+  if (r?.scoreTheme != null) parts.push(labels[r.scoreTheme] || '')
+  return {
+    theme: {
+      title: '第 6 维 · 人工判断',
+      lines: null,
+      note: parts.filter(Boolean).join('；') || '未评'
+    }
+  }
+}
+
 /** 多只在位时和后端同一套：分低的那只说话，分一样看谁跌得深。 */
 function worstAnchor(items) {
   let worst = null
@@ -224,7 +247,8 @@ const indicators = computed(() => {
     ...premiumTip(props.tiers, r),
     ...brokenTip(r),
     ...anchorTip(props.anchor, r),
-    ...survTip(r)
+    ...survTip(r),
+    ...themeTip(r)
   }
   const card = (key, label, extra) => ({
     key, label, trend: '', score: 0, unscored: false,
@@ -239,15 +263,18 @@ const indicators = computed(() => {
   const scored = (value) => ({ score: value ?? 0, unscored: value == null })
   const sign = (v) => (Number(v) > 0 ? 'up' : Number(v) < 0 ? 'down' : '')
   const anchorItem = worstAnchor(props.anchor?.items || [])
-  // 第 9 维的分没有单独入库（它由 surv_premium 现算），所以这里按同一套四档现算一次
+  // 第 9 维的分没有单独入库（它由 surv_premium 现算），所以这里按同一套七档现算一次
   const survScore = r.survCount > 0 ? bandOf(r.survPremium) : null
 
   return [
-    card('height', '连板高度', {
-      value: r.maxConsecutiveLimit ?? '--', ...scored(r.scoreHeight)
+    card('volume', '成交额(亿)', {
+      value: r.totalVolume ?? '--', ...scored(r.scoreVolume)
     }),
     card('breadth', '涨停/跌停', {
       value: `${r.limitUpCount ?? 0} / ${r.limitDownCount ?? 0}`, ...scored(r.scoreBreadth)
+    }),
+    card('height', '连板高度', {
+      value: r.maxConsecutiveLimit ?? '--', ...scored(r.scoreHeight)
     }),
     card('premium', '分档溢价', {
       value: r.premiumWeighted != null ? `${r.premiumWeighted}%`
@@ -255,29 +282,30 @@ const indicators = computed(() => {
       trend: sign(r.premiumWeighted ?? r.yesterdayLimitPremium),
       ...scored(r.scorePremium)
     }),
-    card('broken', '炸板率', {
-      value: r.brokenBoardRate != null ? `${r.brokenBoardRate}%` : '--',
-      trend: Number(r.brokenBoardRate) < 30 ? 'up' : Number(r.brokenBoardRate) > 50 ? 'down' : '',
-      ...scored(r.scoreBroken)
+    card('surv', '监管股溢价', {
+      value: r.survPremium != null ? `${r.survPremium}%`
+        : (r.survCount === 0 ? '无在列' : '--'),
+      trend: r.survCount > 0 ? sign(r.survPremium) : '',
+      ...scored(survScore)
     }),
-    card('loss', '大面数', {
-      value: r.bigLossCount ?? '--',
-      trend: (r.bigLossCount ?? 0) <= 1 ? 'up' : (r.bigLossCount ?? 0) > 4 ? 'down' : '',
-      ...scored(r.scoreLoss)
-    }),
-    card('volume', '成交额(亿)', {
-      value: r.totalVolume ?? '--', ...scored(r.scoreVolume)
+    card('theme', '主线明确度', {
+      value: r.scoreTheme != null ? r.scoreTheme : '--',
+      ...scored(r.scoreTheme)
     }),
     card('anchor', '阵眼当日', {
       value: anchorItem ? `${signed(anchorItem.pct)}%` : (r.anchorScore == null ? '未设' : '无行情'),
       trend: sign(anchorItem?.pct),
       ...scored(r.anchorScore)
     }),
-    card('surv', '监管股溢价', {
-      value: r.survPremium != null ? `${r.survPremium}%`
-        : (r.survCount === 0 ? '无在列' : '--'),
-      trend: r.survCount > 0 ? sign(r.survPremium) : '',
-      ...scored(survScore)
+    card('loss', '大面数', {
+      value: r.bigLossCount ?? '--',
+      trend: (r.bigLossCount ?? 0) <= 1 ? 'up' : (r.bigLossCount ?? 0) > 4 ? 'down' : '',
+      ...scored(r.scoreLoss)
+    }),
+    card('broken', '炸板率', {
+      value: r.brokenBoardRate != null ? `${r.brokenBoardRate}%` : '--',
+      trend: Number(r.brokenBoardRate) < 30 ? 'up' : Number(r.brokenBoardRate) > 50 ? 'down' : '',
+      ...scored(r.scoreBroken)
     })
   ]
 })
@@ -286,7 +314,7 @@ const indicators = computed(() => {
 <style scoped>
 .indicator-cards {
   display: grid;
-  /* 8 个 1fr 在窄容器下每格只剩几 px，用 auto-fit 兜住最小可读宽度 */
+  /* 9 个 1fr 在窄容器下每格只剩几 px，用 auto-fit 兜住最小可读宽度 */
   grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr));
   gap: 12px;
   margin-bottom: 20px;

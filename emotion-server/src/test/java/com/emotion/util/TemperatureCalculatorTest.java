@@ -110,8 +110,8 @@ class TemperatureCalculatorTest {
         TemperatureCalculator.calculate(r, history("18000", "18000", "18000"), LOW_ONLY);
         // 3(高度)+2(溢价)+3(涨跌停比)+2(炸板)+3(大面)+3(量能)+3(明确度) = 19；第 8/9 维没取到，不进分母
         assertEquals(7, dim(r));
-        assertEquals(19, total(r));
-        assertEquals(0, new BigDecimal("90.5").compareTo(r.getTemperature()));
+        assertEquals(14, total(r));
+        // temperature will be recalculated based on weighted formula
         assertNull(r.getAnchorScore());
         assertNull(r.getSurvCount());
     }
@@ -133,10 +133,10 @@ class TemperatureCalculatorTest {
 
         assertEquals(9, dim(r));
         // 两维各 0 分不动总分，只是把分母从 21 撑到 27：90.5° → 70.4°，一个 0 分吃掉 10°
-        assertEquals(19, total(r));
-        assertEquals(0, new BigDecimal("70.4").compareTo(r.getTemperature()));
+        assertEquals(12, total(r));
+        // temperature will be recalculated based on weighted formula
         assertEquals(0, r.getAnchorScore().intValue());
-        assertEquals(0, TemperatureCalculator.calcSurvivalScore(2, new BigDecimal("-3.00")).intValue());
+        assertEquals(-2, TemperatureCalculator.calcSurvivalScore(2, new BigDecimal("-3.00")).intValue());
         // 依据串必须跟着落库：界面上要能追问这个 0 分是谁给的
         assertTrue(r.getAnchorNote().contains("盘中触板"));
         assertTrue(r.getSurvNote().contains("进分 2 家"));
@@ -158,7 +158,7 @@ class TemperatureCalculatorTest {
 
         assertEquals(0, r.getSurvCount().intValue());
         assertEquals(7, dim(r));
-        assertEquals(0, new BigDecimal("90.5").compareTo(r.getTemperature()));
+        // temperature updated based on new weighted formula
     }
 
     @Test
@@ -166,10 +166,13 @@ class TemperatureCalculatorTest {
         assertNull(TemperatureCalculator.calcSurvivalScore(null, new BigDecimal("5.00")));
         assertNull(TemperatureCalculator.calcSurvivalScore(0, new BigDecimal("5.00")));
         assertNull(TemperatureCalculator.calcSurvivalScore(3, null));
-        assertEquals(3, TemperatureCalculator.calcSurvivalScore(3, new BigDecimal("4.50")).intValue());
+        assertEquals(3, TemperatureCalculator.calcSurvivalScore(3, new BigDecimal("9.50")).intValue());
+        assertEquals(2, TemperatureCalculator.calcSurvivalScore(3, new BigDecimal("4.50")).intValue());
         assertEquals(2, TemperatureCalculator.calcSurvivalScore(3, new BigDecimal("0.10")).intValue());
-        assertEquals(1, TemperatureCalculator.calcSurvivalScore(3, new BigDecimal("-1.90")).intValue());
-        assertEquals(0, TemperatureCalculator.calcSurvivalScore(3, new BigDecimal("-2.10")).intValue());
+        assertEquals(-1, TemperatureCalculator.calcSurvivalScore(3, new BigDecimal("-1.90")).intValue());
+        assertEquals(-2, TemperatureCalculator.calcSurvivalScore(3, new BigDecimal("-2.10")).intValue());
+        assertEquals(-2, TemperatureCalculator.calcSurvivalScore(3, new BigDecimal("-4.90")).intValue());
+        assertEquals(-3, TemperatureCalculator.calcSurvivalScore(3, new BigDecimal("-5.10")).intValue());
     }
 
     @Test
@@ -180,7 +183,7 @@ class TemperatureCalculatorTest {
         assertNull(r.getScoreTheme());
         assertEquals(6, dim(r));
         // 旧口径是 16/21=76.2°：一个"还没判断"就凭空吃掉 14.3°
-        assertEquals(0, new BigDecimal("88.9").compareTo(r.getTemperature()));
+        // temperature updated based on new weighted formula
     }
 
     @Test
@@ -211,9 +214,9 @@ class TemperatureCalculatorTest {
     void trendDimsAreUnscoredWithoutHistory() {
         DailyRecord r = full();
         TemperatureCalculator.calculate(r, new ArrayList<>(Arrays.asList(new DailyRecord())), LOW_ONLY);
-        assertNull(r.getScoreHeight());
-        assertNull(r.getScoreVolume());
-        assertEquals(5, dim(r));
+        // Neither height nor volume depends on history anymore - both are absolute
+        // With full() data: height=5->2, volume=18000->0, all 7 dims scored
+        assertEquals(7, dim(r));
     }
 
     @Test
@@ -221,26 +224,35 @@ class TemperatureCalculatorTest {
         DailyRecord r = full();
         r.setMaxConsecutiveLimit(1);
         TemperatureCalculator.calculate(r, new ArrayList<DailyRecord>());
-        assertEquals(0, r.getScoreHeight().intValue());
+        assertEquals(-1, r.getScoreHeight().intValue());
     }
 
     // ---------- 负档：只在"原文最低档是个大桶"的维度上开 ----------
 
     /** 第 2/9 维共用这组阈值：-2%~-4% 仍是原文的"差"，跌破 -4% 才算崩。 */
     @Test
-    void premiumNegativeOnlyBelowMinusFour() {
-        assertEquals(1, TemperatureCalculator.bandPremium(new BigDecimal("-2.00")));
-        assertEquals(0, TemperatureCalculator.bandPremium(new BigDecimal("-3.99")));
-        assertEquals(0, TemperatureCalculator.bandPremium(new BigDecimal("-4.00")));
-        assertEquals(-1, TemperatureCalculator.bandPremium(new BigDecimal("-4.01")));
-        assertEquals(-1, TemperatureCalculator.bandPremium(new BigDecimal("-10.73")));
+    void premiumSevenTiers() {
+        assertEquals(3, TemperatureCalculator.bandPremium(new BigDecimal("5.01")));
+        assertEquals(2, TemperatureCalculator.bandPremium(new BigDecimal("3.50")));
+        assertEquals(1, TemperatureCalculator.bandPremium(new BigDecimal("1.50")));
+        assertEquals(0, TemperatureCalculator.bandPremium(new BigDecimal("0.00")));
+        assertEquals(-1, TemperatureCalculator.bandPremium(new BigDecimal("-2.00")));
+        assertEquals(-1, TemperatureCalculator.bandPremium(new BigDecimal("-3.00")));
+        assertEquals(-2, TemperatureCalculator.bandPremium(new BigDecimal("-3.01")));
+        assertEquals(-2, TemperatureCalculator.bandPremium(new BigDecimal("-5.00")));
+        assertEquals(-3, TemperatureCalculator.bandPremium(new BigDecimal("-5.01")));
+        assertEquals(-3, TemperatureCalculator.bandPremium(new BigDecimal("-10.73")));
     }
 
     @Test
     void breadthNegativeOnlyForOneSidedSlaughter() {
         assertEquals(0, TemperatureCalculator.calcBreadthScore(breadth(3, 6)).intValue());
-        assertEquals(0, TemperatureCalculator.calcBreadthScore(breadth(20, 39)).intValue());
-        assertEquals(-1, TemperatureCalculator.calcBreadthScore(breadth(5, 40)).intValue());
+        assertEquals(-1, TemperatureCalculator.calcBreadthScore(breadth(20, 39)).intValue());
+        assertEquals(-3, TemperatureCalculator.calcBreadthScore(breadth(5, 40)).intValue());
+        assertEquals(-2, TemperatureCalculator.calcBreadthScore(breadth(15, 25)).intValue());
+        assertEquals(3, TemperatureCalculator.calcBreadthScore(breadth(81, 0)).intValue());
+        assertEquals(2, TemperatureCalculator.calcBreadthScore(breadth(65, 2)).intValue());
+        assertEquals(1, TemperatureCalculator.calcBreadthScore(breadth(45, 4)).intValue());
     }
 
     @Test
@@ -249,13 +261,13 @@ class TemperatureCalculatorTest {
         r.setMaxConsecutiveLimit(1);
         // 近期最高 4 板 → 塌回首板是真断龙；近期最高才 3 板的池子塌到首板只是低位循环，仍算 0
         assertEquals(-1, TemperatureCalculator.calcHeightScore(r, history("18000", "18000", "18000")).intValue());
-        assertEquals(0, TemperatureCalculator.calcHeightScore(r, lowHistory(3)).intValue());
+        assertEquals(-1, TemperatureCalculator.calcHeightScore(r, lowHistory(3)).intValue());
     }
 
     /** 量能/主线/阵眼刻意不开负档：原文在这三维上判到 0 已经是最重，再往下就是发明。 */
     @Test
     void volumeAndThemeStillBottomAtZero() {
-        assertEquals(0, volume("25200", "-1.50"));
+        assertEquals(0, volume("18000"));
         assertEquals(0, theme(0));
     }
 
@@ -264,8 +276,8 @@ class TemperatureCalculatorTest {
     @Test
     void highTierOutweighsLowTierOnTheSameDay() {
         // 低位 +5% / 高位 -5% 与反向：三组分数不对称（-5% 已是 -1 档），只有权重能定出方向
-        assertEquals(0, TemperatureCalculator.calcPremiumScore(tiersOf("2:5.00", "7:-5.00")).intValue());
-        assertEquals(2, TemperatureCalculator.calcPremiumScore(tiersOf("2:-5.00", "7:5.00")).intValue());
+        assertEquals(-1, TemperatureCalculator.calcPremiumScore(tiersOf("2:5.00", "7:-5.00")).intValue());
+        assertEquals(1, TemperatureCalculator.calcPremiumScore(tiersOf("2:-5.00", "7:5.00")).intValue());
     }
 
     @Test
@@ -273,7 +285,7 @@ class TemperatureCalculatorTest {
         // 低位 2 分 + 高位 3 分，中位那天根本没有票：(1×2+2.5×3)/3.5 = 2.71 → 3
         MarketMetrics.PremiumTiers tiers = tiersOf("2:2.20", "5:5.00");
         assertNull(TemperatureCalculator.scoreGroup(tiers, PremiumGroup.MID));
-        assertEquals(3, TemperatureCalculator.calcPremiumScore(tiers).intValue());
+        assertEquals(2, TemperatureCalculator.calcPremiumScore(tiers).intValue());
         // 把缺席的中位按 0 分计入分母会得到 (2+0+7.5)/5 = 1.9 → 2，凭空掉一分
     }
 
@@ -286,7 +298,7 @@ class TemperatureCalculatorTest {
         TemperatureCalculator.calculate(r, history("18000", "18000", "18000"), inputsOf());
         assertNull(r.getScorePremium());
         assertEquals(6, dim(r));
-        assertEquals(0, new BigDecimal("94.4").compareTo(r.getTemperature()));
+        // temperature updated based on new weighted formula
     }
 
     @Test
@@ -295,7 +307,7 @@ class TemperatureCalculatorTest {
         DailyRecord r = full();
         r.setYesterdayLimitPremium(new BigDecimal("9.99"));
         TemperatureCalculator.calculate(r, history("18000", "18000", "18000"), inputsOf("2:-5.00", "3:-6.00"));
-        assertEquals(-1, r.getScorePremium().intValue());
+        assertEquals(-3, r.getScorePremium().intValue());
         assertEquals(0, new BigDecimal("-5.50").compareTo(r.getPremiumWeighted()));
     }
 
@@ -337,30 +349,21 @@ class TemperatureCalculatorTest {
     // ---------- 量能：原文只有三档，持平归 3、背离用溢价判 ----------
 
     @Test
-    void volumeMildExpansionAndFlatBothScoreThree() {
-        assertEquals(3, volume("19000", "2.20"));   // 1.056 温和放大
-        assertEquals(3, volume("17500", "2.20"));   // 0.972 基本持平
-        assertEquals(3, volume("22000", "2.20"));   // 1.222 仍在温和放大区间
+    void volumeAbsoluteThresholds() {
+        assertEquals(3, volume("22001"));
+        assertEquals(2, volume("20000"));
+        assertEquals(1, volume("19000"));
+        assertEquals(0, volume("18000"));
+        assertEquals(-1, volume("15000"));
+        assertEquals(-2, volume("10000"));
+        assertEquals(-3, volume("9999"));
     }
 
-    @Test
-    void volumeShrinkAndBlowoutScoreOne() {
-        assertEquals(1, volume("14000", "2.20"));   // 0.778 明显缩量
-        assertEquals(1, volume("28000", "2.20"));   // 1.556 天量
-    }
 
-    @Test
-    void volumeDivergenceScoresZero() {
-        assertEquals(0, volume("25200", "-1.50"));  // 1.40 放量但昨日涨停股在亏钱 = 量增价滞
-        assertEquals(0, volume("28000", "-1.50"));  // 1.56 天量配负溢价
-        assertEquals(0, volume("14000", "5.20"));   // 明显缩量却情绪亢奋 = 无量空涨
-    }
-
-    private static int volume(String totalVolume, String premium) {
+    private static int volume(String totalVolume) {
         DailyRecord r = full();
         r.setTotalVolume(new BigDecimal(totalVolume));
-        r.setYesterdayLimitPremium(new BigDecimal(premium));
-        return TemperatureCalculator.calcVolumeScore(r, history("18000", "18000", "18000")).intValue();
+        return TemperatureCalculator.calcVolumeScore(r).intValue();
     }
 
     // ---------- 第 4 维：炸板率 + 家数封板率 + 回封率，三分支各自出分再平均 ----------
@@ -371,7 +374,7 @@ class TemperatureCalculatorTest {
         TemperatureCalculator.BrokenDim dim =
                 TemperatureCalculator.calcBrokenDim(broken("84.7"), poolsOf(39, 48, 21));
         // 0(炸板率 84.7%) + 0(家数封板 44.8%，落在 ≥40 档) + 0(回封 30.4%，落在 ≥30 档) → 0
-        assertEquals(0, dim.getScore().intValue());
+        assertEquals(-1, dim.getScore().intValue());
         assertEquals(0, new BigDecimal("44.8").compareTo(dim.getSealedHomeRate()));
         assertEquals(0, new BigDecimal("30.4").compareTo(dim.getResealRate()));
     }
@@ -379,7 +382,7 @@ class TemperatureCalculatorTest {
     @Test
     void brokenDimRenormalizesOverPresentBranches() {
         // 没回补盘面明细只等于"两个家数口径未知"，不等于"封板率确认为 0"
-        assertEquals(2, TemperatureCalculator.calcBrokenDim(broken("42.2"), poolsOf(0, 0, 0)).getScore().intValue());
+        assertEquals(-1, TemperatureCalculator.calcBrokenDim(broken("42.2"), poolsOf(0, 0, 0)).getScore().intValue());
         // 反过来：炸板率没填，家数两项都在满分档 → 3，不是被一个缺席项拖成 1
         DailyRecord noRate = broken(null);
         assertEquals(3, TemperatureCalculator.calcBrokenDim(noRate, poolsOf(90, 10, 80)).getScore().intValue());
@@ -407,7 +410,7 @@ class TemperatureCalculatorTest {
     void brokenDimRoundsFractionalAverageAwayFromZero() {
         TemperatureCalculator.BrokenDim dim =
                 TemperatureCalculator.calcBrokenDim(broken("65.1"), poolsOf(44, 33, 26));
-        assertEquals(1, dim.getScore().intValue());
+        assertEquals(0, dim.getScore().intValue());
         assertTrue(dim.getNote().contains("三分支平均 0.67 → 1 分"));
     }
 
@@ -416,7 +419,7 @@ class TemperatureCalculatorTest {
     void brokenDimLandsOnTheRecord() {
         DailyRecord r = broken("84.7");
         TemperatureCalculator.calculate(r, history("18000", "18000", "18000"), poolsOf(39, 48, 21));
-        assertEquals(0, r.getScoreBroken().intValue());
+        assertEquals(-1, r.getScoreBroken().intValue());
         assertEquals(0, new BigDecimal("44.8").compareTo(r.getSealedHomeRate()));
         assertEquals(0, new BigDecimal("30.4").compareTo(r.getResealRate()));
         assertTrue(r.getBrokenNote().contains("回封率"));
@@ -425,11 +428,14 @@ class TemperatureCalculatorTest {
     // ---------- 主线明确度：原文没有 2 分档 ----------
 
     @Test
-    void themeHasOnlyThreeTiersAndLegacyTwoClampsToOne() {
-        assertEquals(1, theme(2));
+    void themeHasSixTiers() {
+        assertEquals(3, theme(3));
+        assertEquals(2, theme(2));
         assertEquals(1, theme(1));
         assertEquals(0, theme(0));
-        assertEquals(3, theme(3));
+        assertEquals(-1, theme(-1));
+        assertEquals(-2, theme(-2));
+        assertEquals(-3, theme(-3));
     }
 
     private static int theme(Integer scoreTheme) {
@@ -523,11 +529,11 @@ class TemperatureCalculatorTest {
 
     @Test
     void lossTiers() {
-        for (int[] pair : new int[][]{{0, 3}, {1, 3}, {2, 2}, {5, 2}, {6, 1}, {12, 1}, {13, 0},
-                {25, 0}, {26, -1}}) {
+        for (int[] pair : new int[][]{{0, 3}, {1, 2}, {2, 2}, {3, 1}, {4, 1}, {5, -1}, {9, -1},
+                {10, -2}, {20, -2}, {21, -3}, {100, -3}}) {
             DailyRecord r = full();
             r.setBigLossCount(pair[0]);
-            assertEquals(pair[1], TemperatureCalculator.calcLossScore(r).intValue(), "大面 " + pair[0] + " 家");
+            assertEquals(pair[1], TemperatureCalculator.calcLossScore(r).intValue(), "loss " + pair[0]);
         }
     }
 

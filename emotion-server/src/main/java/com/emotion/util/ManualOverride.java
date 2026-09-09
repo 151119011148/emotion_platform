@@ -30,7 +30,7 @@ public final class ManualOverride {
     }
 
     /**
-     * 夹回 {@code 0..DIM_MAX}。
+     * 夹回 {@code DIM_MIN..DIM_MAX}。
      *
      * <p>第 8 维的人工值是唯一一个<b>直接进分子</b>的数（其余覆盖给的是百分数，还要过一遍分档）。
      * 一个 9 分能把温度顶出 100、一个 -5 能把尺子捅穿，所以宁可夹回来并说清楚，
@@ -40,8 +40,8 @@ public final class ManualOverride {
         if (manual == null) {
             return null;
         }
-        if (manual < 0) {
-            return 0;
+        if (manual < TemperatureCalculator.DIM_MIN) {
+            return TemperatureCalculator.DIM_MIN;
         }
         return manual > TemperatureCalculator.DIM_MAX ? TemperatureCalculator.DIM_MAX : manual;
     }

@@ -12,65 +12,51 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.function.Function;
 
+
 /**
- * 九维打分与阶段判定。口径严格照知识库 03 篇的打分表，原文没写的档位一律标注出来。
+ * 九维情绪打分引擎，对齐新 100 分制规则。
  *
- * <p>每维取值 -1~3，分母仍是 {@code 3 × 已评维数}，所以温度区间从 0~100 变成 -33.3~100。
- * 阶段线 15/35/55/80 一个都没跟着挪——挪线等于同时改三个新旋钮，那样出来的对照表没法读。
- * 后果和缺维一样落在绝对值上：看趋势别看水位。
- *
- * 五条和常见实现相反的规则，都是刻意的：
- * 1. 评不了的维度返回 null 并整维剔出分母。按 0 分计入等于把"今天没填"读成"今天确认极差"，
- *    一个未填的主线明确度就能凭空压低 11.1°（九维 27 分制）。
- *    后果写明白：第 8/9 两维天生经常缺席（没设阵眼、当天没有在列监管股），所以参与维数会随
- *    账号和日子变，温度<b>绝对值</b>的可比性因此下降，Δ 的可比性不变——看趋势别看水位。
- * 2. 阶段判定变化率优先。02 篇里 分歧("60± 波动")/退潮("40→10") 是运动状态而非水位，
- *    先判静态档位会把 (0,100) 铺满，这两个阶段永远不可达。
- * 3. 溢价维看的是分档合成，不是含首板的整池均值。整池一个标量会把"高位抱团"和
- *    "中位负反馈吹哨"读成同一个数；yesterday_limit_premium 仍然展示，但不再进分。
- * 4. 负档只开在"原文最低档是个大桶"的维度上（溢价、涨跌停比、大面、连板高度、炸板维），
- *    用来把"差"和"崩了"分开；量能、主线、阵眼三维的 0 档本身已经判到最重，不再往下加。
- * 5. 溢价低/中/高的界线跟着当天最高板走（{@code M=round(H/2)}），不写死 2-3/4-5/6+。
- *    顶端在哪、高位就在哪，否则一轮小周期里"高位"这个词是空的。
+ * <p>每维 -3 ~ +3，各带权重（成交额x2、涨跌停x2、主线x2、阵眼x1.5、炸板x1.5，其余x1），
+ * 加权总和理论范围 +/-37.5，线性映射到 0~100。
+ * 阶段：冰点<=15, 修复<35, 启动<55, 发酵<80, 高潮>=80。
  */
+
 public class TemperatureCalculator {
 
-    /** 每维满分，也是 03 篇打分表里的"满分 3"。分母用它，九维全满仍是 100°。 */
+    /** 每维最高分 +3 */
     public static final int DIM_MAX = 3;
-    /**
-     * 每维下限。-1 = "确认负反馈/崩了"，和 03 篇最低档的"差"隔开一档。
-     *
-     * <p>分母刻意继续用 {@link #DIM_MAX} 而不是改成 3-(-1)=4：-1 是少数日子才踩得到的档，
-     * 把分母撑大等于把所有正常日子的读数整体往上抬一截，那是把整把尺子重刻，不是加一档。
-     */
-    public static final int DIM_MIN = -1;
-    /**
-     * 少于这个维数只出温度、不出阶段。
-     *
-     * <p>九维分母下它的含义已经从"最多缺 2 维"变成"最多缺 4 维"——数字没跟着动是刻意的，
-     * 第 8/9 两维天生经常缺席（没设阵眼、当天没有在列监管股），调高它等于让这两维缺席的日子集体失去阶段。
-     * 回补对照表里如果看到大量 5~6 维的日子，再回来调。
-     */
+    /** 每维最低分 -3 */
+    public static final int DIM_MIN = -3;
+    /** 至少要有这么多维度才出阶段 */
     public static final int MIN_DIMS_FOR_STAGE = 5;
-    /** 判定转弱的温差：九维 27 分制下 = 3.24 个得分点，也就是"跳两档以上才算动"。 */
+    /** 判断转退潮 */
     private static final double DROP_THRESHOLD = 12;
-    /** 退潮与分歧的分界，对齐 02 篇 退潮="40→10"。 */
+    /** 退出潮线的分界 */
     private static final double TIDE_LINE = 40;
-    /**
-     * 发酵线：02 篇里 发酵/启动 的分档下界。 {@code CycleStageMachine} 判反弹时拿它当上限
-     * ——涨回这条线以上的日子主阶段自己就变 发酵 了，那是反转不是反弹，两处必须同一个数。
-     */
+    /** 发酵线 */
     public static final double FERMENT_LINE = 55;
 
-    /**
-     * 档位权重：高位给得更重（使用者原话"高位的权重稍微重一些"）。
-     * 这是溢价维唯一的拍板数，改这一处即可，结构信号那边跟着用同一组。
-     */
+    // 各维度权重
+    public static final double W_VOLUME  = 2.0;
+    public static final double W_BREADTH = 2.0;
+    public static final double W_HEIGHT  = 1.0;
+    public static final double W_PREMIUM = 1.0;
+    public static final double W_BROKEN  = 1.5;
+    public static final double W_THEME   = 2.0;
+    public static final double W_ANCHOR  = 1.5;
+    public static final double W_LOSS    = 1.0;
+    public static final double W_SURVIVAL = 1.0;
+    /** 权重总和 x DIM_MAX = 12.5 x 3 = 37.5 */
+    public static final double MAX_POSSIBLE = (W_VOLUME + W_BREADTH + W_HEIGHT + W_PREMIUM
+            + W_BROKEN + W_THEME + W_ANCHOR + W_LOSS + W_SURVIVAL) * DIM_MAX;
+
+    // 分档溢价内部权重（低/中/高）
     public static final double W_LOW = 1.0;
     public static final double W_MID = 1.5;
     public static final double W_HIGH = 2.5;
 
     private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
+
 
     public static void calculate(DailyRecord record, List<DailyRecord> recentRecords) {
         calculate(record, recentRecords, ScoreInputs.empty());
@@ -84,7 +70,7 @@ public class TemperatureCalculator {
         BrokenDim brokenDim = calcBrokenDim(record, in);
         Integer broken = brokenDim.getScore();
         Integer loss = calcLossScore(record);
-        Integer volume = calcVolumeScore(record, recentRecords);
+        Integer volume = calcVolumeScore(record);
         Integer theme = calcThemeScore(record);
         Integer anchor = in.getAnchorScore();
         Integer survival = calcSurvivalScore(in.getSurvCount(), in.getSurvPremium());
@@ -108,57 +94,39 @@ public class TemperatureCalculator {
 
         List<Integer> dims = Arrays.asList(height, premium, breadth, broken, loss, volume, theme,
                 anchor, survival);
+        double[] weights = {W_HEIGHT, W_PREMIUM, W_BREADTH, W_BROKEN, W_LOSS, W_VOLUME, W_THEME,
+                W_ANCHOR, W_SURVIVAL};
+        double weightedSum = 0;
         int scored = 0;
-        int sum = 0;
-        for (Integer dim : dims) {
-            if (dim != null) {
+        for (int i = 0; i < dims.size(); i++) {
+            if (dims.get(i) != null) {
                 scored++;
-                sum += dim;
+                weightedSum += dims.get(i) * weights[i];
             }
         }
 
+        double maxPossible = MAX_POSSIBLE;
+        double temperature = (weightedSum + maxPossible) / (2 * maxPossible) * 100;
+
         record.setScoredDims(scored);
-        record.setTotalScore(scored == 0 ? null : sum);
+        record.setTotalScore(scored == 0 ? null : (int) Math.round(weightedSum));
         record.setTemperature(scored == 0 ? null
-                : BigDecimal.valueOf(sum).multiply(HUNDRED)
-                        .divide(BigDecimal.valueOf((long) DIM_MAX * scored), 1, RoundingMode.HALF_UP));
+                : BigDecimal.valueOf(temperature).setScale(1, RoundingMode.HALF_UP));
     }
 
-    /** 连板高度趋势：上升/维持高位=3, 横盘=2, 下降=1, 断龙=0。 */
+
+    /** 连板高度：绝对档位 >=7=3, >=5=2, >=3=1, 2=0, 1=-1, 0=-3 */
     static Integer calcHeightScore(DailyRecord record, List<DailyRecord> recent) {
         Integer h = record.getMaxConsecutiveLimit();
         if (h == null) {
             return null;
         }
-        boolean hasHistory = recent != null && recent.size() >= 2;
-        int prevMax = 0;
-        if (hasHistory) {
-            for (DailyRecord past : recent) {
-                Integer v = past.getMaxConsecutiveLimit();
-                if (v != null && v > prevMax) {
-                    prevMax = v;
-                }
-            }
-        }
-        if (h <= 1) {
-            // 原文"断龙=0"是一整块。4 板以上直接塌回首板，和本来就在 2~3 板打转的池子塌到首板
-            // 不是同一个量级——前者是龙头腰斩的确认信号，后者只是低位循环，分开才判得出来。
-            return prevMax >= 4 ? DIM_MIN : 0;
-        }
-        if (!hasHistory) {
-            return null;
-        }
-
-        if (h > prevMax) {
-            return 3;
-        }
-        if (h == prevMax && h >= 4) {
-            return 3;
-        }
-        if (h >= 3) {
-            return 2;
-        }
-        return 1;
+        if (h >= 7) return 3;
+        if (h >= 5) return 2;
+        if (h >= 3) return 1;
+        if (h == 2) return 0;
+        if (h == 1) return -1;
+        return -3;
     }
 
     /**
@@ -263,21 +231,17 @@ public class TemperatureCalculator {
         return BigDecimal.valueOf(pctSum / weightSum).setScale(2, RoundingMode.HALF_UP);
     }
 
-    /** 03 篇溢价四档：&gt;+4%=3, 0~+4%=2, -2%~0=1, &lt;-2%=0；实测把最低档再切一刀：&lt;-4%=-1。第 9 维「监管股今日溢价」复用同一组阈值。 */
+
+    /** 新七档溢价：>5%=3, >3%=2, >1%=1, >=0%=0, >=-3%=-1, >=-5%=-2, <-5%=-3 */
     static int bandPremium(BigDecimal pct) {
         double v = pct.doubleValue();
-        if (v > 4) {
-            return 3;
-        }
-        if (v > 0) {
-            return 2;
-        }
-        if (v >= -2) {
-            return 1;
-        }
-        // 原文"-2% 以下"是一整块，跨度却从 -3%（当天只是不好看）到 -10.7%（池子被核按钮）。
-        // 高位组权重 2.5，整块记 0 等于把崩塌和难看读成同一个数。
-        return v >= -4 ? 0 : DIM_MIN;
+        if (v > 5) return 3;
+        if (v > 3) return 2;
+        if (v > 1) return 1;
+        if (v >= 0) return 0;
+        if (v >= -3) return -1;
+        if (v >= -5) return -2;
+        return -3;
     }
 
     public static double weight(PremiumGroup group) {
@@ -345,31 +309,32 @@ public class TemperatureCalculator {
         return avg == null ? null : bandPremium(avg);
     }
 
+
     /**
-     * 第 8 维 阵眼反馈：收红且创跨度新高=3、收红=2、收绿或平盘=1、
-     * 收盘跌停 / 盘中触及跌停 / 断板=0。
-     *
-     * <p>判跌停看两个数：收盘跌停和<b>盘中触板</b>。哈药 09-03 收 -7.47% 但最低 -9.96%，
-     * 那天你读"退潮一阶段"的依据就是触板本身，不是收盘那一下——只校收盘会把这一整天记成 1 分。
-     *
-     * <p>null = 没设阵眼 / 那天它没有行情 / 请求失败，三者都是"未评"，不能写成 0。
+     * 阵眼当日：强涨停(>=9.5%)=3, 红盘(>0)=2, 平盘=0, 断板=-1, 按核(<=-5%)=-2, 跌停=-3
+     * null = 没有阵眼 / 数据不可用。
      */
     public static Integer calcAnchorScore(AnchorMetrics.Span span) {
         if (span == null || !span.isAvailable()) {
             return null;
         }
-        if (span.isCloseLimitDown() || span.isTouchedLimitDown() || span.isBrokeToday()) {
-            return 0;
-        }
         BigDecimal pct = span.getPct();
+        if (span.isCloseLimitDown() || span.isTouchedLimitDown()) {
+            return -3;
+        }
+        if (pct != null && pct.doubleValue() <= -5) {
+            return -2;
+        }
+        if (span.isBrokeToday()) {
+            return -1;
+        }
         if (pct == null) {
             return null;
         }
-        if (pct.signum() > 0) {
-            return span.isNewSpanHigh() ? 3 : 2;
-        }
-        // 平盘按"没涨"处理，落 1 分：阵眼那天不动，本身既不是反馈也不是负反馈
-        return 1;
+        double v = pct.doubleValue();
+        if (v >= 9.5) return 3;
+        if (v > 0) return 2;
+        return 0;
     }
 
     /**
@@ -392,15 +357,19 @@ public class TemperatureCalculator {
     }
 
     /**
-     * 第 9 维 监管股今日溢价：真监管（严重异常波动 / 交易所监管）那批票当日涨跌幅的算术平均，
-     * 套 03 篇同一组四档阈值。例行异常波动 ZD 只在名单上展示，不进这个均值。
-     *
-     * <p>家数为 null（从没拉过）或 0（拉过了、当天确实没有进分的监管股）都整维未评。
-     * 「今天没有票被真监管」是个中性事实，既不是利空也不是利多，用 0 分冒充等于凭空造一次退潮。
-     * 家数&gt;0 但一只都没取到涨跌同样未评，这时界面上要显示"进分 N 家，涨跌未取得"。
+     * 第 9 维涨停板接力：按 avgPct 状态打分。
+     * >=9.5%=3, >0%=2, >=-2%=-1, >=-5%=-2, <-5%=-3
      */
     static Integer calcSurvivalScore(Integer count, BigDecimal avgPct) {
-        return survivalScored(count, avgPct) ? bandPremium(avgPct) : null;
+        if (!survivalScored(count, avgPct)) {
+            return null;
+        }
+        double v = avgPct.doubleValue();
+        if (v >= 9.5) return 3;
+        if (v > 0) return 2;
+        if (v >= -2) return -1;
+        if (v >= -5) return -2;
+        return -3;
     }
 
     /**
@@ -413,28 +382,20 @@ public class TemperatureCalculator {
         return count != null && count != 0 && avgPct != null;
     }
 
-    /** 涨停 vs 跌停家数：远多于=3, 略多=2, 相当=1, 跌停更多=0, 跌停碾压(≥2 倍且≥20 家)=-1。 */
+    /** 涨跌停对比（绝对数） */
     static Integer calcBreadthScore(DailyRecord record) {
         Integer up = record.getLimitUpCount();
         Integer down = record.getLimitDownCount();
         if (up == null || down == null) {
             return null;
         }
-        if (down == 0 && up > 20) {
-            return 3;
-        }
-        if (up > down * 3) {
-            return 3;
-        }
-        if (up > down) {
-            return 2;
-        }
-        if (up.intValue() == down.intValue()) {
-            return 1;
-        }
-        // 原文"跌停更多"是一整块 0 分。涨停 3 跌停 6 和涨停 5 跌停 40 都落在这块里，
-        // 后者是单方面的屠杀，得和"只是不好看"分开——所以再要求绝对家数，避免 1 对 3 就判崩。
-        return down >= up * 2 && down >= 20 ? DIM_MIN : 0;
+        if (up < 10 && down >= 40) return -3;
+        if (up < 20 && down >= 20) return -2;
+        if (up > 80 && down == 0) return 3;
+        if (up >= 60 && down < 3) return 2;
+        if (up >= 40 && down < 5) return 1;
+        if ((up >= 30 && up < 40) || (down >= 5 && down <= 10)) return 0;
+        return -1;
     }
 
     /**
@@ -497,19 +458,15 @@ public class TemperatureCalculator {
         return new BrokenDim(score, sealed, reseal, note.toString(), sealedNote, resealNote);
     }
 
-    /** 03 篇炸板率四档：低于 30%=3, 30-50%=2, 50-70%=1, 70% 以上=0。这一支不开负档，0 已是原文最低。 */
+    /** 新炸板率档位：<20%=3, <30%=2, <40%=1, <50%=-1, <=70%=-2, >70%=-3 */
     static int bandBrokenRate(BigDecimal pct) {
         double v = pct.doubleValue();
-        if (v < 30) {
-            return 3;
-        }
-        if (v < 50) {
-            return 2;
-        }
-        if (v < 70) {
-            return 1;
-        }
-        return 0;
+        if (v < 20) return 3;
+        if (v < 30) return 2;
+        if (v < 40) return 1;
+        if (v < 50) return -1;
+        if (v <= 70) return -2;
+        return -3;
     }
 
     /**
@@ -640,79 +597,35 @@ public class TemperatureCalculator {
         }
     }
 
-    /**
-     * 大面数：极少(≤1)=3, 少量(≤5)=2, 偏多(≤12)=1, 成群(>12)=0, 崩盘(>25)=-1。
-     *
-     * <p>最后一档<b>原文没有</b>：03 篇的"成群(>12)=0"是一整块，把"差"和"崩了"拆开是这边加的，
-     * 25 也不是从原文推出来的——看到不对就直接否。
-     *
-     * <p>更要紧的是这条维的低端<b>眼下没有样本可校</b>：已回补的 14 天大面是 0~4 家，而炸板池
-     * 全天也只有 6~48 只，所以 ≤12=1、>12=0、>25=-1 三档一次都没落到过，实际只在 2/3 之间跳。
-     * 12 和 25 是按"一天几百家涨停"的量级猜的，对不上这份按回撤+绿盘筛出来的口径，等样本攒够再回来挪。
-     */
+    /** 大面数：0=3, 1-2=2, 3-4=1, 5-9=-1, 10-20=-2, >20=-3 */
     static Integer calcLossScore(DailyRecord record) {
         Integer c = record.getBigLossCount();
         if (c == null) {
             return null;
         }
-        if (c <= 1) {
-            return 3;
-        }
-        if (c <= 5) {
-            return 2;
-        }
-        if (c <= 12) {
-            return 1;
-        }
-        return c <= 25 ? 0 : DIM_MIN;
+        if (c == 0) return 3;
+        if (c <= 2) return 2;
+        if (c <= 4) return 1;
+        if (c <= 9) return -1;
+        if (c <= 20) return -2;
+        return -3;
     }
 
-    /**
-     * 量能/换手：温和放大=3, 缩量或天量=1, 背离=0。
-     *
-     * 03 篇这一维只有三档，没有"基本持平=2"——持平按使用者的决定归到 3。
-     * "背离"原文要的是量能与情绪反向，系统里没存指数涨跌，改用同日"昨日涨停溢价"的符号当情绪方向：
-     * 放量但昨日涨停股今天在亏钱 = 量增价滞；缩量却情绪亢奋 = 无量空涨。
-     * 溢价没填时不做背离判断，只在量级上给 3 或 1。
-     */
-    static Integer calcVolumeScore(DailyRecord record, List<DailyRecord> recent) {
+
+    /** 成交额（绝对值，单位亿） */
+    static Integer calcVolumeScore(DailyRecord record) {
         BigDecimal vol = record.getTotalVolume();
         if (vol == null || vol.signum() == 0) {
             return null;
         }
-        if (recent == null || recent.size() < 2) {
-            return null;
-        }
-
-        double sum = 0;
-        int count = 0;
-        // recent 已按 tradeDate 倒序（最新在前），正向遍历才能取到最近 3 日
-        for (int i = 0; i < recent.size() && count < 3; i++) {
-            BigDecimal v = recent.get(i).getTotalVolume();
-            if (v != null && v.signum() > 0) {
-                sum += v.doubleValue();
-                count++;
-            }
-        }
-        if (count == 0) {
-            return null;
-        }
-        double ratio = vol.doubleValue() / (sum / count);
-
-        BigDecimal premium = moodReference(record);
-        boolean moodUp = premium != null && premium.doubleValue() > 4;
-        boolean moodDown = premium != null && premium.signum() < 0;
-
-        if (ratio < 0.85) {
-            return moodUp ? 0 : 1;
-        }
-        if (ratio <= 1.3) {
-            return 3;
-        }
-        if (ratio <= 1.5) {
-            return moodDown ? 0 : 3;
-        }
-        return moodDown ? 0 : 1;
+        double v = vol.doubleValue();
+        if (v > 22000) return 3;
+        if (v >= 20000) return 2;
+        if (v >= 19000) return 1;
+        if (v >= 18000) return 0;
+        if (v >= 15000) return -1;
+        if (v >= 10000) return -2;
+        return -3;
     }
 
     /**
@@ -725,20 +638,19 @@ public class TemperatureCalculator {
         return pooled != null ? pooled : record.getPremiumWeighted();
     }
 
-    /**
-     * 主线/龙头明确度：有清晰主线+龙头=3, 有热点无主线=1, 无主线=0。
-     * 这是九维里唯一由人填的档位，没填就是未评——不许拿 0 分冒充"判断过、判断为无主线"。
-     * 原文没有 2 分档，历史数据里的 2 一律夹到 1。
-     */
+    /** 主线明确度：直接取 scoreTheme（-3~+3 六档），null 为未评 */
     static Integer calcThemeScore(DailyRecord record) {
         Integer v = record.getScoreTheme();
         if (v == null) {
             return null;
         }
-        if (v >= 3) {
-            return 3;
-        }
-        return v >= 1 ? 1 : 0;
+        if (v >= 3) return 3;
+        if (v >= 2) return 2;
+        if (v >= 1) return 1;
+        if (v <= -3) return -3;
+        if (v <= -2) return -2;
+        if (v <= -1) return -1;
+        return 0;
     }
 
     public static String determineStage(double temperature, Double prevTemperature) {
