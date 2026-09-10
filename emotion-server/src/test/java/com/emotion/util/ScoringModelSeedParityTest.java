@@ -408,4 +408,52 @@ class ScoringModelSeedParityTest {
         }
         return t;
     }
+
+    // ==================== 种子元组宽度 ====================
+
+    /**
+     * 每条 INSERT 的每个 VALUES 元组必须与它自己声明的列清单同宽。
+     * MySQL 遇到 "Column count doesn't match value count" 会把整条 INSERT 判死（一条都不进），
+     * 而本测试原有的逐字段比对只按下标读元组，窄元组会被静默跳过：五维 D3 的 65 条阶梯规则就是这样
+     * 在实库里从来没种进去、单测与 build 却全绿。这条是防那类形状再造。
+     */
+    @Test
+    void everySeedTupleMatchesItsDeclaredColumnCount() throws Exception {
+        String sql = readSchema();
+        String[] anchors = { MODEL_ANCHOR, DIM_ANCHOR, SUB_ANCHOR, RULE_ANCHOR };
+        int checked = 0;
+        for (String anchor : anchors) {
+            int cursor = 0;
+            while (true) {
+                int start = sql.indexOf(anchor, cursor);
+                if (start < 0) {
+                    break;
+                }
+                int open = sql.indexOf('(', start);
+                int close = open < 0 ? -1 : sql.indexOf(')', open);
+                int values = close < 0 ? -1 : sql.indexOf("VALUES", close);
+                assertTrue(open > 0 && close > open && values > 0, anchor + " 找不到 \"列清单 ... VALUES\" 形状");
+                int declared = 1 + countChar(sql.substring(open + 1, close), ',');
+                List<List<String>> tuples = scanTuples(sql, values + "VALUES".length());
+                assertTrue(!tuples.isEmpty(), anchor + " 没扫到任何元组");
+                for (int i = 0; i < tuples.size(); i++) {
+                    assertEquals(declared, tuples.get(i).size(),
+                            anchor + " 第 " + (i + 1) + " 个元组字段数与列清单(" + declared + ")不符：" + tuples.get(i));
+                    checked++;
+                }
+                cursor = values + "VALUES".length();
+            }
+        }
+        assertTrue(checked >= 250, "扫描到的种子元组太少，八成是扫描形状漂了：" + checked);
+    }
+
+    private static int countChar(String s, char ch) {
+        int n = 0;
+        for (int i = 0; i < s.length(); i++) {
+            if (s.charAt(i) == ch) {
+                n++;
+            }
+        }
+        return n;
+    }
 }
