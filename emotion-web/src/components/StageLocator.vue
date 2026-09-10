@@ -6,11 +6,12 @@
         v-for="s in stages"
         :key="s.name"
         class="stage-item"
-        :class="{ active: s.name === stage }"
-        :style="{ background: s.name === stage ? s.color : 'transparent' }"
+        :class="{ active: isActive(s.name), forced: isForced(s.name) }"
+        :style="slotStyle(s.name)"
       >
-        <div class="stage-dot" :style="{ background: s.color }"></div>
+        <div class="stage-dot" :style="{ background: dotColor(s.name) }"></div>
         <span class="stage-name">{{ s.name }}</span>
+        <span class="forced-badge" v-if="isForced(s.name)">强制</span>
       </div>
     </div>
     <div class="direction-info" v-if="stage">
@@ -19,28 +20,57 @@
     <div class="basis-info" v-if="basis">
       来路: <span class="basis">{{ basis }}</span>
     </div>
+    <div class="forced-info" v-if="forcedReason">
+      强制退潮原因：{{ forcedReason }}
+    </div>
     <div class="signal-info" v-if="signals.length">
-      顶哨 {{ signals.length }} 项：{{ signals.join('、') }}
+      结构信号 {{ signals.length }} 项：{{ signals.join('、') }}
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed } from 'vue'
-import { STAGES } from '../utils/stages'
+import { STAGES, FORCED_EBB_STAGE, FORCED_EBB_COLOR } from '../utils/stages'
 import { stageBasis, topSignals } from '../utils/cycleReading'
 
 const props = defineProps({
   stage: { type: String, default: '' },
   direction: { type: String, default: '' },
-  /** 当日整条记录：来路和顶哨都从里面现读，不另发请求 */
+  /** 当日整条记录：来路 / 顶哨 / 强制退潮原因都从里面现读，不另发请求 */
   record: { type: Object, default: null }
 })
 
 const stages = STAGES
 
+/** "退潮(强制)" 归一化到"退潮" slot 做高亮判断。 */
+function normalized() {
+  return props.stage === FORCED_EBB_STAGE ? '退潮' : props.stage
+}
+function isActive(name) {
+  return normalized() === name
+}
+function isForced(name) {
+  return props.stage === FORCED_EBB_STAGE && name === '退潮'
+}
+function slotStyle(name) {
+  if (!isActive(name)) return { background: 'transparent' }
+  return { background: isForced(name) ? FORCED_EBB_COLOR : stageColor(name) }
+}
+function dotColor(name) {
+  return isForced(name) ? FORCED_EBB_COLOR : stageColor(name)
+}
+function stageColor(name) {
+  const s = STAGES.find((x) => x.name === name)
+  return s ? s.color : ''
+}
+
 const basis = computed(() => stageBasis(props.record))
 const signals = computed(() => topSignals(props.record))
+const forcedReason = computed(() => {
+  if (!props.record || props.record.forcedEbb !== 1) return ''
+  return props.record.forcedEbbReason || ''
+})
 
 const directionClass = computed(() => {
   if (props.direction === '上升') return 'rising'
@@ -108,6 +138,22 @@ const directionClass = computed(() => {
 }
 .basis-info .basis {
   color: #cbd5e1;
+}
+.forced-badge {
+  margin-top: 4px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: #dc2626;
+  border-radius: 8px;
+  letter-spacing: 1px;
+}
+.forced-info {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #fecaca;
 }
 .signal-info {
   margin-top: 8px;

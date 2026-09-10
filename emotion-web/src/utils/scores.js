@@ -1,16 +1,72 @@
 /**
  * 与后端打分口径对齐用的小工具。
  *
- * <p>survivalBandOf() 抄的是后端 TemperatureCalculator#calcSurvivalScore（第 9 维涨停板接力）。
- * <b>不是</b> bandPremium：第 9 维从这轮重定标起用自己那套刻度，两者在 +1.5%（接力 2 分 / 溢价 0 分）
- * 和 -3.5%（-2 / -3）这类读数上分得很开，拿错那张表会把卡面上的分印成假的。
- * 界面上要显示"这一维进了几分"又没有单独字段可取时用它现算，改那边必须改这里。
+ * <p>两套并存：
+ *   <ul>
+ *     <li>五维双层模型（{@link FIVE_DIM_DIMS} / {@link FIVE_DIM_ORDER} / {@link FIVE_DIM_MAX}）
+ *         是新的 active 模型；每维 0-100 打分、按维权直加成 0-100 总分。后端唯一真源是
+ *         BoardScoreCalculator#builtinTree。</li>
+ *     <li>旧 9 维（{@link DIMS} / {@link CARD_ORDER} / {@link MAX_POSSIBLE} / {@link survivalBandOf}）
+ *         仍在 DailyRecord 的 score_height..surv_* 列中回填、IndicatorCards 的 legacy 卡片仍在展示，
+ *         所以在替换完成前保留。后端唯一真源是 TemperatureCalculator#builtinModel。</li>
+ *   </ul>
+ * 任何一边改了常量都必须同步这里，否则界面印出的分与引擎实际算出来的会静默漂移。
  */
 
+// ==================== 五维双层（新，active=five_dim）====================
+
+/** 五维一级维：dimNo / label / weight（维权和=1.00）。 */
+export const FIVE_DIM_DIMS = {
+  market: { dim: 1, label: '大盘生态', weight: 0.25, recordColumn: 'scoreMarket' },
+  theme_main: { dim: 2, label: '主线明确度', weight: 0.20, recordColumn: 'scoreThemeMain' },
+  board: { dim: 3, label: '连板生态', weight: 0.25, recordColumn: 'scoreBoard' },
+  first: { dim: 4, label: '首板生态', weight: 0.15, recordColumn: 'scoreFirst' },
+  anchor: { dim: 5, label: '阵眼', weight: 0.15, recordColumn: 'scoreAnchor' }
+}
+
+/** 仪表盘卡片摆放序：与后端 dim_no 一致。 */
+export const FIVE_DIM_ORDER = ['market', 'theme_main', 'board', 'first', 'anchor']
+
+/** 总分满分——五维模型直加权，0-100，不再 (x+M)/2M 映射。 */
+export const FIVE_DIM_MAX = 100
+
+/** 4 带（交易纪律）；边界与后端 BoardScoreCalculator.stageOf 一致。 */
+export const FIVE_DIM_BANDS = [
+  { name: '高潮', min: 85, max: 100, cls: 'b-climax' },
+  { name: '发酵', min: 60, max: 84.999, cls: 'b-ferment' },
+  { name: '混沌', min: 40, max: 59.999, cls: 'b-chaos' },
+  { name: '退潮', min: 0, max: 39.999, cls: 'b-ebb' }
+]
+
+/** 分 → 带对象；null / NaN / 落在带外都返回 null（未评绝不退化成"退潮"）。 */
+function bandOf(score) {
+  if (score == null) return null
+  const v = Number(score)
+  if (Number.isNaN(v)) return null
+  for (const b of FIVE_DIM_BANDS) {
+    if (v >= b.min && v <= b.max) return b
+  }
+  return null
+}
+
+/** 分 → 4 带名；null / NaN 返回 null，不兜"退潮"，让调用方自己判"未评"。 */
+export function fiveDimBandOf(score) {
+  const b = bandOf(score)
+  return b ? b.name : null
+}
+
+/** 分 → 带样式类名（横条与文字同色）；未评返回 b-none。类名由这里独家定义。 */
+export function fiveDimBandClassOf(score) {
+  const b = bandOf(score)
+  return b ? b.cls : 'b-none'
+}
+
+// ==================== 旧 9 维（legacy，仅显示回填列）====================
+
 /**
- * 第 9 维接力五档：>=9.5=3 / >0=2 / >=-2=-1 / >=-5=-2 / 其余=-3。
- * 注意这套刻度跳过了 1 分与 0 分——涨不到 9.5% 又还在涨是 2，一旦转负立刻掉进负档。
- * null 是未评，不是 0 分。
+ * 第 9 维接力五档（对齐旧 TemperatureCalculator#calcSurvivalScore）：
+ *   >=9.5=3 / >0=2 / >=-2=-1 / >=-5=-2 / 其余=-3。
+ * null 是未评，不是 0。
  */
 export function survivalBandOf(p) {
   if (p == null) return null
@@ -23,10 +79,7 @@ export function survivalBandOf(p) {
   return -3
 }
 
-/**
- * 九维的维序与权重。唯一真源是后端 TemperatureCalculator:40-48，那边改了必须改这里。
- * key 用的是 IndicatorCards 的卡片 key（第 9 维在那边叫 surv，后端叫 survival）。
- */
+/** 旧 9 维维序与权重（唯一真源 TemperatureCalculator#builtinModel）。 */
 export const DIMS = {
   height: { dim: 1, label: '连板高度', weight: 1.0 },
   premium: { dim: 2, label: '分档溢价', weight: 1.0 },
@@ -39,26 +92,17 @@ export const DIMS = {
   surv: { dim: 9, label: '异动监管', weight: 1.0 }
 }
 
-/**
- * 他读盘的那串顺序，成交额打头。<b>不是</b>打分引擎的维序：维序是 {@code DIMS[key].dim}，
- * 界面上那句「第 N 维」印的是它，所以照这一串摆过去编号会跳（6、3、1、2…），那是刻意的。
- *
- * <p>仪表盘九张卡与复盘页九维<b>共用这一份</b>。上一轮我把卡片排成引擎序，被他退回过一次
- * （「要用我之前发的顺序，成交额第一维」）；两边各写一串的话，下一次一定再漂一次。
- */
+/** 旧 9 维仪表盘卡片摆放序。 */
 export const CARD_ORDER = [
   'volume', 'breadth', 'height', 'premium', 'surv', 'theme', 'anchor', 'loss', 'broken'
 ]
 
-/** 权重总和 × 每维满分 3 = 温度公式的分母。 */
+/** 旧 9 维权重和 × 每维满分 3 = 温度分母。 */
 export const MAX_POSSIBLE =
   Object.values(DIMS).reduce((sum, d) => sum + d.weight, 0) * 3
 
 /**
- * 一维进分的那句话，仪表盘 tooltip 的第一行。
- *
- * <p>「未评」和「0 分」必须长得不一样：新口径下分母固定是 39，两者对温度的影响确实同数，
- * 于是界面成了唯一还能把它们分开说清楚的地方。
+ * 一维进分那句 tooltip（旧 9 维；新五维由 stores/scoring.dimScoreLineFive 走树）。
  */
 export function dimScoreLine(key, score) {
   const d = DIMS[key]
@@ -71,7 +115,7 @@ export function dimScoreLine(key, score) {
   return `第 ${d.dim} 维 · ${d.label} · ${fmt(v)} 分 × 权重 ${d.weight} = 加权 ${fmt(v * d.weight)}`
 }
 
-/** 涨跌带正负号，null 一律出 em-dash——0.00% 是一个真实读数，不能拿来代替"没数"。 */
+/** 涨跌带正负号；null 一律 em-dash——0.00% 是真实读数，不能代替"没数"。 */
 export function signed(p, digits = 2) {
   if (p == null) return '—'
   const v = Number(p)

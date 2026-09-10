@@ -21,7 +21,8 @@ import java.util.function.Function;
 /**
  * 表单那一串键到库里那一格的对应关系，重点只有一件事：<b>「这格没发键」必须等于「这格不动」</b>。
  *
- * <p>为什么钉这么细：十二格 ALWAYS 策略的列（涨跌家数、我的仓位、对照、八格 manual_*）
+ * <p>为什么钉这么细：二十一份 ALWAYS 策略的列（涨跌家数、我的仓位、对照、旧九维八格 manual_*、
+ * 五维九格 manual_*）
  * 在 update 时是"给什么写什么"，包括写 NULL。复盘页上删掉一块、或者一个只改阶段的半截请求，
  * 只要还按"值非 null 才写"的老规矩发，就会把 md 导入存进去的数一并洗成空。
  * 那种洗法界面上看不见，事后也追不回来。
@@ -76,6 +77,27 @@ class DailyRecordFieldsTest {
                     DailyRecord::getManualSurvCount, (r, v) -> r.setManualSurvCount((Integer) v)),
             new Column("manualSurvPremium", new BigDecimal("-1.5"), new BigDecimal("9.9"),
                     DailyRecord::getManualSurvPremium, (r, v) -> r.setManualSurvPremium((BigDecimal) v)),
+            // ===== 五维人工读数九格（Stage 10）：同样三条路（缺键不动 / 发 null 清空 / 发值落库）逐个钉 =====
+            new Column("manualSectorLimitUpCount", 3, 5,
+                    DailyRecord::getManualSectorLimitUpCount, (r, v) -> r.setManualSectorLimitUpCount((Integer) v)),
+            new Column("manualLadderCompleteScore", new BigDecimal("90"), new BigDecimal("35"),
+                    DailyRecord::getManualLadderCompleteScore, (r, v) -> r.setManualLadderCompleteScore((BigDecimal) v)),
+            new Column("manualSectorPremiumPct", new BigDecimal("1.8"), new BigDecimal("-2.4"),
+                    DailyRecord::getManualSectorPremiumPct, (r, v) -> r.setManualSectorPremiumPct((BigDecimal) v)),
+            new Column("manualThemePersistenceDays", 1, 4,
+                    DailyRecord::getManualThemePersistenceDays, (r, v) -> r.setManualThemePersistenceDays((Integer) v)),
+            new Column("manualTopHighTurnoverPct", new BigDecimal("22.5"), new BigDecimal("41.0"),
+                    DailyRecord::getManualTopHighTurnoverPct, (r, v) -> r.setManualTopHighTurnoverPct((BigDecimal) v)),
+            new Column("manualFirstPremiumPct", new BigDecimal("3.3"), new BigDecimal("-1.1"),
+                    DailyRecord::getManualFirstPremiumPct, (r, v) -> r.setManualFirstPremiumPct((BigDecimal) v)),
+            new Column("manualFirstSealedRate", new BigDecimal("61.0"), new BigDecimal("85.0"),
+                    DailyRecord::getManualFirstSealedRate, (r, v) -> r.setManualFirstSealedRate((BigDecimal) v)),
+            // sent = 0：0 是「判过了，答案是没断板」，是一个真读数不是缺省，必须原样落库。
+            new Column("manualTopHighBreak", 1, 0,
+                    DailyRecord::getManualTopHighBreak, (r, v) -> r.setManualTopHighBreak((Integer) v)),
+            new Column("manualAnchorSupervisionDiscount", new BigDecimal("1.00"), new BigDecimal("0.80"),
+                    DailyRecord::getManualAnchorSupervisionDiscount,
+                    (r, v) -> r.setManualAnchorSupervisionDiscount((BigDecimal) v)),
     };
 
     private static final ObjectMapper JSON = new ObjectMapper()
@@ -95,7 +117,7 @@ class DailyRecordFieldsTest {
         return r;
     }
 
-    /** 一份只发了行情读数的 body：这十二格一个都没发。 */
+    /** 一份只发了行情读数的 body：这二十一格一个都没发。 */
     private static Map<String, Object> unrelatedBody() {
         Map<String, Object> body = new HashMap<>();
         body.put("limitUpCount", 44);

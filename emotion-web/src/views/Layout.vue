@@ -30,6 +30,10 @@
           <el-icon><Calendar /></el-icon>
           <span>历史回看</span>
         </el-menu-item>
+        <el-menu-item index="/scoring">
+          <el-icon><SetUp /></el-icon>
+          <span>打分配置</span>
+        </el-menu-item>
       </el-menu>
       <div class="sidebar-footer">
         <span class="user-name">{{ userStore.nickname || userStore.username }}</span>
@@ -43,15 +47,20 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
+import { useScoringStore } from '../stores/scoring'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const scoringStore = useScoringStore()
 
 const activeMenu = computed(() => route.path)
+
+// 生效打分模型的维度/权重：进外壳就拉一次，供仪表盘卡片与复盘页用（读不到则退回本地兜底常量）。
+onMounted(() => scoringStore.load())
 
 function handleLogout() {
   userStore.logout()

@@ -1,6 +1,6 @@
 <template>
   <div class="indicator-cards">
-    <div class="card" v-for="item in indicators" :key="item.key">
+    <div class="card" v-for="c in cards" :key="c.key">
       <el-tooltip
         placement="bottom"
         :show-after="150"
@@ -8,31 +8,62 @@
       >
         <template #content>
           <div class="tip">
-            <div class="tip-score">{{ item.scoreLine }}</div>
-            <template v-if="item.lines || item.note">
-              <div class="tip-title">{{ item.tipTitle }}</div>
-              <div v-for="(line, i) in item.lines" :key="i" class="tip-line">
-                <span class="tip-main">{{ line.main }}</span>
-                <span class="tip-sub">{{ line.sub }}</span>
+            <div class="tip-head">
+              <span class="tip-title">第 {{ c.dimNo }} 维 · {{ c.label }}</span>
+              <span class="tip-weight">×{{ fmt(c.weight) }}</span>
+            </div>
+            <div class="tip-score" :class="c.bandClass">
+              {{ c.score == null ? '未评（不计入加权）' : c.scoreText + ' 分 · ' + c.bandName }}
+            </div>
+            <div v-if="c.note" class="tip-note">{{ c.note }}</div>
+
+            <template v-if="c.subs.length">
+              <div class="tip-divider"></div>
+              <div v-for="(s, i) in c.subs" :key="i" class="tip-row">
+                <div class="tip-row-main">
+                  <span class="tip-sub-label">{{ s.label }}</span>
+                  <span class="tip-sub-weight">×{{ fmt(s.weight) }}</span>
+                  <span class="tip-sub-score" :class="{ unscored: s.score == null }">
+                    {{ s.score == null ? '未评' : fmt(s.score) }}
+                  </span>
+                </div>
+                <div v-if="s.detail" class="tip-sub-detail">{{ s.detail }}</div>
+                <div v-for="(l, j) in s.layers" :key="'l' + j" class="tip-sub-layer">
+                  └ {{ l.label }} · {{ l.score == null ? '未评' : fmt(l.score) }}
+                  <span v-if="l.raw != null" class="tip-sub-layer-raw">
+                    （raw={{ fmt(l.raw) }}{{ l.bandHit ? ' · ' + l.bandHit : '' }}）
+                  </span>
+                </div>
               </div>
-              <div v-if="item.note" class="tip-note">{{ item.note }}</div>
             </template>
+            <div v-else-if="scoring.detailLoading" class="tip-empty">子分读数加载中…</div>
+            <div v-else-if="c.hasEval" class="tip-empty">这一维没有子层：整维就一个分</div>
+            <div v-else-if="c.fromRecord" class="tip-empty">
+              子分读数未取到（只显示已落库的维分）
+            </div>
+            <div v-else class="tip-empty">
+              子分读数未取到，且这天还没有落库记录
+            </div>
+
+            <div v-if="c.notes && c.notes.length" class="tip-notes">
+              <div v-for="(n, i) in c.notes" :key="'n' + i">{{ n }}</div>
+            </div>
           </div>
         </template>
+
         <div class="card-inner hoverable">
-          <div class="card-label">{{ item.label }}</div>
-          <div class="card-value">{{ item.value }}</div>
-          <div class="card-trend" :class="item.trend">
-            <span v-if="item.trend === 'up'">↑</span>
-            <span v-else-if="item.trend === 'down'">↓</span>
-            <span v-else-if="item.unscored" class="unscored">未评</span>
+          <div class="card-head">
+            <span class="card-label">{{ c.dimNo }} · {{ c.label }}</span>
+            <span class="card-weight">×{{ fmt(c.weight) }}</span>
           </div>
-          <div class="card-score">
-            <span v-if="item.score < 0" class="minus">{{ item.score }}</span>
-            <template v-else>
-              <span v-for="n in 3" :key="n" class="dot" :class="{ active: n <= item.score }"></span>
-            </template>
+          <div class="card-value" :class="{ unscored: c.score == null }">
+            {{ c.score == null ? '未评' : fmt(c.score) }}
           </div>
+          <div class="card-bar">
+            <div class="card-bar-fill" :class="c.bandClass" :style="{ width: c.barWidth }"></div>
+          </div>
+          <div class="card-band" :class="c.bandClass">{{ c.bandName }}</div>
+          <div v-if="c.forcedEbb" class="card-forced">强制退潮</div>
         </div>
       </el-tooltip>
     </div>
@@ -41,392 +72,274 @@
 
 <script setup>
 import { computed } from 'vue'
-import { CARD_ORDER, survivalBandOf, signed, dimScoreLine } from '../utils/scores'
+import { fiveDimBandOf, fiveDimBandClassOf } from '../utils/scores'
+import { useScoringStore } from '../stores/scoring'
 
 const props = defineProps({
-  record: { type: Object, default: null },
-  /** 该交易日的盘面明细（/api/market/stocks），没回补过就是 null */
-  details: { type: Object, default: null },
-  /** 该交易日的逐档溢价（/api/market/premium-tiers），没回补过就是 null */
-  tiers: { type: Object, default: null },
-  /** 该交易日的阵眼（/api/anchors），卡片只借它的当日涨跌 */
-  anchor: { type: Object, default: null }
+  /** 当日 t_daily_record（含 score_market/score_theme_main/…、forced_ebb、signal_flags） */
+  record: { type: Object, default: null }
 })
 
-/** 名单超过这么长就截断：tooltip 是给人扫一眼的，不是给人翻页的。 */
-const MAX_LINES = 15
-
 /**
- * 卡面标题只有这一份（带单位，是给这一屏看的短名）；<b>顺序不在这里</b>，
- * 那份在 {@code utils/scores} 的 CARD_ORDER，复盘页九维用的是同一个数组。
- * tooltip 首行那个「第 N 维」才是引擎维序——它是这张卡和复盘页同一行对得上的编号，
- * 所以扫过去编号会跳（6、3、1、2…），那是刻意的。
+ * 五维卡：卡主体只印"这一维 0-100 分 + 落哪条带"，子层树全在 tooltip。
+ *
+ * 分数来源：优先 {@code scoring.detail}（每卡现算，改一 sub 权重立刻反映），
+ * 拉不到（loading / 后端不可达 / 该日还没录行情）时退回 `record.score_*`——
+ * 那是上一次 recalc 落库的值，与表可能漂移，tooltip 明写"未取到"提醒。
+ * 单位一律 0-100 分；未评（null）绝不兜 0，剔出分母是引擎的口径。
  */
-const CARD_LABELS = {
-  volume: '成交额(亿)',
-  breadth: '涨停/跌停',
-  height: '连板高度',
-  premium: '分档溢价',
-  surv: '异动监管',
-  theme: '主线明确度',
-  anchor: '阵眼当日',
-  loss: '大面数',
-  broken: '炸板率'
-}
-const CARDS = CARD_ORDER.map((key) => ({ key, label: CARD_LABELS[key] }))
+const scoring = useScoringStore()
 
-function stockNames(list, limit = MAX_LINES) {
-  const shown = list.slice(0, limit).map((s) => s.name)
-  return { text: shown.join('、'), hidden: list.length - shown.length }
+const FIVE_TO_RECORD = {
+  market: 'scoreMarket',
+  theme_main: 'scoreThemeMain',
+  board: 'scoreBoard',
+  first: 'scoreFirst',
+  anchor: 'scoreAnchor'
 }
 
-function ladderLines(ladder, firstBoardCount) {
-  const lines = ladder.map((tier) => ({
-    main: `${tier.board} 板 · ${tier.stocks.length} 家`,
-    sub: stockNames(tier.stocks, 8).text
-  }))
-  if (firstBoardCount) {
-    lines.push({ main: `首板 · ${firstBoardCount} 家`, sub: '' })
-  }
-  return lines
+function fmt(v) {
+  if (v == null) return '—'
+  const n = Number(v)
+  if (Number.isNaN(n)) return '—'
+  return (Math.round(n * 100) / 100).toString()
 }
 
-function detailTips(details) {
-  if (!details || !details.available) return {}
-  const tips = {}
-
-  if (details.ladder?.length) {
-    const hidden = details.ladder.reduce(
-      (acc, tier) => acc + Math.max(0, tier.stocks.length - 8), 0)
-    tips.height = {
-      title: '连板梯队',
-      lines: ladderLines(details.ladder, details.firstBoardCount),
-      note: details.gapBoards?.length
-        ? `${details.gapBoards.join('、')} 板断档，最高板是独苗` + (hidden ? `；另有 ${hidden} 只未列出` : '')
-        : (hidden ? `另有 ${hidden} 只未列出` : '')
-    }
+/** 一 sub 的 tooltip 行：叶 → raw + 命中档；复合 → 层清单。 */
+function flattenSub(s) {
+  const row = {
+    label: s.label || s.key,
+    weight: s.weight,
+    score: s.score,
+    detail: '',
+    layers: []
   }
-
-  if (details.limitDown?.length) {
-    const list = details.limitDown
-    const hidden = list.length - Math.min(list.length, MAX_LINES)
-    tips.breadth = {
-      title: `跌停 ${list.length} 家`,
-      lines: list.slice(0, MAX_LINES).map((s) => ({
-        main: s.name, sub: `${s.pct}%${s.industry ? ' · ' + s.industry : ''}`
-      })),
-      note: hidden > 0 ? `另有 ${hidden} 家未列出` : ''
-    }
+  const kids = Array.isArray(s.children) ? s.children : []
+  if (kids.length) {
+    // 复合子（LAYER_WEIGHTED_BAND / WEIGHTED_SUM）：把每个层单独摆一行
+    row.layers = kids.map((k) => ({
+      label: k.label || k.key,
+      score: k.score,
+      raw: k.raw,
+      bandHit: k.bandHit
+    }))
+    if (s.scoringKind === 'WEIGHTED_SUM') row.detail = '加权子分（非四层）'
+  } else {
+    // 叶：BAND_LADDER / MANUAL / STRATEGY
+    const parts = []
+    if (s.raw != null) parts.push(`raw=${fmt(s.raw)}`)
+    if (s.bandHit) parts.push(s.bandHit)
+    if (s.scoringKind === 'STRATEGY') parts.push('策略计算')
+    if (s.scoringKind === 'MANUAL' && s.score == null) parts.push('人工未评')
+    row.detail = parts.join(' · ')
   }
-
-  if (details.bigLoss?.length) {
-    const list = details.bigLoss
-    const hidden = list.length - Math.min(list.length, MAX_LINES)
-    tips.loss = {
-      title: `大面 ${list.length} 家（自涨停回撤 >7% 且收盘绿盘）`,
-      lines: list.slice(0, MAX_LINES).map((s) => ({
-        main: s.name, sub: `回撤 ${s.pullback}%${s.industry ? ' · ' + s.industry : ''}`
-      })),
-      note: hidden > 0 ? `另有 ${hidden} 只未列出` : ''
-    }
-  }
-  return tips
+  return row
 }
 
-/**
- * 溢价卡：逐档 2..8+ 是展示粒度，进分只看低/中/高三组。
- * 断档那一组要写出来——"高位没人"本身就是信号，藏起来等于把断层说成没数据。
- */
-function premiumTip(tiers, r) {
-  if (!tiers || !tiers.available) return {}
-  // 三组的边界是活的（按前一天最高板的一半定），所以逐档那几行要顺手标出它落在哪一组
-  const shortGroup = {}
-  for (const g of tiers.groups || []) shortGroup[g.group] = (g.label || '').split('(')[0]
-  // 数组顺序（逐档从高到低、三组高位在前）由后端排好，这里不再排一次
-  const lines = (tiers.tiers || []).map((t) => ({
-    main: `${t.label} 板`,
-    sub: `${signed(t.avgPct)}% · ${t.matched}/${t.stockCount} 只${shortGroup[t.group] ? ` · ${shortGroup[t.group]}` : ''}`
-  }))
-  for (const g of tiers.groups || []) {
-    lines.push({
-      main: g.label,
-      sub: g.score == null
-        ? '断档 · 权重摊给其余档'
-        : `${signed(g.avgPct)}% → ${g.score} 分 ×${g.weight}`
-    })
-  }
-  const first = r?.yesterdayLimitPremium
-  return {
-    premium: {
-      title: `昨日涨停池（${tiers.prevTradeDate || '前一日'}）· 首板 ${tiers.firstBoard ?? 0} 只不计`,
-      lines,
-      note: [
-        tiers.binNote,
-        `三组加权合成 ${signed(tiers.weightedPct)}% 进分${first == null ? '' : `；含首板整体 ${signed(first)}% 只展示不打分`}`,
-        `结构：${tiers.structure || '—'}`
-      ].filter(Boolean).join('；')
-    }
-  }
-}
-
-/**
- * 炸板率卡。第 4 维现在是三个子项取平均，卡片上那一个百分数解释不了另外两支，
- * 所以三个率各摆一行、子分怎么来的读后端落库的那条算式。
- * 家数两个率没回补过盘面明细就是 null——那是"没取到"，不是"封板率 0%"。
- */
-function brokenTip(r) {
-  if (!r) return {}
-  const { brokenBoardRate: rate, sealedHomeRate: sealed, resealRate: reseal } = r
-  if (rate == null && sealed == null && reseal == null) return {}
-  const text = (v) => (v == null ? '盘面明细未取到' : `${v}%`)
-  return {
-    broken: {
-      title: '第 4 维 · 三分支各出分再平均',
-      lines: [
-        { main: '炸板率(次数)', sub: text(rate) },
-        { main: '家数封板率', sub: text(sealed) },
-        { main: '回封率', sub: text(reseal) }
-      ],
-      note: [
-        r.brokenNote,
-        '炸板率数的是打开次数（一只票炸三次算三次），100% 减它不等于家数封板率'
-      ].filter(Boolean).join('；')
-    }
-  }
-}
-
-/** 阵眼卡：值用当日涨跌，判据用后端存下来的那条中文串。 */
-function anchorTip(anchor, r) {
-  const items = anchor?.items || []
-  if (!items.length) {
-    return { anchor: { title: '周期阵眼', lines: null, note: r?.anchorNote || anchor?.note || '' } }
-  }
-  return {
-    anchor: {
-      title: `在位 ${items.length} 只 · 第 8 维取最差`,
-      lines: items.map((it) => ({
-        main: it.name,
-        sub: `${signed(it.pct)}% · ${it.score == null ? '未评' : it.score + ' 分'}`
-      })),
-      note: r?.anchorNote || ''
-    }
-  }
-}
-
-function survTip(r) {
-  return { surv: { title: '异动监管 · 今日进分溢价', lines: null, note: r?.survNote || '' } }
-}
-
-function themeTip(r) {
-  const labels = {
-    3: '有清晰主线 + 龙头',
-    2: '有主线但龙头不明确',
-    1: '有热点无主线',
-    0: '无主线',
-    '-1': '热点散乱',
-    '-2': '无明显热点',
-    '-3': '全面退潮'
-  }
-  const parts = []
-  if (r?.mainTheme) parts.push(`主线：${r.mainTheme}`)
-  if (r?.scoreTheme != null) parts.push(labels[r.scoreTheme] || '')
-  return {
-    theme: {
-      title: '第 7 维 · 人工判断',
-      lines: null,
-      note: parts.filter(Boolean).join('；') || '未评'
-    }
-  }
-}
-
-/** 多只在位时和后端同一套：分低的那只说话，分一样看谁跌得深。 */
-function worstAnchor(items) {
-  let worst = null
-  for (const it of items) {
-    if (it.pct == null) continue
-    if (!worst || Number(it.pct) < Number(worst.pct)) worst = it
-  }
-  return worst
-}
-
-const indicators = computed(() => {
+const cards = computed(() => {
   const r = props.record
-  const tips = {
-    ...detailTips(props.details),
-    ...premiumTip(props.tiers, r),
-    ...brokenTip(r),
-    ...anchorTip(props.anchor, r),
-    ...survTip(r),
-    ...themeTip(r)
-  }
-  const card = (key, extra) => ({
-    key, label: CARD_LABELS[key], trend: '', score: 0, unscored: false, raw: null,
-    tipTitle: tips[key]?.title, lines: tips[key]?.lines, note: tips[key]?.note,
-    ...extra
+  const dims = scoring.detail?.dims
+  const dimMap = {}
+  if (Array.isArray(dims)) for (const d of dims) dimMap[d.key] = d
+  const forced = scoring.detail?.forcedEbb === true || r?.forcedEbb === 1
+  const globalNotes = Array.isArray(scoring.detail?.notes) ? scoring.detail.notes : []
+  return scoring.fiveDimCardOrder.map((key) => {
+    const meta = scoring.fiveDimDims.find((d) => d.dimKey === key) || {}
+    const evalNode = dimMap[key] || null
+    const fromRecord = !evalNode && r
+    const rawScore = evalNode ? evalNode.score
+      : (r ? r[FIVE_TO_RECORD[key]] : null)
+    const band = fiveDimBandOf(rawScore)
+    const subs = evalNode && Array.isArray(evalNode.children)
+      ? evalNode.children.map(flattenSub) : []
+    // 只把和这一维相关的 note 挂上（简化：全量挂，反正 tooltip 空间够）
+    return {
+      key,
+      dimNo: evalNode?.dimNo ?? meta.dimNo ?? meta.dim,
+      label: evalNode?.label ?? meta.label ?? key,
+      weight: evalNode?.weight ?? meta.weight,
+      score: rawScore,
+      scoreText: rawScore == null ? '未评' : fmt(rawScore),
+      bandName: band || '—',
+      bandClass: fiveDimBandClassOf(rawScore),
+      barWidth: rawScore == null ? '0%' : `${Math.max(0, Math.min(100, Number(rawScore)))}%`,
+      note: evalNode?.note || (fromRecord ? 'score-detail 未取到，显示的是落库的维分' : ''),
+      subs,
+      notes: globalNotes,
+      fromRecord: !!fromRecord,
+      hasEval: !!evalNode,
+      forcedEbb: forced
+    }
   })
-  const withScoreLine = (item) => ({ ...item, scoreLine: dimScoreLine(item.key, item.raw) })
-
-  if (!r) {
-    return CARDS.map((c) => card(c.key, { value: '--' })).map(withScoreLine)
-  }
-
-  const scored = (value) => ({ score: value ?? 0, unscored: value == null, raw: value ?? null })
-  const sign = (v) => (Number(v) > 0 ? 'up' : Number(v) < 0 ? 'down' : '')
-  const anchorItem = worstAnchor(props.anchor?.items || [])
-  // 第 9 维的分没有单独入库（它由 surv_premium 现算），走接力那套五档，不是溢价七档
-  const survScore = r.survCount > 0 ? survivalBandOf(r.survPremium) : null
-
-  // 出卡顺序由 CARDS 排，这里只写每一维的读数
-  const byKey = {
-    height: card('height', {
-      value: r.maxConsecutiveLimit ?? '--', ...scored(r.scoreHeight)
-    }),
-    premium: card('premium', {
-      value: r.premiumWeighted != null ? `${r.premiumWeighted}%`
-        : (r.yesterdayLimitPremium != null ? `${r.yesterdayLimitPremium}%` : '--'),
-      trend: sign(r.premiumWeighted ?? r.yesterdayLimitPremium),
-      ...scored(r.scorePremium)
-    }),
-    breadth: card('breadth', {
-      value: `${r.limitUpCount ?? 0} / ${r.limitDownCount ?? 0}`, ...scored(r.scoreBreadth)
-    }),
-    broken: card('broken', {
-      value: r.brokenBoardRate != null ? `${r.brokenBoardRate}%` : '--',
-      trend: Number(r.brokenBoardRate) < 30 ? 'up' : Number(r.brokenBoardRate) > 50 ? 'down' : '',
-      ...scored(r.scoreBroken)
-    }),
-    loss: card('loss', {
-      value: r.bigLossCount ?? '--',
-      trend: (r.bigLossCount ?? 0) <= 1 ? 'up' : (r.bigLossCount ?? 0) > 4 ? 'down' : '',
-      ...scored(r.scoreLoss)
-    }),
-    volume: card('volume', {
-      value: r.totalVolume ?? '--', ...scored(r.scoreVolume)
-    }),
-    theme: card('theme', {
-      value: r.scoreTheme != null ? r.scoreTheme : '--',
-      ...scored(r.scoreTheme)
-    }),
-    anchor: card('anchor', {
-      value: anchorItem ? `${signed(anchorItem.pct)}%` : (r.anchorScore == null ? '未设' : '无行情'),
-      trend: sign(anchorItem?.pct),
-      ...scored(r.anchorScore)
-    }),
-    surv: card('surv', {
-      value: r.survPremium != null ? `${r.survPremium}%`
-        : (r.survCount === 0 ? '无在列' : '--'),
-      trend: r.survCount > 0 ? sign(r.survPremium) : '',
-      ...scored(survScore)
-    })
-  }
-  return CARDS.map((c) => withScoreLine(byKey[c.key]))
 })
 </script>
 
 <style scoped>
 .indicator-cards {
   display: grid;
-  /* 9 个 1fr 在窄容器下每格只剩几 px，用 auto-fit 兜住最小可读宽度 */
-  grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr));
+  /* 5 张卡：minmax 保证窄容器下也不会挤成一列一字 */
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   gap: 12px;
   margin-bottom: 20px;
 }
 .card {
   background: #1a2332;
   border-radius: 10px;
-  padding: 16px;
-  text-align: center;
-}
-.card-inner {
-  text-align: center;
+  padding: 14px 16px;
+  position: relative;
 }
 .card-inner.hoverable {
   cursor: default;
 }
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
 .card-label {
   font-size: 12px;
   color: #8899a6;
-  margin-bottom: 8px;
+}
+.card-weight {
+  font-size: 11px;
+  color: #5b6c7d;
 }
 .card-value {
-  font-size: 22px;
+  font-size: 26px;
   font-weight: 700;
   color: #e1e8ed;
-  margin-bottom: 6px;
-  /* 长数字（20306.68）和"无在列"这种三字文案都不许把卡片撑开 */
-  overflow-wrap: anywhere;
+  line-height: 30px;
 }
-.card-trend {
-  font-size: 16px;
-  line-height: 16px;
-  margin-bottom: 8px;
+.card-value.unscored {
+  font-size: 18px;
+  color: #8899a6;
+  font-weight: 500;
 }
-.card-trend.up { color: #ef4444; }
-.card-trend.down { color: #3b82f6; }
-.unscored {
+.card-bar {
+  margin: 8px 0 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: #223041;
+  overflow: hidden;
+}
+.card-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.card-band {
   font-size: 11px;
   color: #8899a6;
-  border: 1px solid #2d3748;
-  border-radius: 4px;
-  padding: 1px 4px;
+  text-align: left;
 }
-.card-score {
-  display: flex;
-  justify-content: center;
-  gap: 4px;
+.card-forced {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: #fecaca;
+  background: #7f1d1d;
+  border: 1px solid #b91c1c;
+  letter-spacing: 0.5px;
 }
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #2d3748;
-}
-.dot.active {
-  background: #f59e0b;
-}
-/* 负分：三颗空心和 0 分撞脸，只能另给一个标记。蓝色沿用全站"跌/坏"那一侧。 */
-.minus {
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 14px;
-  padding: 0 6px;
-  color: #60a5fa;
-  border: 1px solid #1e40af;
-  border-radius: 4px;
-}
+
+/* 4 带色：与 Dashboard 页头温度色一致（灰 / 蓝 / 橙 / 红） */
+.b-none { background: #2d3748; }
+.b-ebb { color: #94a3b8; }
+.card-bar-fill.b-ebb { background: #64748b; }
+.b-chaos { color: #60a5fa; }
+.card-bar-fill.b-chaos { background: #3b82f6; }
+.b-ferment { color: #fbbf24; }
+.card-bar-fill.b-ferment { background: #f59e0b; }
+.b-climax { color: #f87171; }
+.card-bar-fill.b-climax { background: #ef4444; }
 </style>
 
 <style>
-/* popper 挂在 body 下，scoped 选择器到不了，所以这段故意不加 scoped */
+/* popper 挂在 body 下，scoped 到不了 */
 .card-tip {
-  max-width: 340px;
+  max-width: 400px;
+}
+.card-tip .tip-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.card-tip .tip-weight {
+  color: #8899a6;
+  font-weight: 400;
 }
 .card-tip .tip-score {
   font-weight: 700;
-  /* 和卡片上那颗进分点同色：一眼对得上"这就是这一维的那几分" */
-  color: #f59e0b;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
-.card-tip .tip-title {
-  font-weight: 700;
-  margin-bottom: 6px;
+.card-tip .tip-score.b-ebb { color: #94a3b8; }
+.card-tip .tip-score.b-chaos { color: #60a5fa; }
+.card-tip .tip-score.b-ferment { color: #fbbf24; }
+.card-tip .tip-score.b-climax { color: #f87171; }
+.card-tip .tip-note {
+  color: #d97706;
+  font-size: 12px;
+  margin-bottom: 4px;
 }
-.card-tip .tip-line {
+.card-tip .tip-divider {
+  border-top: 1px solid #2d3748;
+  margin: 6px 0;
+}
+.card-tip .tip-row {
+  line-height: 1.55;
+  margin-bottom: 4px;
+}
+.card-tip .tip-row-main {
   display: flex;
   gap: 8px;
-  line-height: 1.6;
+  align-items: baseline;
 }
-.card-tip .tip-main {
-  flex: 0 0 auto;
-  min-width: 74px;
-  text-align: left;
+.card-tip .tip-sub-label {
+  flex: 1 1 auto;
 }
-.card-tip .tip-sub {
+.card-tip .tip-sub-weight {
+  color: #5b6c7d;
+  font-size: 11px;
+}
+.card-tip .tip-sub-score {
+  color: #f59e0b;
+  font-weight: 700;
+  min-width: 42px;
+  text-align: right;
+}
+.card-tip .tip-sub-score.unscored {
   color: #8899a6;
-  text-align: left;
+  font-weight: 400;
 }
-.card-tip .tip-note {
+.card-tip .tip-sub-detail {
+  color: #8899a6;
+  font-size: 12px;
+  padding-left: 8px;
+}
+.card-tip .tip-sub-layer {
+  color: #a8b7c4;
+  font-size: 12px;
+  padding-left: 12px;
+}
+.card-tip .tip-sub-layer-raw {
+  color: #7d8d9d;
+}
+.card-tip .tip-empty {
+  color: #8899a6;
+  font-style: italic;
+  margin-top: 4px;
+}
+.card-tip .tip-notes {
   margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #2d3748;
   color: #d97706;
+  font-size: 12px;
 }
 </style>

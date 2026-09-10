@@ -4,7 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.emotion.dto.DailyRecordRequest;
 import com.emotion.entity.DailyRecord;
 import com.emotion.mapper.DailyRecordMapper;
+import com.emotion.util.BoardScoreCalculator;
 import com.emotion.util.CycleStageMachine;
+import com.emotion.util.ScoreInputs;
+import com.emotion.vo.ScoreDetailVO;
+import com.emotion.util.ScoringTree;
 import com.emotion.util.TemperatureCalculator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,6 +16,7 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
@@ -161,7 +166,8 @@ public class DailyRecordService {
             beforeSeq[i] = all.get(i).getStageSeq();
             beforePhase[i] = all.get(i).getStagePhase();
         }
-        CycleStageMachine.assign(all);
+        // 7-stage CycleStageMachine 已下线（五维 4 带不再需要 "反弹/一阶段/二阶段" 的回合段号）。
+        // 保留 resequence 链路以便 Stage 7 接入新的带变化段号；现在它是 no-op。
         int changed = 0;
         for (int i = 0; i < all.size(); i++) {
             DailyRecord row = all.get(i);
@@ -179,34 +185,111 @@ public class DailyRecordService {
     }
 
     private void scoreAndPlace(Long userId, LocalDate date, DailyRecord record) {
+        // LIMIT 20 covers both the old 5-record window and the new 20-day turnover baseline.
+        // LadderMetricsService reuses this list from ScoreContextService internally; keeping 20 here is harmless
+        // for the legacy path (only reads the most recent).
         List<DailyRecord> recent = dailyRecordMapper.selectList(
                 new LambdaQueryWrapper<DailyRecord>()
                         .eq(DailyRecord::getUserId, userId)
                         .lt(DailyRecord::getTradeDate, date)
                         .orderByDesc(DailyRecord::getTradeDate)
-                        .last("LIMIT 5"));
+                        .last("LIMIT 20"));
 
-        // 溢价维吃公开档位表，不是请求里带的那个含首板标量；阵眼与监管名单同理——谁存那天都该得到同一个分。
-        // 唯一的例外是 record 自己那八列 manual_*：公开读数负责默认值，他手改的那一格才是这一天的结论。
-        TemperatureCalculator.calculate(record, recent, scoreContext.forDate(userId, date, record));
+        // 公开读数一次性装配：档位溢价 / 盘面三池 / 阵眼 / 监管 / 五维 metrics；人工 manual_* 叠在最后。
+        ScoreInputs in = scoreContext.forDate(userId, date, record);
+
+        // 1) 旧 9 维引擎：仍写 score_height…theme / anchor_score / surv_* / sealed_home_rate 等展示列，
+        //    以及临时的 total_score/temperature。Stage 7 前保留，之后随前端一起下线。
+        TemperatureCalculator.calculate(record, recent, in);
 
         if (!recent.isEmpty()) {
             record.setPrevTemperature(recent.get(0).getTemperature());
         }
 
-        double temp = record.getTemperature() == null ? 0 : record.getTemperature().doubleValue();
-        Double prev = record.getPrevTemperature() == null ? null : record.getPrevTemperature().doubleValue();
-        // 缺维守卫：未评的维度已整维剔出分母，评不了几维的日子算出的读数只是残值的自我确认，
-        // 这时候给阶段等于给操作建议，比不给更危险。
-        int dims = record.getScoredDims() == null ? 0 : record.getScoredDims();
-        if (dims < TemperatureCalculator.MIN_DIMS_FOR_STAGE) {
-            record.setStage("");
+        // 2) 五维引擎：覆写 total_score / temperature / stage / scored_dims，并写入新增的
+        //    score_market…anchor + signal_flags + forced_ebb。也就是说温度计读数的权威口径已切到五维。
+        applyFiveDimScore(record, in);
+    }
+
+    /**
+     * 五维双层引擎：{@link ScoreContextService} 装配好的树 + metrics 交给 {@link BoardScoreCalculator} 纯函数求值，
+     * 然后把 5 维分/总分/温度/信号/强制退潮/阶段带写回 record。旧 9 维展示列（score_height…theme、
+     * anchor/surv/sealed_home…）不删，仍留着上一轮的值作历史留痕；只是不再参与总分。
+     *
+     * <p>prev_temperature 直接沿用 {@link #scoreAndPlace} 安排的上一条写入（已是五维口径），方向判定才不会拿
+     * 旧 9 维温度对新 5 维温度。
+     */
+    static void applyFiveDimScore(DailyRecord record, ScoreInputs in) {
+        ScoringTree tree = in.getScoringTree() != null ? in.getScoringTree() : BoardScoreCalculator.builtinTree();
+        BoardScoreCalculator.Result r = BoardScoreCalculator.evaluate(tree, in.getMetrics());
+
+        record.setScoreMarket(r.getDimScores().get("market"));
+        record.setScoreThemeMain(r.getDimScores().get("theme_main"));
+        record.setScoreBoard(r.getDimScores().get("board"));
+        record.setScoreFirst(r.getDimScores().get("first"));
+        record.setScoreAnchor(r.getDimScores().get("anchor"));
+        record.setSignalFlags(r.getSignalFlags().isEmpty() ? null : String.join(",", r.getSignalFlags()));
+        record.setForcedEbb(r.isForcedEbb() ? 1 : 0);
+        record.setForcedEbbReason(r.getForcedEbbReason());
+
+        BigDecimal total = r.getTotal();
+        record.setScoredDims(r.getDimScores().size());
+        record.setTotalScore(total == null ? null : total.setScale(0, RoundingMode.HALF_UP).intValue());
+        record.setTemperature(total);
+
+        // stage 仍然落 4 带（高潮/发酵/混沌/退潮）或 "退潮(强制)"；无 total 时空串，不给阶段。
+        String stage = r.getStage();
+        record.setStage(stage == null ? "" : stage);
+
+        // 方向：与 prev_temperature 相比。>= +3 上升、<= -3 下降、其他横盘；无可比则空串。
+        BigDecimal prev = record.getPrevTemperature();
+        if (total == null || prev == null) {
             record.setStageDirection("");
         } else {
-            record.setStage(TemperatureCalculator.determineStage(temp, prev));
-            record.setStageDirection(TemperatureCalculator.determineDirection(temp, prev));
+            BigDecimal delta = total.subtract(prev);
+            if (delta.compareTo(new BigDecimal("3")) >= 0) {
+                record.setStageDirection("上升");
+            } else if (delta.compareTo(new BigDecimal("-3")) <= 0) {
+                record.setStageDirection("下降");
+            } else {
+                record.setStageDirection("横盘");
+            }
         }
     }
+
+    /**
+     * Stage 9 只读端点：给定日期现装 metrics + tree 走一遍引擎，返回整棵 eval 树 + 结构信号 + 原始读数快照。
+     * 不写库；改一 sub 权重或一 ladder 阈值后刷新即可反映（真数据驱动）。
+     */
+    public ScoreDetailVO scoreDetail(Long userId, LocalDate date) {
+        DailyRecord record = getByDate(userId, date);
+        DailyRecord base = record != null ? record : blank(userId, date);
+        ScoreInputs in = scoreContext.forDate(userId, date, base);
+        ScoringTree tree = in.getScoringTree();
+        boolean fromDb = tree != null;
+        if (tree == null) {
+            tree = BoardScoreCalculator.builtinTree();
+        }
+        BoardScoreCalculator.Result r = BoardScoreCalculator.evaluate(tree, in.getMetrics());
+
+        ScoreDetailVO vo = new ScoreDetailVO();
+        vo.setTradeDate(date);
+        vo.setModelKey(tree.getModelKey());
+        vo.setDims(r.getDimEvals());
+        vo.setTotal(r.getTotal());
+        vo.setSignalFlags(r.getSignalFlags());
+        vo.setForcedEbb(r.isForcedEbb());
+        vo.setForcedEbbReason(r.getForcedEbbReason());
+        vo.setSource(fromDb ? "DB" : "BUILTIN");
+        if (in.getMetrics() != null) {
+            vo.setMetrics(new java.util.LinkedHashMap<>(in.getMetrics()));
+        }
+        if (in.getMetricNotes() != null) {
+            vo.setNotes(new java.util.ArrayList<>(in.getMetricNotes().values()));
+        }
+        return vo;
+    }
+
 
     public DailyRecord getToday(Long userId) {
         return dailyRecordMapper.selectOne(
@@ -277,6 +360,15 @@ public class DailyRecordService {
         if (present.contains("manualAnchorScore")) record.setManualAnchorScore(req.getManualAnchorScore());
         if (present.contains("manualSurvCount")) record.setManualSurvCount(req.getManualSurvCount());
         if (present.contains("manualSurvPremium")) record.setManualSurvPremium(req.getManualSurvPremium());
+        if (present.contains("manualSectorLimitUpCount")) record.setManualSectorLimitUpCount(req.getManualSectorLimitUpCount());
+        if (present.contains("manualLadderCompleteScore")) record.setManualLadderCompleteScore(req.getManualLadderCompleteScore());
+        if (present.contains("manualSectorPremiumPct")) record.setManualSectorPremiumPct(req.getManualSectorPremiumPct());
+        if (present.contains("manualThemePersistenceDays")) record.setManualThemePersistenceDays(req.getManualThemePersistenceDays());
+        if (present.contains("manualTopHighTurnoverPct")) record.setManualTopHighTurnoverPct(req.getManualTopHighTurnoverPct());
+        if (present.contains("manualFirstPremiumPct")) record.setManualFirstPremiumPct(req.getManualFirstPremiumPct());
+        if (present.contains("manualFirstSealedRate")) record.setManualFirstSealedRate(req.getManualFirstSealedRate());
+        if (present.contains("manualTopHighBreak")) record.setManualTopHighBreak(req.getManualTopHighBreak());
+        if (present.contains("manualAnchorSupervisionDiscount")) record.setManualAnchorSupervisionDiscount(req.getManualAnchorSupervisionDiscount());
 
         if (req.getMainTheme() != null) record.setMainTheme(req.getMainTheme());
         if (req.getLeadingStock() != null) record.setLeadingStock(req.getLeadingStock());

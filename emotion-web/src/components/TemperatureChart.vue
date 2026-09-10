@@ -99,12 +99,11 @@ function buildOption() {
           symbol: 'none',
           lineStyle: { type: 'dashed', color: '#2d3748' },
           data: [
-            // 标签写的是"跨过这条线就进入哪个阶段"，与 determineStage 的下界一一对应。
-            // 之前整体少写一档（把 55 叫启动）会让人按错的线判退潮。
-            { yAxis: 15, label: { formatter: '冰点 15', color: '#3b82f6', position: 'insideEndTop', fontSize: 10 } },
-            { yAxis: 35, label: { formatter: '启动 35', color: '#2d8a4e', position: 'insideEndTop', fontSize: 10 } },
-            { yAxis: 55, label: { formatter: '发酵 55', color: '#d97706', position: 'insideEndTop', fontSize: 10 } },
-            { yAxis: 80, label: { formatter: '高潮 80', color: '#dc2626', position: 'insideEndTop', fontSize: 10 } }
+            // 五维双层模型 4 带下界：<40 退潮 / ≥40 混沌 / ≥60 发酵 / ≥85 高潮。
+            // 标签写的是"跨过这条线就进入哪个带"，与 BoardScoreCalculator.stageOf 一一对应。
+            { yAxis: 40, label: { formatter: '混沌 40', color: '#0891b2', position: 'insideEndTop', fontSize: 10 } },
+            { yAxis: 60, label: { formatter: '发酵 60', color: '#d97706', position: 'insideEndTop', fontSize: 10 } },
+            { yAxis: 85, label: { formatter: '高潮 85', color: '#dc2626', position: 'insideEndTop', fontSize: 10 } }
           ]
         }
       }

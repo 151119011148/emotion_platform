@@ -2,12 +2,15 @@ server:
   port: 8080
 
 spring:
-  # 真实口令在同模块根的 application-local.yml（未入库，见 application-local.yml.example）。
+  # 真实口令在同模块根的 application-local.yml（未入库，见 application-local.yml）。
   # 走 profile 文档而不是 spring.config.import：导入的那份优先级低于本文件，占位会反过来盖掉真值。
+  # additional-location: 覆盖多种工作目录场景（IDE 启动在项目根 / 命令行 cd emotion-server / java -jar 所在目录）
+  config:
+    additional-location: "file:./,file:./emotion-server/"
   profiles:
     active: local
   datasource:
-    url: jdbc:mysql://127.0.0.1:3306/emotion_dashboard?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://192.168.123.18:3306/emotion_dashboard?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: ${MYSQL_USERNAME:root}
     password: ${MYSQL_PASSWORD:}
     driver-class-name: com.mysql.cj.jdbc.Driver

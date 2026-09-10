@@ -13,6 +13,10 @@
           <span class="temp-value">{{ currentTemp }}</span>
           <span class="temp-unit">°</span>
         </div>
+        <div v-if="tempDrift" class="temp-drift"
+          title="这条记录还是旧引擎落的分，没按五维重算；跑一次 recalc-all 就与页头一致（± 也在对齐后才显示）">
+          落库 {{ recordTempText }}（未重算）
+        </div>
         <div class="stage-badge" :style="{ background: stageColor }">
           {{ currentStage || '暂无数据' }}
           <small v-if="currentLabel">{{ currentLabel }}</small>
@@ -26,6 +30,11 @@
       </div>
     </div>
 
+    <div v-if="loadErrorShort" class="load-error">
+      记录没读回来，下面的"暂无数据 / 未评"是读不到、不是真的没录：{{ loadErrorShort }}
+      <span class="load-error-hint">若这句提到 Unknown column，说明库还没跟上 schema.sql（含五维那一步迁移）。</span>
+    </div>
+
     <div class="chart-section">
       <div class="chart-controls">
         <el-radio-group v-model="days" size="small" @change="loadCurve">
@@ -36,7 +45,7 @@
       <TemperatureChart :data="curveData" />
     </div>
 
-    <IndicatorCards :record="headRecord" :details="details" :tiers="tiers" :anchor="anchorDay" />
+    <IndicatorCards :record="headRecord" />
 
     <div class="bottom-row">
       <StageLocator :stage="currentStage" :direction="headRecord?.stageDirection" :record="headRecord" />
@@ -47,7 +56,8 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { recordApi, marketApi, anchorApi } from '../api/modules'
+import { recordApi } from '../api/modules'
+import { useScoringStore } from '../stores/scoring'
 import { stageColorOf, seqOnly } from '../utils/stages'
 import TemperatureChart from '../components/TemperatureChart.vue'
 import IndicatorCards from '../components/IndicatorCards.vue'
@@ -60,9 +70,17 @@ const days = ref(20)
 const headRecord = ref(null)
 const curveData = ref({ dates: [], temperatures: [], stages: [] })
 const advice = ref(null)
-const details = ref(null)
-const tiers = ref(null)
-const anchorDay = ref(null)
+const loadError = ref('')
+const scoring = useScoringStore()
+
+/** MyBatis 的报错整串是带换行的堆栈，页面上只要中间那句 Cause；取不到就截断兜底。 */
+const loadErrorShort = computed(() => {
+  const raw = loadError.value
+  if (!raw) return ''
+  const m = raw.match(/(?:Cause:|SQLException:|SQLSyntaxErrorException:)\s*(.+)/)
+  const line = (m ? m[1] : raw).split(/\r?\n/)[0].trim()
+  return line.length > 160 ? line.slice(0, 160) + '…' : line
+})
 
 function formatDate(date) {
   if (!date) return ''
@@ -74,25 +92,44 @@ function formatDate(date) {
 const headerDate = computed(() => formatDate(headRecord.value?.tradeDate || todayStr))
 const isStale = computed(() => !!headRecord.value && headRecord.value.tradeDate !== todayStr)
 
-const currentTemp = computed(() => {
+/** 页头温度：优先现算总分（与五维卡、复盘页同源），现算没到位才回落库 temperature。 */
+const shownTemp = computed(() => {
+  const det = scoring.detail
+  if (det && det.total != null) return Number(det.total)
   const raw = headRecord.value?.temperature
+  return raw == null ? null : Number(raw)
+})
+
+/** 落库值与现算值不一致 = 这条记录还没用新引擎重算过（要跑 recalc-all）。 */
+const tempDrift = computed(() => {
+  const r = headRecord.value?.temperature
+  if (r == null || !scoring.detail || scoring.detail.total == null) return false
+  return Math.abs(Number(r) - Number(scoring.detail.total)) > 0.05
+})
+const recordTempText = computed(() => {
+  const r = headRecord.value?.temperature
+  return r == null ? '—' : Number(r).toFixed(1)
+})
+
+const currentTemp = computed(() => {
+  const t = shownTemp.value
   // 0 是一个真实的读数（冰点），不能和"没读数"共用一个 falsy 分支
-  if (raw == null) return '--'
-  return Number(raw).toFixed(1)
+  if (t == null || Number.isNaN(t)) return '--'
+  return t.toFixed(1)
 })
 
 const currentStage = computed(() => headRecord.value?.stage || '')
 const delta = computed(() => {
+  // 页头显示现算值时，落库的 prev_temperature 与它不同源，相减出来的 ± 是假信号
+  if (tempDrift.value) return null
   const r = headRecord.value
   if (!r || r.temperature == null || r.prevTemperature == null) return null
   return Number(r.temperature) - Number(r.prevTemperature)
 })
 
 const tempClass = computed(() => {
-  const raw = headRecord.value?.temperature
-  if (raw === null || raw === undefined) return ''
-  const t = Number(raw)
-  if (Number.isNaN(t)) return ''
+  const t = shownTemp.value
+  if (t === null || t === undefined || Number.isNaN(t)) return ''
   if (t < 0) return 'sub-zero'
   if (t <= 15) return 'cold'
   if (t <= 35) return 'cool'
@@ -113,19 +150,25 @@ const currentLabel = computed(() => {
 })
 
 async function loadHead() {
+  loadError.value = ''
   try {
     const res = await recordApi.getToday()
     if (res.data) {
       headRecord.value = res.data
       return
     }
-  } catch (e) { /* 当日无数据，往下回落 */ }
+  } catch (e) { /* 当日无数据或这次没读回来，往下回落 */ }
   // 周末 / 节假日 / 当天还没复盘：回落到最近一条。
   // 不回落的话这一整块全是 "--"，而下面的建议卡片（后端自带回落）却有内容，页面自相矛盾。
   try {
     const res = await recordApi.getLatest(1)
     headRecord.value = (res.data && res.data[0]) || null
-  } catch (e) { /* 一条都没有 */ }
+  } catch (e) {
+    // 红条会自己闪没，所以把原因留在页面上：库里少列（schema 没跟上）和"确实还没录"
+    // 长得一模一样——都是一屏"暂无数据"，但只有前者需要你去跑迁移。
+    headRecord.value = null
+    loadError.value = e?.message || '记录读取失败'
+  }
 }
 
 async function loadCurve() {
@@ -135,24 +178,15 @@ async function loadCurve() {
   } catch (e) { /* ignore */ }
 }
 
-// 明细跟着头部那条记录的日期走：头记录回落到的那天才是页面上数字的那天
+// 卡片子分跟着头部那条记录的日期现算：改一 sub 权重刷新即见效，不用 recalc-all
 async function loadDay() {
   const date = headRecord.value?.tradeDate
-  details.value = null
-  tiers.value = null
-  anchorDay.value = null
-  if (!date) return
-  await Promise.all([
-    marketApi.stocks(date)
-      .then((res) => { details.value = res.data?.available ? res.data : null })
-      .catch(() => { /* 这天没回补过明细：卡片照旧显示数字，只是不挂 hover */ }),
-    marketApi.premiumTiers(date)
-      .then((res) => { tiers.value = res.data?.available ? res.data : null })
-      .catch(() => { /* 没档位数据：溢价卡退回含首板那个数 */ }),
-    anchorApi.list(date)
-      .then((res) => { anchorDay.value = res.data })
-      .catch(() => { /* 未设阵眼就是 available=false，这里只管请求本身失败 */ })
-  ])
+  if (!date) {
+    scoring.detail = null
+    scoring.detailDate = null
+    return
+  }
+  await scoring.loadDetail(date, true)
 }
 
 async function loadAdvice() {
@@ -163,6 +197,7 @@ async function loadAdvice() {
 }
 
 onMounted(() => {
+  scoring.load()
   loadHead().then(loadDay)
   loadCurve()
   loadAdvice()
@@ -234,6 +269,11 @@ onMounted(() => {
   font-size: 24px;
   color: #8899a6;
 }
+.temp-drift {
+  font-size: 11px;
+  color: #b45309;
+  cursor: help;
+}
 .cold .temp-value { color: #3b82f6; }
 /* 每维 -1 下限之后温度可以是负数：跌破 0 和"低但还在 0 以上"不是一回事 */
 .sub-zero .temp-value { color: #1e40af; }
@@ -270,6 +310,22 @@ onMounted(() => {
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 20px;
+}
+.load-error {
+  margin-bottom: 20px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: rgba(127, 29, 29, 0.25);
+  border: 1px solid #b91c1c;
+  color: #fecaca;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.load-error-hint {
+  display: block;
+  margin-top: 4px;
+  color: #fbbf24;
 }
 .chart-controls {
   margin-bottom: 12px;

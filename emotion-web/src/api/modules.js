@@ -21,6 +21,12 @@ export const recordApi = {
   // 只读复盘文档：把那天系统取数按手写版式排成 md（【一】…【九】），供下载补判断
   reviewDoc: (date) => api.get('/records/review-doc', { params: { date }, timeout: 30000 }),
   /**
+   * 五维 score-detail：服务端现场装配 metrics + 生效树、走 BoardScoreCalculator 返回整棵 eval 树。
+   * 只读、不落库；改了权重/阈值立刻在卡片反映，不用 recalc-all。超时对齐 score-context 那档 60s。
+   * skipErrorToast：取不到时页面自己印「读数未取到」并退回落库维分，红条只会把一个降级说成事故。
+   */
+  scoreDetail: (date) => api.get('/records/score-detail', { params: { date }, timeout: 60000, skipErrorToast: true }),
+  /**
    * 持仓台账：body 是这天的<b>全部</b>行，服务端整日替换，所以调用方必须把行发全——少发一行就是删掉一行。
    * 预判与对答案没有编辑口了：{@code t_prediction} 只由那天导入的 md 整日替换（PLAN 与 ANSWER 一起换）。
    */
@@ -50,8 +56,8 @@ export const marketApi = {
   // 后端拉行情最长 12s，实例默认 10s 会先超时弹红条，这里必须单独放宽
   snapshot: (date, refresh = false) =>
     api.get('/market/snapshot', { params: { date, refresh }, timeout: 25000 }),
-  // 明细是本地表，不打上游，用默认超时即可
-  stocks: (date) => api.get('/market/stocks', { params: { date } }),
+  // 明细是本地表，不打上游，用默认超时即可。取砸了只空掉复盘页那排大面 chips，不弹红条
+  stocks: (date) => api.get('/market/stocks', { params: { date }, skipErrorToast: true }),
   premiumTiers: (date) => api.get('/market/premium-tiers', { params: { date } }),
   /**
    * 子项读数（第 4 维两条家数口径 + 第 8/9 维）。刻意不和 snapshot 并成一次：
@@ -82,4 +88,29 @@ export const importApi = {
   // 复盘页底部那块只读明细。md 导入本身还有四个端点（POST /records/import、
   // /import/template、/import/export），页面撤了但契约没撤，要用走 curl。
   detail: (date) => api.get('/records/import/detail', { params: { date } })
+}
+
+/**
+ * 打分配置（模型 / 维度 / 计算规则）。后端三张表平台全局共享、不绑用户。
+ *
+ * <p>{@code effective} 是当前生效模型的维度/权重视图，卡片与复盘页的维序、权重、名称都从这里来；
+ * 加了 skipErrorToast——后端读不到配置时前端要静默退回 utils/scores 的本地兜底，而不是每次加载弹红条。
+ */
+export const scoringApi = {
+  effective: () => api.get('/scoring/effective', { skipErrorToast: true }),
+  listModels: () => api.get('/scoring/models'),
+  model: (id) => api.get(`/scoring/models/${id}`),
+  createModel: (data) => api.post('/scoring/models', data),
+  updateModel: (id, data) => api.put(`/scoring/models/${id}`, data),
+  deleteModel: (id) => api.delete(`/scoring/models/${id}`),
+  activate: (id) => api.post(`/scoring/models/${id}/activate`),
+  createDim: (data) => api.post('/scoring/dims', data),
+  updateDim: (id, data) => api.put(`/scoring/dims/${id}`, data),
+  deleteDim: (id) => api.delete(`/scoring/dims/${id}`),
+  createSub: (data) => api.post('/scoring/subs', data),
+  updateSub: (id, data) => api.put(`/scoring/subs/${id}`, data),
+  deleteSub: (id) => api.delete(`/scoring/subs/${id}`),
+  createRule: (data) => api.post('/scoring/rules', data),
+  updateRule: (id, data) => api.put(`/scoring/rules/${id}`, data),
+  deleteRule: (id) => api.delete(`/scoring/rules/${id}`)
 }

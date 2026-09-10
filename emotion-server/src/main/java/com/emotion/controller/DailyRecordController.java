@@ -14,6 +14,7 @@ import com.emotion.service.ReviewLedgerService;
 import com.emotion.util.CycleStageMachine;
 import com.emotion.util.TemperatureCalculator;
 import com.emotion.vo.ApiResponse;
+import com.emotion.vo.ScoreDetailVO;
 import com.emotion.vo.ImportPreviewVO;
 import com.emotion.vo.ReviewDetailVO;
 import com.emotion.vo.ReviewExportVO;
@@ -194,6 +195,16 @@ public class DailyRecordController {
     public ApiResponse<ReviewExportVO> reviewDoc(Authentication auth, @RequestParam String date) {
         Long userId = (Long) auth.getPrincipal();
         return ApiResponse.ok(reviewExportService.reviewDoc(userId, parse(date)));
+    }
+
+    /**
+     * Stage 9 只读端点：某天 5 维完整 eval 树 + 结构信号 + 原始读数快照。走引擎现算、不落库；
+     * 改一 sub 权重或一 ladder 阈值 → 刷新即反映。Dashboard 卡片 tooltip 唯一数据源。
+     */
+    @GetMapping("/score-detail")
+    public ApiResponse<ScoreDetailVO> scoreDetail(Authentication auth, @RequestParam String date) {
+        Long userId = (Long) auth.getPrincipal();
+        return ApiResponse.ok(dailyRecordService.scoreDetail(userId, parse(date)));
     }
 
     /**

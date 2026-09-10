@@ -9,7 +9,10 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 
 
@@ -92,20 +95,20 @@ public class TemperatureCalculator {
         record.setSurvNote(in.getSurvNote());
         record.setPremiumWeighted(compositePremiumPct(record, in));
 
-        List<Integer> dims = Arrays.asList(height, premium, breadth, broken, loss, volume, theme,
-                anchor, survival);
-        double[] weights = {W_HEIGHT, W_PREMIUM, W_BREADTH, W_BROKEN, W_LOSS, W_VOLUME, W_THEME,
-                W_ANCHOR, W_SURVIVAL};
+        Map<String, Integer> byKey = dimensionScores(height, premium, breadth, broken, loss,
+                volume, theme, anchor, survival);
+        ScoringModel model = in.getScoringModel() != null ? in.getScoringModel() : builtinModel();
         double weightedSum = 0;
         int scored = 0;
-        for (int i = 0; i < dims.size(); i++) {
-            if (dims.get(i) != null) {
+        for (DimWeight d : model.getDims()) {
+            Integer v = byKey.get(d.getDimKey());
+            if (v != null) {
                 scored++;
-                weightedSum += dims.get(i) * weights[i];
+                weightedSum += v * d.getWeight();
             }
         }
 
-        double maxPossible = MAX_POSSIBLE;
+        double maxPossible = maxScoreOf(model);
         double temperature = (weightedSum + maxPossible) / (2 * maxPossible) * 100;
 
         record.setScoredDims(scored);
@@ -114,6 +117,61 @@ public class TemperatureCalculator {
                 : BigDecimal.valueOf(temperature).setScale(1, RoundingMode.HALF_UP));
     }
 
+
+    /** 内置默认模型：维集合与权重逐字取自上面的 W_* 常量，max_score=null（按权重和×每维满分现推）。 */
+    public static ScoringModel builtinModel() {
+        List<DimWeight> dims = Arrays.asList(
+                new DimWeight("height",  "连板高度",   W_HEIGHT,   1),
+                new DimWeight("premium", "分档溢价",   W_PREMIUM,  2),
+                new DimWeight("breadth", "涨停/跌停",  W_BREADTH,  3),
+                new DimWeight("broken",  "炸板率",     W_BROKEN,   4),
+                new DimWeight("loss",    "大面数",     W_LOSS,     5),
+                new DimWeight("volume",  "成交额",     W_VOLUME,   6),
+                new DimWeight("theme",   "主线明确度", W_THEME,    7),
+                new DimWeight("anchor",  "阵眼当日",   W_ANCHOR,   8),
+                new DimWeight("surv",    "异动监管",   W_SURVIVAL, 9));
+        ScoringModel model = new ScoringModel();
+        model.setModelKey("ultra_short");
+        model.setName("超短情绪模型");
+        model.setDims(Collections.unmodifiableList(dims));
+        model.setMaxScore(null);
+        return model;
+    }
+
+    /** 温度映射分母：模型写死且 >0 用它，否则按权重和 × 每维满分现推；兜到 MAX_POSSIBLE 防 0/NaN。 */
+    static double maxScoreOf(ScoringModel model) {
+        if (model == null) {
+            return MAX_POSSIBLE;
+        }
+        if (model.getMaxScore() != null && model.getMaxScore() > 0) {
+            return model.getMaxScore();
+        }
+        double sum = 0;
+        if (model.getDims() != null) {
+            for (DimWeight d : model.getDims()) {
+                sum += d.getWeight();
+            }
+        }
+        double derived = sum * DIM_MAX;
+        return derived > 0 ? derived : MAX_POSSIBLE;
+    }
+
+    /** 九维出分按 dim_key 收进一个 Map；聚合时按键取权重（顺序无关，防 dim_no 写错导致两维权重串行）。 */
+    private static Map<String, Integer> dimensionScores(Integer height, Integer premium,
+            Integer breadth, Integer broken, Integer loss, Integer volume, Integer theme,
+            Integer anchor, Integer survival) {
+        Map<String, Integer> map = new LinkedHashMap<>();
+        map.put("height", height);
+        map.put("premium", premium);
+        map.put("breadth", breadth);
+        map.put("broken", broken);
+        map.put("loss", loss);
+        map.put("volume", volume);
+        map.put("theme", theme);
+        map.put("anchor", anchor);
+        map.put("surv", survival);
+        return map;
+    }
 
     /** 连板高度：绝对档位 >=7=3, >=5=2, >=3=1, 2=0, 1=-1, 0=-3 */
     static Integer calcHeightScore(DailyRecord record, List<DailyRecord> recent) {

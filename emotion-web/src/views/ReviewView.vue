@@ -17,63 +17,110 @@
               placeholder="选择日期" style="width: 100%" />
           </el-form-item>
 
-          <el-divider content-position="left">九维打分</el-divider>
+          <el-divider content-position="left">行情读数（喂给五维打分）</el-divider>
 
-          <p class="sub-status">{{ subStatus }}</p>
-          <p v-if="subError" class="panel-warn">{{ subError }}</p>
+          <p class="sub-status">{{ detailStatus }}</p>
           <p v-if="!formReady" class="panel-warn">
-            这天的记录没读回来：下面 8 格人工覆盖<b>不会</b>发出（发出去等于把你已存的覆盖洗掉），
-            已有这一行时点「更新记录」会被直接拦下。切到别的日期再切回来、或刷新页面才能存。
+            这天的记录没读回来：下面 11 格人工读数（九格 manual_* + 涨跌家数）<b>不会</b>发出
+            （发了就等于把你已存的值连同你没显示的格子一起洗成空）。已有这一行时点「更新记录」会被直接拦下。
+            切到别的日期再切回来、或刷新页面才能存。
           </p>
 
+          <div class="market-grid">
+            <el-form-item v-for="c in MARKET_CELLS" :key="c.key" :label="c.label" :prop="c.prop"
+              label-width="0" class="market-cell">
+              <el-input-number v-model="form[c.key]" :min="c.min" :max="c.max" :precision="c.precision"
+                :step="c.step" controls-position="right" size="small" placeholder="未取到" />
+              <p v-if="c.note" class="cell-note">{{ c.note }}</p>
+            </el-form-item>
+          </div>
+
+          <el-divider content-position="left">五维打分（0-100 直加权和）</el-divider>
+
           <div class="dim-grid">
-            <div v-for="group in dimRows" :key="'dim' + group.dim" class="dim-group">
+            <div v-for="sec in fiveDimSections" :key="sec.dimKey" class="dim-group">
               <div class="dim-title">
-                <span class="dim-no">{{ group.dim }}</span>
-                <span class="dim-name">{{ group.name }}</span>
-                <span class="dim-score" :class="{ unscored: group.score == null }">
-                  {{ group.score == null ? '未评' : `${group.score} 分 ×${group.weight}` }}
+                <span class="dim-no">{{ sec.dimNo }}</span>
+                <span class="dim-name">{{ sec.label }}</span>
+                <span class="fd-weight">×{{ sec.weight }}</span>
+                <span class="dim-score" :class="sec.score == null ? 'unscored' : sec.bandClass">
+                  {{ sec.score == null ? '未评（剔出分母）' : `${sec.score} 分 · ${sec.band}` }}
                 </span>
               </div>
-
-              <div v-for="cell in group.cells" :key="cell.key" class="dim-cell"
-                :class="{ covered: cell.kind === 'override' && form[cell.key] != null, 'dim-cell-tall': !!cell.prop }">
-                <span class="cell-label">{{ cell.label }}<span v-if="cell.required" class="cell-req">*</span></span>
-
-                <span v-if="cell.kind === 'readonly'" class="cell-auto">{{ cell.text }}</span>
-
-                <el-form-item v-else-if="cell.kind === 'select'" :prop="cell.prop" label-width="0"
-                  class="cell-item cell-item-wide">
-                  <el-select v-model="form[cell.key]" size="small" placeholder="未判断（这一维未评）">
-                    <el-option v-for="opt in cell.options" :key="opt.value" :label="opt.label" :value="opt.value" />
-                  </el-select>
-                </el-form-item>
-
-                <template v-else>
-                  <span v-if="cell.kind === 'override'" class="cell-auto">{{ cell.autoText }}</span>
-                  <el-form-item :prop="cell.prop" label-width="0" class="cell-item">
-                    <el-input-number v-model="form[cell.key]" :min="cell.min" :max="cell.max"
-                      :precision="cell.precision" :step="cell.step" :placeholder="cell.placeholder"
-                      controls-position="right" size="small" />
-                  </el-form-item>
-                  <el-button v-if="cell.kind === 'override' && form[cell.key] != null" size="small" text
-                    @click="form[cell.key] = null">退回自动</el-button>
-                  <span v-else-if="cell.kind === 'override'" class="cell-plain">用自动</span>
-                </template>
-
-                <p v-if="cell.note" class="cell-note">{{ cell.note }}</p>
+              <div class="fd-bar">
+                <div class="fd-bar-fill" :class="sec.bandClass" :style="{ width: sec.barWidth }"></div>
               </div>
 
-              <div v-if="group.list && group.list.length" class="cell-list">
-                <span v-for="s in group.list" :key="s.code" class="list-item"
+              <div v-for="row in sec.rows" :key="row.key" class="fd-sub-row"
+                :class="{ covered: row.filled }">
+                <span class="cell-label">{{ row.label }}</span>
+                <span v-if="row.weight != null" class="fd-weight">×{{ fmtNum(row.weight) }}</span>
+
+                <template v-if="row.manual">
+                  <el-form-item label-width="0" class="cell-item fd-input">
+                    <el-select v-if="row.manual.kind === 'select'" v-model="form[row.manual.field]" size="small"
+                      clearable :placeholder="row.manual.ph">
+                      <el-option v-for="o in row.manual.options" :key="o.value" :label="o.label" :value="o.value" />
+                    </el-select>
+                    <el-input-number v-else v-model="form[row.manual.field]" :min="row.manual.min"
+                      :max="row.manual.max" :precision="row.manual.precision" :step="row.manual.step"
+                      controls-position="right" size="small" :placeholder="row.manual.ph" />
+                  </el-form-item>
+                  <span v-if="row.manual.unit" class="cell-unit">{{ row.manual.unit }}</span>
+                </template>
+                <span v-else class="cell-auto">{{ row.rawText || '—' }}</span>
+
+                <span class="fd-sub-score" :class="{ unscored: row.score == null }">
+                  {{ row.score == null ? '未评' : row.score }}
+                </span>
+                <span v-if="row.bandHit" class="fd-hit">{{ row.bandHit }}</span>
+
+                <p v-if="row.layers.length" class="fd-layer-row">
+                  <span v-for="l in row.layers" :key="l.key" class="fd-layer">{{ l.label }}
+                    <b :class="{ unscored: l.score == null }">{{ l.score == null ? '未评' : l.score }}</b>
+                  </span>
+                </p>
+                <p v-if="row.note" class="cell-note">{{ row.note }}</p>
+              </div>
+
+              <div v-if="sec.list && sec.list.length" class="cell-list">
+                <span v-for="s in sec.list" :key="s.code" class="list-item"
                   :title="`${s.name} ${s.code} · 自涨停回撤 ${s.pullback}% · 收盘 ${s.pct}%${s.industry ? ' · ' + s.industry : ''}`">
                   {{ s.name }}<i>-{{ s.pullback }}%</i>
                 </span>
-                <span v-if="group.listHidden" class="list-more">另有 {{ group.listHidden }} 家</span>
+                <span v-if="sec.listHidden" class="list-more">另有 {{ sec.listHidden }} 家</span>
               </div>
-              <p v-else-if="group.listNote" class="cell-note">{{ group.listNote }}</p>
 
-              <p v-if="group.note" class="dim-note">{{ group.note }}</p>
+              <p v-if="sec.note" class="dim-note">{{ sec.note }}</p>
+            </div>
+          </div>
+
+          <el-divider content-position="left">结构信号 / 强制退潮</el-divider>
+          <div class="signal-block">
+            <div class="fd-signals" v-if="structuralSignals.length">
+              <span class="fd-signal-label">命中信号</span>
+              <span v-for="s in structuralSignals" :key="s" class="fd-chip">{{ s }}</span>
+            </div>
+            <p v-else class="cell-note">
+              {{ scoring.detail ? '这天没命中结构信号。' : '信号读数未取到，暂不判断。' }}
+            </p>
+            <p v-if="forcedEbbOn" class="fd-forced-reason">
+              强制退潮：{{ forcedEbbReason || '命中硬条件，这一天直接空仓，与总分无关' }}
+            </p>
+
+            <div v-for="m in FORCED_EBB_METRICS" :key="m.metric" class="fd-sub-row">
+              <span class="cell-label">{{ m.label }}</span>
+              <el-form-item label-width="0" class="cell-item fd-input">
+                <el-select v-if="m.kind === 'select'" v-model="form[m.field]" size="small" clearable
+                  :placeholder="m.ph">
+                  <el-option v-for="o in m.options" :key="o.value" :label="o.label" :value="o.value" />
+                </el-select>
+                <el-input-number v-else v-model="form[m.field]" :min="m.min" :max="m.max"
+                  :precision="m.precision" :step="m.step" controls-position="right" size="small"
+                  :placeholder="m.ph" />
+              </el-form-item>
+              <span v-if="m.unit" class="cell-unit">{{ m.unit }}</span>
+              <p v-if="m.hint" class="cell-note">{{ m.hint }}</p>
             </div>
           </div>
 
@@ -86,29 +133,62 @@
       </div>
 
       <div class="score-section">
-        <div class="score-card" v-if="savedRecord">
+        <div class="score-card" v-if="savedRecord || scoring.detail">
           <h3>打分结果</h3>
-          <div class="score-grid">
-            <div class="score-item" v-for="item in scoreItems" :key="item.key">
-              <span class="label">{{ item.label }}</span>
-              <span v-if="item.score == null" class="unscored">未评</span>
-              <span v-else-if="item.score < 0" class="minus">{{ item.score }}</span>
-              <span v-else class="dots">
-                <span v-for="i in 3" :key="i" :class="{ active: i <= item.score }"></span>
-              </span>
+
+          <div class="five-dim-strip" v-if="fiveDimItems.length">
+            <div class="fd-head">
+              <span class="fd-title">五维（当前口径 0-100）</span>
+              <span class="fd-source">{{ scoring.detail ? '现算，与仪表盘同源' : '落库值（现算未取到）' }}</span>
+              <el-tag v-if="forcedEbbOn" type="danger" size="small" effect="dark">强制退潮</el-tag>
+            </div>
+            <div class="fd-items">
+              <div v-for="it in fiveDimItems" :key="it.key" class="fd-item" :title="it.tooltip">
+                <span class="fd-label">{{ it.label }}</span>
+                <span class="fd-score" :class="{ unscored: it.score == null }">
+                  {{ it.score == null ? '未评' : it.score }}
+                </span>
+                <span class="fd-band" :class="it.bandClass">{{ it.band || '—' }}</span>
+                <span class="fd-weight">×{{ it.weight }}</span>
+              </div>
+            </div>
+            <p v-if="forcedEbbOn && forcedEbbReason" class="fd-forced-reason">
+              {{ forcedEbbReason }}
+            </p>
+            <div class="fd-signals" v-if="structuralSignals.length">
+              <span class="fd-signal-label">结构信号</span>
+              <span v-for="s in structuralSignals" :key="s" class="fd-chip">{{ s }}</span>
             </div>
           </div>
+
+          <p v-if="!savedRecord" class="fd-norecord">
+            这天还没保存复盘：上面是按当天行情<b>现算</b>的分，与仪表盘同源；周期阶段要保存后才落库。
+          </p>
+
+          <template v-if="savedRecord">
+            <div class="legacy-note">下面这排 3 点是旧 9 维引擎的落库值，五维模型已不读写它们，只当历史留档。</div>
+            <div class="score-grid legacy">
+              <div class="score-item" v-for="item in scoreItems" :key="item.key">
+                <span class="label">{{ item.label }}</span>
+                <span v-if="item.score == null" class="unscored">未评</span>
+                <span v-else-if="item.score < 0" class="minus">{{ item.score }}</span>
+                <span v-else class="dots">
+                  <span v-for="i in 3" :key="i" :class="{ active: i <= item.score }"></span>
+                </span>
+              </div>
+            </div>
+          </template>
           <div class="total-row">
             <span>总分：{{ totalText }}</span>
             <span class="temp">温度：{{ tempText }}</span>
           </div>
-          <div class="stage-row">
+          <div class="stage-row" v-if="savedRecord">
             <template v-if="savedRecord.stage">
               <el-tag :type="stageTagType" size="large">{{ savedRecord.stage }}</el-tag>
               <span class="direction">{{ savedRecord.stageDirection }}</span>
             </template>
             <span v-else class="insufficient">
-              仅 {{ savedRecord.scoredDims || 0 }} 维参与打分，不足 5 维不出阶段
+              五维一条也没出分：没有分子就不出阶段。只要有一维出分，就按它剩下的权重归一化出带。
             </span>
           </div>
         </div>
@@ -124,8 +204,9 @@
             </el-button>
           </div>
           <p class="field-note">
-            这个按钮只取公开市场的那七个数，取回来直接落进左栏对应的维里。
-            分档溢价三组、封板率与回封率、阵眼分、异动监管那两个数不用点，切日期就会自己取。
+            这个按钮只取公开市场的那七个数，取回来直接落进上面「行情读数」那一块。
+            五维里只能人判的那几条不用点按钮：D2 四条（板块涨停数 / 梯队完整性 / 板块溢价 / 持续性）、
+            D4 的首板封板率与首板溢价、D5 的监管折扣、强制退潮的极高位换手与断板，在各自的维段里当场填。
           </p>
 
           <el-alert v-if="snapshot" class="fetch-panel" :closable="false" show-icon
@@ -149,8 +230,9 @@
                 <span class="panel-sub">腾讯日 K，缺才取；齐了这次就一个请求都不发</span>
               </p>
               <p v-if="missingList.length" class="panel-warn">
-                留空＝该维不评：它不进分子，但分母仍是 39，所以在温度上就是一个 0 分——
-                左栏每维标题写的「未评」是唯一能把它和真 0 分分清的地方。缺得越多温度越不稳，少于 5 维不出阶段。
+                留空＝该子指标未评：未评的那一条会从分母里剔掉，这一维按剩下几条的权重归一化出分，
+                <b>不是按 0 计</b>。所以缺数不会把分压低，只会让这一维的分更"薄"——
+                每维标题右边那个「未评（剔出分母）」和维段里每行的「未评」，是唯一能把它和真 0 分分清的地方。
               </p>
               <p v-for="(item, i) in snapshot.notes" :key="'note' + i" class="panel-note">{{ item }}</p>
               <p v-for="(item, i) in snapshot.warnings" :key="'warn' + i" class="panel-warn">{{ item }}</p>
@@ -224,8 +306,12 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { recordApi, marketApi, importApi } from '../api/modules'
-import { CARD_ORDER, DIMS, survivalBandOf } from '../utils/scores'
+import { survivalBandOf, fiveDimBandOf, fiveDimBandClassOf } from '../utils/scores'
+import { topSignals } from '../utils/cycleReading'
+import { useScoringStore } from '../stores/scoring'
 import { ElMessage } from 'element-plus'
+
+const scoring = useScoringStore()
 
 /** 后端 missing / manualFields 用的是实体字段名，面板要显示中文。 */
 const MARKET_LABELS = {
@@ -236,10 +322,16 @@ const MARKET_LABELS = {
   brokenBoardRate: '炸板率',
   bigLossCount: '大面数',
   totalVolume: '两市成交额',
+  upCount: '上涨家数',
+  downCount: '下跌家数',
   mainTheme: '主线题材',
   leadingStock: '总龙头',
   leadingStockStatus: '龙头状态',
-  scoreTheme: '主线明确度'
+  manualSectorLimitUpCount: '主线板块涨停数',
+  manualLadderCompleteScore: '板块梯队完整性',
+  manualSectorPremiumPct: '主线板块溢价',
+  manualThemePersistenceDays: '主线持续天数',
+  manualFirstPremiumPct: '首板次日均溢价'
 }
 
 const formRef = ref(null)
@@ -247,7 +339,7 @@ const saving = ref(false)
 const recordId = ref(null)
 const savedRecord = ref(null)
 /**
- * 这天的行读回来了，才敢发「表单独占的那八格」（八格 manual_*）。
+ * 这天的行读回来了，才敢发「表单独占的那 11 格」（九格五维 manual_* + 涨跌家数）。
  * 后端把"带了这个键"当成"这格就该是这个值"，留空即清空——没读回来就带键等于把已存的数洗掉。
  */
 const formReady = ref(false)
@@ -259,9 +351,12 @@ const today = new Date().toLocaleDateString('en-CA')
 /**
  * 这一份就是本页<b>唯一</b>会提交的字段。
  *
- * <p>刻意不含涨跌家数、我的仓位、主线/龙头那几串文字、复盘笔记和对照：那些格子已经从页面上删了，
+ * <p>刻意不含我的仓位、主线/龙头那几串文字、复盘笔记和对照：那些格子不在页面上，
  * 留在 form 里就等于每次「更新记录」都把一个页面从没显示过的空值发回后端。
  * 键不在这里 = 请求里没有这个键 = 后端不动那一列，md 导入存进去的值因此活得好好的。
+ *
+ * <p>涨跌家数是个例外：列由复盘 md 独家写了几周，现在它喂的是 D1·广度，页面得能填，
+ * 所以它进了 {@link FORM_OWNED_KEYS}——发键的守卫和那九格人工读数同一条路。
  */
 const form = reactive({
   tradeDate: today,
@@ -272,17 +367,18 @@ const form = reactive({
   brokenBoardRate: null,
   bigLossCount: null,
   totalVolume: null,
-  // 分项人工覆盖：有值就是"这一格按我的数进分"，null 就是"用盘面公开读数"。
-  // 刻意不复用那七个市场字段——那七格是整维的输入，这八格是合并维拆开后每一条的输入，两件事两列。
-  manualSealedHomeRate: null,
-  manualResealRate: null,
-  manualPremiumLowPct: null,
-  manualPremiumMidPct: null,
-  manualPremiumHighPct: null,
-  manualAnchorScore: null,
-  manualSurvCount: null,
-  manualSurvPremium: null,
-  scoreTheme: null
+  upCount: null,
+  downCount: null,
+  // 五维里盘面没有可回补取数口径的读数：填了按填的进分，清空即退回未评（不是 0 分）。
+  manualSectorLimitUpCount: null,
+  manualLadderCompleteScore: null,
+  manualSectorPremiumPct: null,
+  manualThemePersistenceDays: null,
+  manualFirstPremiumPct: null,
+  manualFirstSealedRate: null,
+  manualAnchorSupervisionDiscount: null,
+  manualTopHighTurnoverPct: null,
+  manualTopHighBreak: null
   // 对照（compare_note）不在这份里：编辑口已经还给复盘 md，页面不发这个键，那一列就不会被空串洗掉。
 })
 
@@ -294,21 +390,33 @@ const rules = {
 }
 
 const stageTagType = computed(() => {
-  const map = { '冰点': 'info', '修复': '', '启动': 'success', '发酵': 'warning', '高潮': 'danger', '分歧': 'warning', '退潮': 'info' }
+  /* 4 带 + 强制退潮;后端 BoardScoreCalculator.stageOf 是唯一真源。 */
+  const map = { '退潮': 'info', '混沌': '', '发酵': 'warning', '高潮': 'danger', '退潮(强制)': 'danger' }
   return map[savedRecord.value?.stage] || 'info'
 })
 
-/** 分母是"已评维数 × 3"而不是固定的 21：未评的维整维剔出分母，写死 21 会把缺维说成低分。 */
+/**
+ * 五维双层:total_score 已是 0-100 直加权,满分固定 100;
+ * scored_dims 仍显示(<5 说明有整维未评、分子被剔除),但不再乘系数造假分母。
+ */
 const totalText = computed(() => {
+  const det = scoring.detail
+  if (det) {
+    if (det.total == null) return '—（五维全未评）'
+    const n = (det.dims || []).filter((d) => d.score != null).length
+    return `${Number(det.total).toFixed(1)} / 100（${n}/5 维参与）`
+  }
   const r = savedRecord.value
   if (!r || r.totalScore == null) return '—'
   const dims = r.scoredDims || 0
-  return `${r.totalScore} / ${dims * 3}（${dims} 维）`
+  return `${r.totalScore} / 100（${dims}/5 维参与，落库值）`
 })
 
 const tempText = computed(() => {
-  const t = savedRecord.value?.temperature
-  return t == null ? '—' : `${Number(t).toFixed(1)}°`
+  /* temperature 列继续承载五维总分(0-100),保留历史字段名;显示不再带 °。 */
+  const det = scoring.detail
+  const t = det && det.total != null ? det.total : savedRecord.value?.temperature
+  return t == null ? '—' : Number(t).toFixed(1)
 })
 
 /** 与服务端 ReviewImportParser.DISCIPLINE 同一套取值。 */
@@ -331,277 +439,318 @@ function labelList(keys) {
   return list.length ? list.map(k => MARKET_LABELS[k] || k).join('、') : '—'
 }
 
-// ---------- 分项读数与人工覆盖 ----------
+// ---------- 五维录入台：树驱动的行 + 人工读数 ----------
 
-/** 公开读数（打分的默认值）。和表单分开两份，合并只发生在保存那一次。 */
-const sub = ref(null)
-const tiers = ref(null)
-const subLoading = ref(false)
-const subError = ref('')
-/** 第 5 维那份名单：{@code /market/stocks} 纯本地读 t_market_stock，一次请求都不发。 */
+/** 大面名单那排 chips：{@code /market/stocks} 纯本地读 t_market_stock，一次请求都不发上游。 */
 const stocks = ref(null)
-
-/** 每种格子的取值边界与输入步长：单位不同，不能共用一个 el-input-number 配置。 */
-const SUB_KINDS = {
-  rate: { min: 0, max: 100, precision: 2, step: 1, unit: '%' },
-  pct: { min: -30, max: 30, precision: 2, step: 0.5, unit: '%' },
-  score: { min: 0, max: 3, precision: 0, step: 1, unit: ' 分' },
-  count: { min: 0, max: 999, precision: 0, step: 1, unit: ' 家' }
-}
+const LIST_LIMIT = 20
 
 /**
- * 八条分项。key 逐字等于表单字段名（也就是 manual_* 列名），输入框直接绑 form[row.key]，
- * 中间不留第二套命名——两套名字对不上的那天，界面上就会出现"改了这一格、动的是另一格"。
+ * ① 行情读数九格：七个数喂自动子指标，涨跌家数喂 D1·广度。
+ * prop 只给必填的那三格（和 {@link rules} 同一套键）。
  */
-const SUB_ROWS = [
-  { key: 'manualPremiumHighPct', dim: 2, label: '高位组均涨幅', kind: 'pct', group: 'HIGH' },
-  { key: 'manualPremiumMidPct', dim: 2, label: '中位组均涨幅', kind: 'pct', group: 'MID' },
-  { key: 'manualPremiumLowPct', dim: 2, label: '低位组均涨幅', kind: 'pct', group: 'LOW' },
-  { key: 'manualSealedHomeRate', dim: 4, label: '家数封板率', kind: 'rate', auto: 'sealedHomeRate', note: 'sealedNote', missing: '当日未回补盘面明细：这条口径未评（不是 0%）' },
-  { key: 'manualResealRate', dim: 4, label: '回封率', kind: 'rate', auto: 'resealRate', note: 'resealNote', missing: '当日未回补盘面明细：这条口径未评（不是 0%）' },
-  { key: 'manualAnchorScore', dim: 8, label: '阵眼当日反馈分', kind: 'score', auto: 'anchorScore', note: 'anchorNote', missing: '未设阵眼或那天取不到行情：这一维未评（分母仍是 39，在温度上就是一个 0 分）' },
-  { key: 'manualSurvCount', dim: 9, label: '进分家数', kind: 'count', auto: 'survCount', note: 'survNote', missing: '这天的公告还没拉过：这一维未评（分母仍是 39，在温度上就是一个 0 分）' },
-  { key: 'manualSurvPremium', dim: 9, label: '进分溢价', kind: 'pct', auto: 'survPremium', note: 'survNote', missing: '这天的公告还没拉过：这一维未评（分母仍是 39，在温度上就是一个 0 分）' }
+const MARKET_CELLS = [
+  {
+    key: 'maxConsecutiveLimit', label: '最高连板（板）', prop: 'maxConsecutiveLimit',
+    min: 1, max: 30, precision: 0, step: 1, note: 'H：连板四层怎么切以它为顶'
+  },
+  { key: 'limitUpCount', label: '涨停（家）', prop: 'limitUpCount', min: 0, max: 500, precision: 0, step: 1 },
+  {
+    key: 'limitDownCount', label: '跌停（家）', prop: 'limitDownCount', min: 0, max: 500, precision: 0, step: 1,
+    note: '≥10 家即触发强制退潮'
+  },
+  {
+    key: 'upCount', label: '上涨（家）', min: 0, max: 6000, precision: 0, step: 1,
+    note: '与下面那格算 D1·广度的红盘率'
+  },
+  { key: 'downCount', label: '下跌（家）', min: 0, max: 6000, precision: 0, step: 1 },
+  {
+    key: 'totalVolume', label: '两市成交额(亿)', min: 0, max: 60000, precision: 2, step: 100,
+    note: '÷20 日均额 = D1·量能'
+  },
+  { key: 'brokenBoardRate', label: '炸板率(次数)(%)', min: 0, max: 100, precision: 1, step: 1 },
+  { key: 'bigLossCount', label: '大面（家）', min: 0, max: 200, precision: 0, step: 1 },
+  {
+    key: 'yesterdayLimitPremium', label: '昨日涨停今溢价(%)', min: -30, max: 30, precision: 2, step: 0.5,
+    note: '含首板的整体口径，只展示；打分用的是 D3 四层溢价'
+  }
 ]
 
-function groupOf(name) {
-  const list = (tiers.value && tiers.value.groups) || []
-  return list.find(g => g.group === name) || null
+/**
+ * 九条人工读数。<b>键是 metric key（也就是子指标的 source_key）</b>，不是维键也不是子键。
+ *
+ * <p>刻意做成静态表：输入框只由它渲染，生效模型 subs 与 score-detail 那两份只读数据谁挂了
+ * 都不影响「能不能填」。上一版把 D2 那四格挂在只读端点上，端点一慢整维就永远填不进去。
+ * dimKey=null 的两条不属于任何子指标（是强制退潮条件 4 的闸门），摆在③那一块。
+ */
+const MANUAL_METRICS = [
+  {
+    metric: 'sector_limit_up_count', dimKey: 'theme_main', field: 'manualSectorLimitUpCount',
+    label: '板块涨停数', unit: '家', min: 0, max: 200, precision: 0, step: 1, ph: '家',
+    hint: '第一主线今日涨停家数（按 industry 数不出题材，要自己看）'
+  },
+  {
+    metric: 'ladder_complete_score', dimKey: 'theme_main', field: 'manualLadderCompleteScore',
+    label: '梯队完整性', unit: '分', min: 0, max: 100, precision: 0, step: 5, ph: '0-100',
+    hint: '直接给分：完整梯队≈90，单高标无跟风≈35'
+  },
+  {
+    metric: 'sector_premium_pct', dimKey: 'theme_main', field: 'manualSectorPremiumPct',
+    label: '板块溢价', unit: '%', min: -30, max: 50, precision: 2, step: 0.5, ph: '%',
+    hint: '主线板块昨日涨停今日的平均溢价'
+  },
+  {
+    metric: 'persistence_days', dimKey: 'theme_main', field: 'manualThemePersistenceDays',
+    label: '持续性', unit: '天', min: 0, max: 30, precision: 0, step: 1, ph: '天',
+    hint: '主线连续活跃天数：≥3 天算持续，首日算新启动'
+  },
+  {
+    metric: 'first_sealed_rate', dimKey: 'first', field: 'manualFirstSealedRate',
+    label: '首板封板率', unit: '%', min: 0, max: 100, precision: 2, step: 1, ph: '%',
+    hint: '首板封住 /（封住 + 炸）；炸板池分不出首板，只能人判'
+  },
+  {
+    metric: 'first_premium_pct', dimKey: 'first', field: 'manualFirstPremiumPct',
+    label: '首板溢价', unit: '%', min: -30, max: 50, precision: 2, step: 0.5, ph: '%',
+    hint: '首板次日均溢价；自动取数没并进 board=1 时按这一格兜'
+  },
+  {
+    metric: 'anchor_supervision_discount', dimKey: 'anchor', field: 'manualAnchorSupervisionDiscount',
+    label: '监管折扣', unit: '×', min: 0, max: 1, precision: 2, step: 0.05, ph: '0-1',
+    hint: '阵眼被监管时给的乘数（如 0.80）；留空 = 不打折。它是乘数不是百分数'
+  },
+  {
+    metric: 'top_high_turnover_pct', dimKey: null, field: 'manualTopHighTurnoverPct',
+    label: '极高位换手', unit: '%', min: 0, max: 100, precision: 1, step: 1, ph: '%',
+    hint: 'H≥7 才用得上：极高位龙头当日换手 >35% 且断板未回封 = 强制退潮'
+  },
+  {
+    metric: 'top_high_break', dimKey: null, field: 'manualTopHighBreak', label: '极高位断板',
+    kind: 'select', ph: '未判',
+    options: [{ value: 1, label: '是 · 爆量断板未回封' }, { value: 0, label: '否 · 封住或已回封' }],
+    hint: '这一条要人看盘，盘面没有对应读数；留空 = 强制退潮条件 4 不参与'
+  }
+]
+const MANUAL_BY_METRIC = MANUAL_METRICS.reduce((m, x) => { m[x.metric] = x; return m }, {})
+const FORCED_EBB_METRICS = MANUAL_METRICS.filter((m) => m.dimKey === null)
+
+/** 每维段脚注：一句话说清这一维哪些是自动的、哪些只能人判。 */
+const DIM_NOTES = {
+  market: 'D1 四条全自动：指数环境取日 K、量能是成交额/20 日均、广度用上面那两格涨跌家数、涨跌停是家数组合。',
+  theme_main: 'D2 整维只能人判：这四格一格不填，这一维就是未评（剔出分母，不是 0 分）。',
+  board: 'D3 四层由当天三池现算，不用填；命中「中位吹哨」时整维 ×0.8，会写在段头那条 note 上。',
+  first: 'D4 三条自动、两条人判：首板封板率与首板次日均溢价没有回补口径。',
+  anchor: 'D5 阵眼在位/断板自动出状态分；监管折扣是人给的 0-1 乘数。'
 }
 
-/** 一行一个读法：公开值、算式、边界，全部在这里凑齐，模板只管摆。 */
-const subRows = computed(() => SUB_ROWS.map(row => {
-  const kind = SUB_KINDS[row.kind]
-  const out = {
-    key: row.key, dim: row.dim, label: row.label, kind: 'override',
-    min: kind.min, max: kind.max, precision: kind.precision, step: kind.step,
-    placeholder: '覆盖'
-  }
-  let value = null
-  let note = ''
-  if (row.group) {
-    const g = groupOf(row.group)
-    value = g ? g.avgPct : null
-    if (g) {
-      note = `${g.label}：${g.stockCount} 家（取到涨跌 ${g.matched} 家）· 判 ${g.score} 分 · 权重 ${g.weight}`
-    } else {
-      note = tiers.value && tiers.value.available === false
-        ? '当日昨日涨停池无非首板档位：第 2 维未评（不是 0%）'
-        : '档位溢价还没取过：第 2 维未评（不是 0%）'
-    }
-  } else {
-    value = sub.value ? sub.value[row.auto] : null
-    note = (sub.value && sub.value[row.note]) || row.missing || ''
-  }
-  out.hasAuto = value !== null && value !== undefined
-  out.autoText = out.hasAuto ? `${value}${kind.unit}` : '—'
-  out.note = note
-  return out
-}))
+/** 数字一律去掉浮点尾巴：读数 0.62 不是 0.6200000000000001。 */
+function fmtNum(v) {
+  const n = Number(v)
+  if (Number.isNaN(n)) return '—'
+  return String(Math.round(n * 100) / 100)
+}
 
-/** 面板标题要说"八条里取回了几条"，只报"7 项"就是他抱怨的那个样子。 */
-const subFilledCount = computed(() => subRows.value.filter(r => r.hasAuto).length)
-const tierBinNote = computed(() => (tiers.value && tiers.value.binNote) || '')
+/** 层标签压一个字头：四层并排一行才不会把段撑爆。 */
+const LAYER_SHORT = { 中高位: '中高', 极高位: '极高', 低位: '低', 中位: '中' }
+function shortLayer(label) {
+  if (!label) return ''
+  for (const k of ['中高位', '极高位', '低位', '中位']) {
+    if (label.startsWith(k)) return LAYER_SHORT[k]
+  }
+  return label
+}
 
 /**
- * 按钮没了，这一屏关于"读数取没取回来"的话就只剩这一行，整句在这里拼，模板只管摆。
- *
- * <p>把后端报的 {@code elapsedMs} 带出来：「最长约 30 秒」是句形容词，
- * 而他真正要知道的是切一天日期得等多久——数比形容词有用。
+ * 一条复合子下面的层。行清单以生效模型为准（顺序、层名都在库里），
+ * 分数按 subKey 从 eval 树里对上；生效模型没读到时退用 eval 树自己的 children。
  */
-const subStatus = computed(() => {
-  if (subLoading.value) {
-    return '正在取这天的分项读数（阵眼与异动监管名单逐只打日 K，最长约 30 秒）……'
-  }
-  if (!sub.value && !tiers.value) {
-    return '这天的分项读数还没取回来。成交额、涨跌停家数、连板高度、大面数、主线明确度这几维不依赖它，直接填就行；'
-      + '分档溢价那三组、封板率与回封率、阵眼分、异动监管那两个数，要等这一次取数回来才看得见。'
-  }
-  const took = sub.value && sub.value.elapsedMs != null
-    ? `，这次取了 ${(Number(sub.value.elapsedMs) / 1000).toFixed(1)} 秒`
-    : ''
-  return `分项读数已取回 ${subFilledCount.value} / ${subRows.value.length} 条${took}；`
-    + '填了数的那几格以你填的进分，清空即退回读数'
-})
+function layersFor(dimKey, subKey, kid) {
+  const evalKids = kid && Array.isArray(kid.children) ? kid.children : []
+  const fromDb = scoring.childrenOf(dimKey, subKey)
+  const list = fromDb.length
+    ? fromDb.map((c) => ({ key: c.subKey, label: c.label || c.subKey, ev: evalKids.find((k) => k.key === c.subKey) || null }))
+    : evalKids.map((k) => ({ key: k.key, label: k.label || k.key, ev: k }))
+  return list.map((x) => ({ key: x.key, label: shortLayer(x.label), score: numOrNull(x.ev && x.ev.score) }))
+}
 
-// ---------- 九维一行行的形状 ----------
-
-/**
- * 表单不再分「七个输入」和「八个覆盖」两块：那两块里同一个数出现两次，改一处另一处还留着旧值。
- * 这里按维拼一次，模板只管摆，不在此处以外判任何口径。
- */
-function plainCell(key, label, opts) {
-  const o = opts || {}
+/** 一行的形状只在这里拼一次，模板只管摆。 */
+function buildRow(dimKey, node, kid) {
+  const man = MANUAL_BY_METRIC[node.sourceKey]
+  const manual = man && man.dimKey === dimKey ? man : null
   return {
-    key, label, kind: 'plain', prop: o.prop, required: !!o.required,
-    placeholder: o.placeholder || '', min: o.min, max: o.max,
-    precision: o.precision == null ? 0 : o.precision, step: o.step == null ? 1 : o.step,
-    note: o.note || ''
+    key: node.key,
+    label: node.label || node.key,
+    weight: numOrNull(node.weight),
+    manual,
+    score: numOrNull(kid && kid.score),
+    rawText: kid && kid.raw != null ? fmtNum(kid.raw) : '',
+    bandHit: (kid && kid.bandHit) || '',
+    layers: layersFor(dimKey, node.key, kid),
+    note: manual ? manual.hint : ((kid && kid.note) || ''),
+    metric: manual ? manual.metric : ''
   }
 }
 
-const SUB_BY_KEY = computed(() => {
-  const map = {}
-  subRows.value.forEach(r => { map[r.key] = r })
-  return map
-})
+/** 人工读数在树里找不到对应子行时（子指标清单没读到），照原样补一行——输入框绝不依赖只读端点。 */
+function manualOnlyRow(man) {
+  return {
+    key: 'x:' + man.metric, label: man.label, weight: null, manual: man,
+    score: null, rawText: '', bandHit: '', layers: [], note: man.hint, metric: man.metric
+  }
+}
 
-/** 名单一次全摆出来太长，扫一眼要的只是"哪几家、各回撤多深"。 */
-const LIST_LIMIT = 20
-const pctText = (v) => (v == null ? '—' : `${v}%`)
+const FIVE_RECORD_FIELD = {
+  market: 'scoreMarket', theme_main: 'scoreThemeMain', board: 'scoreBoard',
+  first: 'scoreFirst', anchor: 'scoreAnchor'
+}
 
 /**
- * 上次存下来这一维进了几分。列名和 DIMS 的 key 不是一套（第 8 维那列叫 anchorScore），
- * 所以在这里对一次，模板只管显示。
- *
- * <p>第 9 维没有分数列（它由 surv_premium 现算），走 utils/scores 那份接力五档，
- * 和仪表盘那张卡同一个算法。<b>null 就是未评</b>：新口径下分母固定，未评与 0 分对温度的
- * 影响同数，界面上再说一句"这是 0 分"就是把没判过的东西写成判过了。
+ * 一维的当前口径：<b>优先</b> {@code scoring.detail}（/records/score-detail 现算，与仪表盘同源），
+ * 现算没到位才退回落库的 score_*（上一次 recalc 的值，改配置不重算就一直陈旧）。
+ * 段头、右栏横条、tooltip 三处都从这里取，不留第二套真值。未评就是 null，绝不兜 0。
  */
-const DIM_SCORE_FIELD = {
-  height: 'scoreHeight', premium: 'scorePremium', breadth: 'scoreBreadth',
-  broken: 'scoreBroken', loss: 'scoreLoss', volume: 'scoreVolume',
-  theme: 'scoreTheme', anchor: 'anchorScore'
-}
-
-function dimScoreOf(key) {
-  const r = savedRecord.value
-  if (!r) return null
-  if (key === 'surv') {
-    return r.survCount > 0 ? survivalBandOf(r.survPremium) : null
+function fiveDimMeta(dimKey) {
+  const ev = scoring.dimEval(dimKey)
+  const meta = scoring.fiveDimDims.find((d) => d.dimKey === dimKey) || {}
+  const stored = savedRecord.value ? savedRecord.value[FIVE_RECORD_FIELD[dimKey]] : null
+  const score = ev && ev.score != null ? Number(ev.score) : numOrNull(stored)
+  return {
+    dimKey, ev,
+    dimNo: (ev && ev.dimNo) || meta.dimNo || meta.dim,
+    label: (ev && ev.label) || meta.label || dimKey,
+    weight: ev && ev.weight != null ? Number(ev.weight) : (meta.weight ?? 0),
+    score,
+    band: fiveDimBandOf(score),
+    bandClass: fiveDimBandClassOf(score),
+    barWidth: score == null ? '0%' : `${Math.max(0, Math.min(100, score))}%`,
+    fromLive: !!(ev && ev.score != null)
   }
-  return r[DIM_SCORE_FIELD[key]] ?? null
 }
 
-const dimRows = computed(() => {
-  const s = SUB_BY_KEY.value
-  const t = tiers.value || {}
-  const pool = stocks.value
-  const losses = pool ? (pool.bigLoss || []) : []
-  // 字面量按打分引擎的维序写（1..9），读代码时和后端对得上；摆出来的顺序在末尾按 CARD_ORDER 排。
-  return [
-    {
-      key: 'height', name: '连板高度',
-      cells: [plainCell('maxConsecutiveLimit', '最高连板（板）',
-        { prop: 'maxConsecutiveLimit', required: true, min: 1, max: 30 })]
-    },
-    {
-      key: 'premium', name: '分档溢价',
-      cells: [
-        s.manualPremiumHighPct, s.manualPremiumMidPct, s.manualPremiumLowPct,
-        {
-          key: 'weightedPct', label: '三组加权', kind: 'readonly', text: pctText(t.weightedPct),
-          note: t.weightedPct == null ? '还没取档位溢价：这一维先按未评处理' : '进分的是这个数，不是含首板整体'
-        },
-        {
-          key: 'yesterdayLimitPremium', label: '含首板整体', kind: 'readonly',
-          text: pctText(form.yesterdayLimitPremium),
-          note: '含首板，只展示不打分。它是拉行情带回来的那个数，改它不影响这一维'
-        }
-      ].filter(Boolean),
-      note: tierBinNote.value
-    },
-    {
-      key: 'breadth', name: '涨停 / 跌停家数',
-      cells: [
-        plainCell('limitUpCount', '涨停（家）', { prop: 'limitUpCount', required: true, min: 0, max: 500 }),
-        plainCell('limitDownCount', '跌停（家）', { prop: 'limitDownCount', required: true, min: 0, max: 500 })
-      ]
-    },
-    {
-      key: 'broken', name: '炸板 · 封板 · 回封',
-      cells: [
-        plainCell('brokenBoardRate', '炸板率(次数)(%)', { min: 0, max: 100, precision: 1 }),
-        s.manualSealedHomeRate, s.manualResealRate
-      ].filter(Boolean),
-      note: '三分支各出分再平均。炸板率数的是打开次数（一只票炸三次算三次），'
-        + '100% 减它不等于家数封板率；第一格既是当日读数也是你的数——填了按填的进分，不必另开覆盖。'
-        + '后两条读数随拉行情和切日期自动回显，不用点。'
-    },
-    {
-      key: 'loss', name: '大面数',
-      cells: [plainCell('bigLossCount', '大面（家）', { min: 0, max: 200 })],
-      list: losses.slice(0, LIST_LIMIT),
-      listHidden: Math.max(0, losses.length - LIST_LIMIT),
-      listNote: pool ? '今天没有满足这条算式的票。'
-        : '这天的盘面明细没回补过，名单取不到；家数这一格仍然可以自己填。',
-      note: '算式：自涨停回撤 >7% 且收盘绿盘。名单按回撤深到浅排。'
-    },
-    {
-      key: 'volume', name: '量能',
-      cells: [plainCell('totalVolume', '两市成交额(亿)', { min: 0, precision: 2, step: 100 })]
-    },
-    {
-      key: 'theme', name: '主线明确度',
-      cells: [{
-        key: 'scoreTheme', label: '你的判断', kind: 'select', prop: 'scoreTheme',
-        options: [
-          { value: 3, label: '3 · 有清晰主线 + 龙头' },
-          { value: 1, label: '1 · 有热点无主线' },
-          { value: 0, label: '0 · 无主线' }
-        ],
-        note: '这一维只由你判，盘面没有对应读数；选「未判断」即这一维不评——分母仍是 39，'
-          + '在温度上就是一个 0 分。主线题材、总龙头、龙头状态、中军那四格不在本页编辑，值由复盘 md 导入写。'
-      }]
-    },
-    {
-      key: 'anchor', name: '阵眼当日反馈',
-      cells: [s.manualAnchorScore].filter(Boolean),
-      note: '取「主线龙头」页那块「周期阵眼 · 跨度」的当日分：在位几只取最差那一只，逐只读数在同一处。'
-    },
-    {
-      key: 'surv', name: '异动监管',
-      cells: [s.manualSurvCount, s.manualSurvPremium].filter(Boolean),
-      note: '当日名单的进分家数与进分溢价，和「异动监管」页顶上那两个数是同一份数。'
-        + '名单与逐日曲线在同名那一页。'
+const fiveDimSections = computed(() => {
+  const losses = stocks.value ? (stocks.value.bigLoss || []) : []
+  const taken = new Set()
+  return scoring.fiveDimCardOrder.map((dimKey) => {
+    const m = fiveDimMeta(dimKey)
+    const subs = (scoring.subsByDim[dimKey] || []).map((s) => ({
+      key: s.subKey, label: s.label, weight: s.weight, sourceKey: s.sourceKey
+    }))
+    const kids = m.ev && Array.isArray(m.ev.children) ? m.ev.children : []
+    const rowNodes = subs.length ? subs : kids.map((k) => ({
+      key: k.key, label: k.label, weight: k.weight, sourceKey: k.sourceKey
+    }))
+    const rows = rowNodes.map((node) => {
+      const row = buildRow(dimKey, node, kids.find((k) => k.key === node.key) || null)
+      if (row.manual) taken.add(row.metric)
+      return row
+    })
+    MANUAL_METRICS.forEach((man) => {
+      if (man.dimKey === dimKey && !taken.has(man.metric)) rows.push(manualOnlyRow(man))
+    })
+    rows.forEach((r) => { r.filled = !!r.manual && form[r.manual.field] != null })
+
+    let note = DIM_NOTES[dimKey] || ''
+    if (!subs.length && !kids.length) {
+      note = (note ? note + ' ' : '') + '（子指标清单未取到：下面只列人工读数，维分等 score-detail 回来才有）'
+    } else if (m.ev && m.ev.note) {
+      note = (note ? note + ' ' : '') + m.ev.note
     }
-  ]
-    // 编号只有一份来源（DIMS[key].dim，后端依据串里写的就是这个数），所以摆出来会跳着数：6、3、1、2…
-    .map((g) => ({ ...g, dim: DIMS[g.key].dim, score: dimScoreOf(g.key), weight: DIMS[g.key].weight }))
-    .sort((a, b) => CARD_ORDER.indexOf(a.key) - CARD_ORDER.indexOf(b.key))
+    const isBoard = dimKey === 'board'
+    return {
+      dimKey, dimNo: m.dimNo, label: m.label, weight: fmtNum(m.weight),
+      score: m.score == null ? null : fmtNum(m.score), band: m.band || '—',
+      bandClass: m.bandClass, barWidth: m.barWidth,
+      rows, note,
+      list: isBoard ? losses.slice(0, LIST_LIMIT) : [],
+      listHidden: isBoard ? Math.max(0, losses.length - LIST_LIMIT) : 0
+    }
+  })
 })
 
-/** 右栏那份结果与左栏同一顺序、同一维名：从 dimRows 派生，不再写第二套清单。 */
-const scoreItems = computed(() => dimRows.value.map((g) => ({
-  key: g.key, label: g.name, score: g.score
-})))
+/** 面板标题那一行：说清"现算读数到没到位、等了多久、没到位时什么东西照常能用"。 */
+const detailStatus = computed(() => {
+  if (scoring.detailLoading) {
+    return '五维现算读数正在取（三池聚合 + 20 日均量，最长 60 秒）……填数不用等它，填完保存就会重算。'
+  }
+  if (!scoring.detail) {
+    return '五维现算读数这次没取回来：每维的分数与命中档是空的，下面这些输入框照常能填、照常能存。'
+  }
+  const n = (scoring.detail.dims || []).filter((d) => d.score != null).length
+  return `五维现算已取回：${n}/5 维出分，与仪表盘同一份数。填了数的那格按你填的进分，清空即退回未评。`
+})
 
-function clearSub() {
-  sub.value = null
-  tiers.value = null
+const fiveDimItems = computed(() => {
+  if (!savedRecord.value && !scoring.detail) return []
+  return scoring.fiveDimCardOrder.map((key) => {
+    const m = fiveDimMeta(key)
+    const parts = [scoring.fiveDimScoreLine(key, m.score)]
+    if (m.band) parts.push(m.band)
+    if (m.ev && m.ev.note) parts.push(m.ev.note)
+    parts.push(m.fromLive ? '现算：跟着打分配置变' : '落库值：改配置后要 recalc 才动')
+    return {
+      key, label: m.label, weight: m.weight, score: m.score,
+      band: m.band, bandClass: m.bandClass, tooltip: parts.filter(Boolean).join(' · ')
+    }
+  })
+})
+
+/**
+ * 右栏那排 3 点是旧 9 维的落库展示列（五维引擎不读写它们，只当历史留档）。
+ * 维名与维序从生效模型的 legacy 那五行拿，分数列名和 DIMS 的 key 不是一套（第 8 维那列叫 anchorScore），
+ * 所以在这里对一次。第 9 维没有分数列，由 surv_premium 现算，走 utils/scores 那份接力五档。
+ */
+const LEGACY_SCORE_FIELDS = {
+  height: 'scoreHeight', premium: 'scorePremium', breadth: 'scoreBreadth', broken: 'scoreBroken',
+  loss: 'scoreLoss', volume: 'scoreVolume', theme: 'scoreTheme', anchor: 'anchorScore'
+}
+const scoreItems = computed(() => {
+  const r = savedRecord.value
+  if (!r) return []
+  return scoring.dims.slice().sort((a, b) => a.dimNo - b.dimNo).map((d) => ({
+    key: d.dimKey,
+    label: d.label,
+    score: d.dimKey === 'surv'
+      ? (r.survCount > 0 ? survivalBandOf(r.survPremium) : null)
+      : (r[LEGACY_SCORE_FIELDS[d.dimKey]] ?? null)
+  }))
+})
+
+/** 强制退潮与结构信号同样现算优先：detail 到位时它才是当前口径的答案。 */
+const forcedEbbOn = computed(() => {
+  if (scoring.detail) return scoring.detail.forcedEbb === true
+  return savedRecord.value?.forcedEbb === 1
+})
+const forcedEbbReason = computed(() => {
+  if (scoring.detail) return scoring.detail.forcedEbbReason || ''
+  return savedRecord.value?.forcedEbbReason || ''
+})
+const structuralSignals = computed(() => {
+  const flags = scoring.detail && scoring.detail.signalFlags
+  if (Array.isArray(flags)) return flags
+  return topSignals(savedRecord.value)
+})
+
+function clearReadings() {
   stocks.value = null
-  subError.value = ''
 }
 
 /**
- * 取分项读数：第 4/8/9 维走 score-context，第 2 维走现成的 premium-tiers（只读库、不打上游），
- * 第 5 维那份名单走 /market/stocks（同样是只读库，纯本地 t_market_stock）。
+ * 只取 D3 段末那排大面名单：{@code /market/stocks} 读本地 t_market_stock，不发上游、秒回。
  *
- * <p>失败只写这一块自己的红字。<b>绝不</b>把返回的数并进 fillForm：那条路会把他的手改当成自动值刷回去。
- * 名单那一格单独 catch：它只是第 5 维的补充，取不到不该把另外两条读数一起说成失败。
+ * <p>旧那两路（score-context 最坏 60 秒、premium-tiers）随九维一起下线了：五维的整棵 eval 树
+ * 走 {@code scoring.loadDetail}，与仪表盘共用同一份现算结果，切一天日期从四条请求减到两条。
+ * 取砸了就静默——名单只是补充，家数那一格照常能填。
  */
-async function loadSubReadings(date) {
+async function loadStockList(date) {
   if (!date) return
-  subLoading.value = true
-  subError.value = ''
   try {
-    const [ctx, tierRes, stockRes] = await Promise.all([
-      marketApi.scoreContext(date),
-      marketApi.premiumTiers(date),
-      marketApi.stocks(date).catch(() => null)
-    ])
-    // 最长 60s，期间完全可能已经切了日期：把上一日的读数落在当日表单上是脏数据
+    const res = await marketApi.stocks(date)
+    // 请求发出去之后用户可能已经切了日期：上一日的名单落在当日段末是脏数据
     if (form.tradeDate !== date) return
-    sub.value = ctx.data || null
-    tiers.value = tierRes.data || null
-    stocks.value = stockRes && stockRes.data && stockRes.data.available ? stockRes.data : null
+    const data = res && res.data
+    stocks.value = data && data.available ? data : null
   } catch (e) {
-    if (form.tradeDate !== date) return
-    clearSub()
-    subError.value = '分项读数这次没取回来：' + (e.response?.data?.message || e.message || '未知原因')
-      + '。成交额、涨跌停家数、连板高度、大面数、主线明确度这几维不受影响，手改的那几格也还在表单里，照常能存。'
-  } finally {
-    if (form.tradeDate === date) subLoading.value = false
+    if (form.tradeDate === date) stocks.value = null
   }
 }
 
@@ -628,7 +777,7 @@ async function loadRecord(date) {
     }
     // 200 但 data 为空 = 确认这天没有记录，表单从空起步也是权威状态
     formReady.value = true
-  } catch (e) { /* 读不回来就当不知道这天存了什么，那八格这次不发（见 formReady） */ }
+  } catch (e) { /* 读不回来就当不知道这天存了什么，那十一格这次不发（见 formReady） */ }
 }
 
 /** 台账从"这天的行还没读回来"起步：空表不等于"这天清仓了"，所以读回来之前不铺开、也不给保存。 */
@@ -637,17 +786,19 @@ function clearLedger() {
 }
 
 /**
- * 切一次日期＝四条请求：记录、台账明细，外加三条读数（score-context 最坏 60s）。
+ * 切一次日期＝四条请求：记录、台账明细、大面名单，外加五维现算 eval 树（最坏 60s）。
  *
- * <p>代价写在这：他切得快时，上一日的慢响应会晚于当日的回来，靠 {@code loadSubReadings}
- * 里的跨日守卫丢结果（不取消请求，只丢返回值）。读数块不阻塞表单，读砸了也只红它自己那一行。
+ * <p>代价写在这：他切得快时，上一日的慢响应会晚于当日的回来，靠各自的跨日守卫丢结果
+ * （不取消请求，只丢返回值）。读数不阻塞表单，读砸了也只空它自己那一块。
  */
 function handleDateChange(date) {
   snapshot.value = null
-  clearSub()
+  clearReadings()
   loadRecord(date)
   loadDetail(date)
-  loadSubReadings(date)
+  loadStockList(date)
+  // 左栏每维的分数与右栏横条、仪表盘卡片共用这一份现算 eval 树：不 await，store 自己管守卫。
+  scoring.loadDetail(date, true)
 }
 
 // 不用 @change：实测 el-date-picker 改了模型却不触发 change，日期换了记录却不重载
@@ -666,12 +817,11 @@ async function handleFetchMarket(refresh) {
     if (form.tradeDate !== date) return
     snapshot.value = res.data || {}
     fillForm(snapshot.value.filled || {})
-    // 不 await：这一路最坏 60s，而拉行情按钮该在七个数到手时就交还操作。
-    // 读数块自己有加载态，取砸了也只红它那一块。
-    // 切日期时已经取过一轮，这一次是因为 compute() 刚把那天的三池与逐档溢价写进库——
-    // 在那之前第 2 维三组和第 4 维那两条一律是空的。
-    loadSubReadings(date)
-    ElMessage.success(`已填充 ${filledCount.value} 项，请核对后保存；分项读数随后自己刷新`)
+    // 不 await：现算那一棵五维树最坏 60s，而拉行情按钮该在七个数到手时就交还操作。
+    // 这一次刷新是因为 compute() 刚把那天的三池与逐档溢价写进库——在那之前自动子指标一律没读数。
+    loadStockList(date)
+    scoring.loadDetail(date, true)
+    ElMessage.success(`已填充 ${filledCount.value} 项，请核对后保存；五维读数随后自己刷新`)
   } catch (e) {
     // 失败提示由 axios 拦截器统一弹（后端保证 message 是中文）。
     // 这里只清面板：拉取不写库，表单里不会留下半截数据。
@@ -692,8 +842,8 @@ function fillForm(data) {
 async function handleSave() {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
-  // 已经有这一行、却从没读回来过：那八格现在表单里是空的，发出去就是把已存的覆盖清成未覆盖。
-  // 与其悄悄少存八格，不如停下来把原因说清楚。
+  // 已经有这一行、却从没读回来过：那十一格现在表单里是空的，发出去就是把已存的读数清成未填。
+  // 与其悄悄少存这十一格，不如停下来把原因说清楚。
   if (recordId.value && !formReady.value) {
     ElMessage.error('这天的记录没读回来，本次不能保存：切到别的日期再切回来，或刷新页面')
     return
@@ -714,6 +864,8 @@ async function handleSave() {
       ElMessage.success('提交成功')
     }
     snapshot.value = null
+    // 保存会触发服务端重算：让横条和仪表盘卡面一起跟上，不等用户切日期
+    scoring.loadDetail(form.tradeDate, true)
   } catch (e) {
     ElMessage.error(e.response?.data?.message || '保存失败')
   } finally {
@@ -754,23 +906,28 @@ function numOrNull(v) {
 }
 
 /**
- * 表单独占的那八格（八格 manual_*）：列都是 ALWAYS 策略，后端把"带了这个键"
- * 当成"这格就该是这个值"，所以只在真的读回那天的行之后才发键——没读回来就带键，
- * 等于把他存的人工覆盖一并清回未覆盖。
+ * 表单独占的那 11 格（九格五维 {@code manual_*} + 涨跌家数）：列全是 ALWAYS 策略，
+ * 后端把"带了这个键"当成"这格就该是这个值"，所以只在真的读回那天的行之后才发键——
+ * 没读回来就带键，等于把他存的人工覆盖一并清回未覆盖。
+ *
+ * <p>涨跌家数以前不在这一份里：那两列只有复盘 md 写。现在它们喂 D1·广度，页面必须能填，
+ * 于是与九格走同一条守卫。
  *
  * <p>另一半守卫在后端：{@code DailyRecordService.copyFields} 认的就是这个键集合。
- * 从页面删掉的那六块（涨跌家数、我的仓位、主线与龙头、复盘笔记、预判与对答案、对照）
- * 因为压根不在 {@code form} 里，所以永远不会出现在这一份 body 里；
- * 对照这一列从此只有复盘 md 一个作者，页面不发键它就一动不动。
+ * 旧九维那八格覆盖（{@code manual_sealed_home_rate} 等）已从页面下线——不发键，已存的历史值一动不动。
  */
 const FORM_OWNED_KEYS = [
-  'manualSealedHomeRate', 'manualResealRate',
-  'manualPremiumLowPct', 'manualPremiumMidPct', 'manualPremiumHighPct',
-  'manualAnchorScore', 'manualSurvCount', 'manualSurvPremium'
+  'upCount', 'downCount',
+  'manualSectorLimitUpCount', 'manualLadderCompleteScore', 'manualSectorPremiumPct',
+  'manualThemePersistenceDays', 'manualFirstPremiumPct', 'manualFirstSealedRate',
+  'manualAnchorSupervisionDiscount', 'manualTopHighTurnoverPct', 'manualTopHighBreak'
 ]
 
 function payload() {
   const body = { ...form }
+  // el-input-number / el-select 清空给的是 undefined，JSON.stringify 会直接把键丢掉：
+  // 那样"清空这一格"就静默变成了"这格不动"。 ALWAYS 列要的是显式 null。
+  Object.keys(body).forEach(k => { if (body[k] === undefined) body[k] = null })
   if (!formReady.value) FORM_OWNED_KEYS.forEach(k => delete body[k])
   return body
 }
@@ -973,6 +1130,105 @@ onMounted(() => {
   color: #8899a6;
   font-size: 13px;
 }
+.five-dim-strip {
+  margin-bottom: 14px;
+  padding: 12px;
+  background: rgba(8, 145, 178, 0.08);
+  border: 1px solid rgba(8, 145, 178, 0.28);
+  border-radius: 8px;
+}
+.fd-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.fd-title {
+  font-size: 12px;
+  color: #67e8f9;
+  font-weight: 600;
+}
+.fd-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+.fd-item {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 13px;
+}
+.fd-label {
+  color: #8899a6;
+}
+.fd-score {
+  color: #e1e8ed;
+  font-weight: 600;
+}
+.fd-score.unscored {
+  color: #64748b;
+  font-weight: 400;
+  font-size: 12px;
+}
+.fd-weight {
+  color: #64748b;
+  font-size: 11px;
+}
+.fd-source {
+  font-size: 11px;
+  color: #64748b;
+}
+.fd-norecord {
+  margin: 10px 0 0 0;
+  font-size: 12px;
+  color: #8899a6;
+  line-height: 1.5;
+}
+.fd-norecord b {
+  color: #67e8f9;
+}
+.fd-band {
+  font-size: 11px;
+}
+.fd-band.b-none { color: #64748b; }
+.fd-band.b-ebb { color: #94a3b8; }
+.fd-band.b-chaos { color: #60a5fa; }
+.fd-band.b-ferment { color: #fbbf24; }
+.fd-band.b-climax { color: #f87171; }
+.legacy-note {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  color: #64748b;
+}
+.score-grid.legacy {
+  opacity: 0.55;
+}
+.fd-forced-reason {
+  margin: 8px 0 0 0;
+  font-size: 12px;
+  color: #fca5a5;
+  line-height: 1.5;
+}
+.fd-signals {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.fd-signal-label {
+  font-size: 12px;
+  color: #fbbf24;
+}
+.fd-chip {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  background: rgba(251, 191, 36, 0.14);
+  border: 1px solid rgba(251, 191, 36, 0.36);
+  color: #fcd34d;
+}
 .total-row {
   display: flex;
   justify-content: space-between;
@@ -1039,14 +1295,27 @@ onMounted(() => {
   margin-left: 6px;
 }
 
-/* 九维打分：算式常驻可见，不藏进 hover——这几套刻度里有两套是这边按实测自造的，要能当场否 */
+/* 五维录入台：读数与算式常驻可见，不藏进 hover——这几套刻度里有几条是这边按实测自造的，要能当场否 */
 .sub-status {
   font-size: 12px;
   color: #8899a6;
   line-height: 1.6;
   margin: 0 0 10px;
 }
-/* 九维打分：算式常驻可见，不藏进 hover——这几套刻度里有两套是这边按实测自造的，要能当场否 */
+/* ① 行情读数：七个数 + 涨跌家数，容器宽就三列铺开，窄了自动塌 */
+.market-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
+  gap: 0 12px;
+  margin-bottom: 8px;
+}
+.market-cell {
+  margin-bottom: 8px;
+}
+.market-cell :deep(.el-input-number) {
+  width: 100%;
+}
+
 .dim-grid {
   display: flex;
   flex-direction: column;
@@ -1079,7 +1348,7 @@ onMounted(() => {
   font-size: 13px;
   font-weight: 600;
 }
-/* 这一维进了几分就写在标题右边，和仪表盘 hover 那行分数串同一个色 */
+/* 这一维进了几分就写在标题右边，色与仪表盘卡面、右栏横条同一套 4 带 */
 .dim-score {
   margin-left: auto;
   font-size: 12px;
@@ -1090,7 +1359,29 @@ onMounted(() => {
   color: #6b7c8c;
   font-weight: 500;
 }
-.dim-cell {
+.dim-score.b-ebb { color: #94a3b8; }
+.dim-score.b-chaos { color: #60a5fa; }
+.dim-score.b-ferment { color: #fbbf24; }
+.dim-score.b-climax { color: #f87171; }
+/* 段头下面那根细条：分数一眼看得见长短，配色跟着带走 */
+.fd-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: #223041;
+  overflow: hidden;
+  margin-bottom: 7px;
+}
+.fd-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+.fd-bar-fill.b-none { background: #2d3748; }
+.fd-bar-fill.b-ebb { background: #64748b; }
+.fd-bar-fill.b-chaos { background: #3b82f6; }
+.fd-bar-fill.b-ferment { background: #f59e0b; }
+.fd-bar-fill.b-climax { background: #ef4444; }
+.fd-sub-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -1099,22 +1390,15 @@ onMounted(() => {
   margin: 0 -6px;
   border-radius: 6px;
 }
-.dim-cell.covered {
+/* 这一格你已经填了数：底色标出来，和"树里没这条、只按你填的进分"是两件事 */
+.fd-sub-row.covered {
   background: #16202e;
-}
-.dim-cell.covered .cell-auto {
-  color: #6b7c8c;
-  text-decoration: line-through;
 }
 .cell-label {
   color: #cbd5e0;
   font-size: 13px;
   font-weight: 600;
   min-width: 128px;
-}
-.cell-req {
-  color: #dc5b5b;
-  margin-left: 3px;
 }
 .cell-auto {
   color: #e1e8ed;
@@ -1126,19 +1410,60 @@ onMounted(() => {
   width: 122px;
   flex: none;
 }
-.cell-item.cell-item-wide {
-  width: 190px;
-}
 .cell-item :deep(.el-input-number),
 .cell-item :deep(.el-select) {
   width: 100%;
 }
-.dim-cell-tall {
-  padding-bottom: 18px;
+/* 输入格与只读文本同宽，避免填一次行高跳一次 */
+.fd-input {
+  width: 132px;
 }
-.cell-plain {
+.cell-unit {
+  color: #8899a6;
+  font-size: 12px;
+}
+.fd-sub-score {
+  margin-left: auto;
+  color: #f59e0b;
+  font-size: 13px;
+  font-weight: 700;
+  min-width: 34px;
+  text-align: right;
+}
+.fd-sub-score.unscored {
   color: #6b7c8c;
   font-size: 12px;
+  font-weight: 400;
+}
+/* 命中的那条阶梯档：原样印后端 bandHit 的档名，改阈值刷新后就换 */
+.fd-hit {
+  color: #a8b7c4;
+  font-size: 11px;
+  border: 1px solid #2d3748;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+/* 复合子（D3 的晋级/溢价/大面…）四层并排一行，段才不会撑到三屏 */
+.fd-layer-row {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0;
+  padding-left: 8px;
+}
+.fd-layer {
+  color: #a8b7c4;
+  font-size: 12px;
+}
+.fd-layer b {
+  color: #cbd5e0;
+  font-weight: 600;
+  margin-left: 2px;
+}
+.fd-layer b.unscored {
+  color: #6b7c8c;
+  font-weight: 400;
 }
 .cell-note {
   flex-basis: 100%;
@@ -1177,6 +1502,16 @@ onMounted(() => {
   color: #8899a6;
   font-size: 12px;
   line-height: 1.5;
+}
+/* ③ 结构信号与强制退潮那两块：形状跟维段一致，读起来是一家人 */
+.signal-block {
+  border: 1px solid #2d3748;
+  border-radius: 10px;
+  padding: 8px 12px 9px;
+  margin-bottom: 12px;
+}
+.signal-block .fd-sub-row {
+  margin-top: 6px;
 }
 
 /* el-table 默认浅色，这里压成深色以匹配整页 */

@@ -4,7 +4,7 @@
     <div class="advice-signal" v-if="signals.length">
       <el-icon><WarningFilled /></el-icon>
       <span>
-        顶哨 {{ signals.length }} 项：{{ signals.join('、') }}
+        结构信号 {{ signals.length }} 项：{{ signals.join('、') }}
         —— 下面的建议是这一阶段的默认动作，不是"今天可以放心上"
       </span>
     </div>

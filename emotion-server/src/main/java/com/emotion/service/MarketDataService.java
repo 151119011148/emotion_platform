@@ -72,8 +72,16 @@ public class MarketDataService {
     private static final BigDecimal AMOUNT_MIN_YI = BigDecimal.valueOf(3000);
     private static final BigDecimal AMOUNT_MAX_YI = BigDecimal.valueOf(60000);
 
+    /**
+     * 拉完行情后仍然缺的东西，前端按 key 翻成中文名提示「仍需人工」。
+     *
+     * <p>只列五维真的会读的那几格。旧「人工判断：主线明确度」那个 scoreTheme 下拉已经下线，
+     * 再列它就是指向一个页面上不存在的入口。
+     */
     private static final List<String> MANUAL_FIELDS = Collections.unmodifiableList(
-            java.util.Arrays.asList("mainTheme", "leadingStock", "leadingStockStatus", "scoreTheme"));
+            java.util.Arrays.asList("mainTheme", "leadingStock", "leadingStockStatus",
+                    "manualSectorLimitUpCount", "manualLadderCompleteScore", "manualSectorPremiumPct",
+                    "manualThemePersistenceDays", "manualFirstPremiumPct"));
     private static final List<String> ALL_MARKET_FIELDS = Collections.unmodifiableList(
             java.util.Arrays.asList("maxConsecutiveLimit", "limitUpCount", "limitDownCount",
                     "yesterdayLimitPremium", "brokenBoardRate", "bigLossCount", "totalVolume"));

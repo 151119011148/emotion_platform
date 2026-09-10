@@ -1,6 +1,8 @@
 package com.emotion.util;
 
 import java.math.BigDecimal;
+import java.util.HashMap;
+import java.util.Map;
 
 import com.emotion.market.MarketMetrics;
 import com.emotion.market.PoolCounts;
@@ -44,6 +46,39 @@ public class ScoreInputs {
     /** 进分组合的当日算术平均涨幅%；家数>0 但一只都没取到涨跌时也是 null。 */
     private BigDecimal survPremium;
     private String survNote;
+
+    /**
+     * 生效打分模型快照：维集合 + 每维权重 + 温度映射分母。由 ScoreContextService 从配置表装配后塞进来。
+     *
+     * <p>null = 用 {@code TemperatureCalculator} 内置默认（权重逐字等于引擎常量、分母按权重和现推），
+     * 所以不接 DB 的单测、以及"生效模型没配/读挂了"这两种情况，算出来的分与今天完全一致，不会 500。
+     */
+    private ScoringModel scoringModel;
+
+    /**
+     * Raw metric readings keyed by SubNode.sourceKey (turnover_ratio / red_ratio / jr_low / ...).
+     * Populated by ScoreContextService: LadderMetricsService computes the auto ones, manual_* merged on top.
+     * A missing key means that leaf sub-indicator is unscored (null), never 0.
+     */
+    private Map<String, BigDecimal> metrics = new HashMap<String, BigDecimal>();
+
+    /** Per-metric human-readable computation trace, same keys as metrics. */
+    private Map<String, String> metricNotes = new HashMap<String, String>();
+
+    /** Effective five-dim scoring tree snapshot (null = fall back to BoardScoreCalculator.builtinTree()). */
+    private ScoringTree scoringTree;
+
+    public BigDecimal metric(String key) {
+        return metrics == null ? null : metrics.get(key);
+    }
+
+    public boolean hasMetric(String key) {
+        return metrics != null && metrics.get(key) != null;
+    }
+
+    public void putMetric(String key, BigDecimal value) {
+        metrics.put(key, value);
+    }
 
     public static ScoreInputs empty() {
         return new ScoreInputs();

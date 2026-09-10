@@ -119,6 +119,62 @@ public class DailyRecord {
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal manualSurvPremium;
 
+    // ==================== 五维双层模型（five_dim）====================
+    // 0-100 直加权：每维分 0-100，总分=Σ(维分×维权)；未评（NULL）整维剔出分母。
+    // ALWAYS 与旧 9 维 score_* 同：recalc 后"未评"必须真的写回 NULL，否则界面会挂着上一版没消的旧分。
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private BigDecimal scoreMarket;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private BigDecimal scoreThemeMain;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private BigDecimal scoreBoard;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private BigDecimal scoreFirst;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private BigDecimal scoreAnchor;
+
+    /** 结构信号 CSV："中位吹哨,高位抱团,抱团瓦解前兆,高低切,全面退潮" 子集，可多选。null=无信号或未算。 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String signalFlags;
+    /** 强制退潮（0/1）：任一命中即出"退潮(强制)"，无视 total_score。null=未算。 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private Integer forcedEbb;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String forcedEbbReason;
+
+    /**
+     * 五维模型下的纯人工子指标 9 列（NULL=未填=这一子不进分；0 是真实读数不是没填）：
+     * 板块涨停数 / 板块溢价 / 梯队完整性 / 持续性天数 / 极高位换手 / 首板溢价 /
+     * 首板封板率 / 极高位是否爆量断板 / 阵眼监管折扣。
+     * 前四项是 theme_main 维的人工子，中三项是 first 维与 forced-ebb cond 4 的读数，
+     * 后两项是 D5 阵眼的折扣乘数与 cond 4 的闸门。
+     *
+     * <p>这九条一律没有任何自动生产者：{@code LadderMetricsService.aggregate} 取不到它们
+     * （炸板池分不出首板、极高位断板要人眼看、监管折扣是主观乘数），所以 {@code metrics} 里
+     * 对应的键只有靠这几列才有值——缺列的现场表现是 D2 整维恒未评、cond 4 恒不触发，
+     * 看着像引擎漏了判定，其实是取数口就没开。
+     */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private Integer manualSectorLimitUpCount;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private BigDecimal manualSectorPremiumPct;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private BigDecimal manualLadderCompleteScore;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private Integer manualThemePersistenceDays;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private BigDecimal manualTopHighTurnoverPct;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private BigDecimal manualFirstPremiumPct;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private BigDecimal manualFirstSealedRate;
+    /** 极高位是否爆量断板未回封：1=是。引擎按 {@code isOne} 判，null=未判=cond 4 不参与。 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private Integer manualTopHighBreak;
+    /** 阵眼监管折扣乘数(0-1)：null=不打折。刻意不走 overlayDecimal 那句 % 文案。 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private BigDecimal manualAnchorSupervisionDiscount;
+
     // 阶段定位
     private String stage;
     private String stageDirection;
