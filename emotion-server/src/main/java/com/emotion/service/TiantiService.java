@@ -6,6 +6,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -15,23 +16,23 @@ import org.springframework.stereotype.Service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.emotion.entity.MarketStock;
 import com.emotion.mapper.MarketStockMapper;
+import com.emotion.market.StockPatterns;
 import com.emotion.vo.TiantiVO;
 
 /**
- * 连板天梯（PRD P2）：当日涨停池 ≥2 板按四层分组，逐只挂龙头分工标签。
+ * 连板生态（PRD P2）：当日涨停池按<b>板高</b>从 H 到 2 逐层组成金字塔，
+ * 每层给个股（龙头分工标签 + 一字/T字/换手形态 + 封单额）与晋级明细
+ * （昨日 n-1 板家数、晋级成功/失败名单、晋级率）。
  *
- * <p>划界直接复用 {@link LadderMetricsService#hsplit}/{@link LadderMetricsService#layerIndex}
- * 的动态口径（低=2；中=3-4；中高=5..hsplit；极高=hsplit+1..H）——天梯的分层和打分的四层
- * 溢价必须能对上号，否则页面上"极高位"两边的票对不起来。空层保留（断档本身是信息）。
- *
- * <p>龙头标签取 {@link PrdMetricsService} 的同一份判定（总龙头/中军/卡位/反包给到只，
- * 跟风=主线内扣除前四者的涨停股），页面上每个标签都能在 score-detail 的阵眼维里复现。
- * 晋级旗标按昨日涨停池连板数比对（昨日同代码连板数 = 今日-1 即 true）。
+ * <p>四层动态归属（低=2/中=3-4/中高=5..hsplit/极高=hsplit+1..H）仍按
+ * {@link LadderMetricsService#hsplit}/{@link LadderMetricsService#layerIndex} 打在每层上，
+ * 保证金字塔的层名与打分四层对得上。龙头标签与判定依据全部取自 {@link PrdMetricsService} 同一份快照。
  */
 @Service
 public class TiantiService {
 
     private static final ZoneId CN = ZoneId.of("Asia/Shanghai");
+    private static final String[] LAYER_LABELS = {"低位", "中位", "中高位", "极高位"};
 
     private final PrdMetricsService prdMetrics;
     private final MarketStockMapper marketStockMapper;
@@ -46,18 +47,29 @@ public class TiantiService {
         PrdMetricsService.Snapshot snap = prdMetrics.snapshot(userId, date);
 
         List<MarketStock> zt = listPool(date, MarketStock.POOL_LIMIT_UP);
-        Map<String, Integer> prevBoard = new HashMap<>();
+        List<MarketStock> zb = listPool(date, MarketStock.POOL_BROKEN);
         LocalDate prev = marketStockMapper.prevDetailDate(date);
-        if (prev != null) {
-            for (MarketStock row : listPool(prev, MarketStock.POOL_LIMIT_UP)) {
-                prevBoard.put(row.getCode(), row.getConsecutive() == null ? 1 : row.getConsecutive());
-            }
+        List<MarketStock> prevZT = prev == null ? new ArrayList<MarketStock>()
+                : listPool(prev, MarketStock.POOL_LIMIT_UP);
+        Map<String, Integer> prevBoard = new HashMap<>();
+        for (MarketStock row : prevZT) {
+            prevBoard.put(row.getCode(), row.getConsecutive() == null ? 1 : row.getConsecutive());
+        }
+        // 今日个股按代码索引（涨停 + 炸板），判晋级失败后的去向
+        Map<String, MarketStock> todayZtByCode = new LinkedHashMap<>();
+        for (MarketStock row : zt) {
+            todayZtByCode.put(row.getCode(), row);
+        }
+        Map<String, MarketStock> todayZbByCode = new LinkedHashMap<>();
+        for (MarketStock row : zb) {
+            todayZbByCode.put(row.getCode(), row);
         }
 
         TiantiVO vo = new TiantiVO();
         vo.setTradeDate(date);
         vo.setMaxBoard(snap.maxBoard);
         vo.setMainIndustry(snap.mainIndustry);
+        vo.setMainlineConfirmed(snap.mainlineConfirmed);
         vo.setZtGatherPct(snap.ztGatherPct);
         vo.setHeightGatherPct(snap.heightGatherPct);
         vo.setPersistenceDays(snap.persistenceDays);
@@ -65,7 +77,6 @@ public class TiantiService {
         vo.setZbTotal(snap.zbTotal);
         vo.setDragon(dragon(snap));
 
-        // 角色只按代码认（snapshot 与本服务的行是两趟查询，对象不等号但代码同源）
         Set<String> zong = new HashSet<>();
         if (snap.zongLong != null && snap.zongLong.getCode() != null) {
             zong.add(snap.zongLong.getCode());
@@ -74,89 +85,132 @@ public class TiantiService {
         Set<String> fanBao = codes(snap.fanBao);
         String kaWeiCode = snap.kaWei == null ? null : snap.kaWei.getCode();
 
-        // 梯子：连板 ≥2，先板高降序、同板高按涨幅降序
-        List<MarketStock> ladder = new ArrayList<>();
-        for (MarketStock row : zt) {
-            int n = row.getConsecutive() == null ? 1 : row.getConsecutive();
-            if (n >= 2) {
-                ladder.add(row);
-            }
-        }
-        ladder.sort((a, b) -> {
-            int na = a.getConsecutive() == null ? 1 : a.getConsecutive();
-            int nb = b.getConsecutive() == null ? 1 : b.getConsecutive();
-            if (na != nb) {
-                return nb - na;
-            }
-            BigDecimal ca = a.getChangePct();
-            BigDecimal cb = b.getChangePct();
-            if (ca == null && cb == null) {
-                return 0;
-            }
-            if (ca == null) {
-                return 1;
-            }
-            if (cb == null) {
-                return -1;
-            }
-            return cb.compareTo(ca);
-        });
-
         int h = Math.max(snap.maxBoard, 2);
-        int split = LadderMetricsService.hsplit(h);
-        List<TiantiVO.Tier> tiers = new ArrayList<>();
-        addTier(tiers, tier("top", "极高位", split + 1, h, ladder, prevBoard, snap, zong, zhongJun, kaWeiCode, fanBao));
-        addTier(tiers, tier("midhigh", "中高位", 5, split, ladder, prevBoard, snap, zong, zhongJun, kaWeiCode, fanBao));
-        addTier(tiers, tier("mid", "中位", 3, 4, ladder, prevBoard, snap, zong, zhongJun, kaWeiCode, fanBao));
-        addTier(tiers, tier("low", "低位", 2, 2, ladder, prevBoard, snap, zong, zhongJun, kaWeiCode, fanBao));
-        vo.setTiers(tiers);
+
+        // 金字塔：n 从 H 往下到 2，每层独立判晋级
+        List<TiantiVO.Level> levels = new ArrayList<>();
+        for (int n = h; n >= 2; n--) {
+            levels.add(level(n, h, zt, prevZT, prevBoard, todayZtByCode, todayZbByCode, snap,
+                    zong, zhongJun, kaWeiCode, fanBao));
+        }
+        vo.setLevels(levels);
         return vo;
     }
 
-    private static void addTier(List<TiantiVO.Tier> out, TiantiVO.Tier t) {
-        if (t != null) {
-            out.add(t);
-        }
-    }
+    private TiantiVO.Level level(int n, int h,
+                                 List<MarketStock> zt, List<MarketStock> prevZT,
+                                 Map<String, Integer> prevBoard,
+                                 Map<String, MarketStock> todayZtByCode,
+                                 Map<String, MarketStock> todayZbByCode,
+                                 PrdMetricsService.Snapshot snap,
+                                 Set<String> zong, Set<String> zhongJun, String kaWeiCode, Set<String> fanBao) {
+        TiantiVO.Level lvl = new TiantiVO.Level();
+        lvl.setBoard(n);
+        lvl.setLayerLabel(LAYER_LABELS[LadderMetricsService.layerIndex(n, h)]);
 
-    /** 区间无效（lo>hi，H 不足时中高/极高段）整层不返回，而不是返回一个不可能有票的空档。 */
-    private static TiantiVO.Tier tier(String key, String label, int lo, int hi, List<MarketStock> ladder,
-                                      Map<String, Integer> prevBoard, PrdMetricsService.Snapshot snap,
-                                      Set<String> zong, Set<String> zhongJun, String kaWeiCode, Set<String> fanBao) {
-        if (lo > hi) {
-            return null;
-        }
-        TiantiVO.Tier t = new TiantiVO.Tier();
-        t.setKey(key);
-        t.setLabel(label);
-        t.setBoardRange(lo + "-" + hi + "板");
-        List<TiantiVO.Row> rows = new ArrayList<>();
-        if (lo <= hi) {
-            for (MarketStock row : ladder) {
-                int n = row.getConsecutive() == null ? 1 : row.getConsecutive();
-                if (n < lo || n > hi) {
-                    continue;
-                }
-                TiantiVO.Row r = new TiantiVO.Row();
-                r.setCode(row.getCode());
-                r.setName(row.getName());
-                r.setIndustry(row.getIndustry());
-                r.setBoard(n);
-                r.setChangePct(row.getChangePct());
-                r.setBreakCount(row.getBreakCount());
-                r.setRole(roleOf(row, n, snap, zong, zhongJun, kaWeiCode, fanBao));
-                Integer prevN = prevBoard.get(row.getCode());
-                r.setPromoted(prevN == null ? null : prevN == n - 1);
-                rows.add(r);
+        // 今日 n 板个股（板高降序、同板高涨幅降序由 zt 顺序保证——zt 按代码入库无序，这里现排）
+        List<MarketStock> onBoard = new ArrayList<>();
+        for (MarketStock row : zt) {
+            int b = row.getConsecutive() == null ? 1 : row.getConsecutive();
+            if (b == n) {
+                onBoard.add(row);
             }
         }
-        t.setRows(rows);
-        t.setCount(rows.size());
-        return t;
+        onBoard.sort((a, b) -> {
+            BigDecimal ca = a.getChangePct();
+            BigDecimal cb = b.getChangePct();
+            if (ca == null && cb == null) return 0;
+            if (ca == null) return 1;
+            if (cb == null) return -1;
+            return cb.compareTo(ca);
+        });
+
+        List<TiantiVO.Row> rows = new ArrayList<>();
+        List<TiantiVO.Row> success = new ArrayList<>();
+        for (MarketStock row : onBoard) {
+            TiantiVO.Row r = rowOf(row, n, snap, zong, zhongJun, kaWeiCode, fanBao);
+            Integer prevN = prevBoard.get(row.getCode());
+            r.setPromoted(prevN == null ? null : prevN == n - 1);
+            rows.add(r);
+            if (prevN != null && prevN == n - 1) {
+                success.add(r);
+            }
+        }
+        lvl.setRows(rows);
+        lvl.setCount(rows.size());
+        lvl.setSuccess(success);
+        lvl.setPromotedCount(success.size());
+
+        // 昨日 n-1 板：分母。注意 n=2 时昨日 1 板=首板，全部纳入
+        List<MarketStock> prevCandidates = new ArrayList<>();
+        for (MarketStock row : prevZT) {
+            int b = row.getConsecutive() == null ? 1 : row.getConsecutive();
+            if (b == n - 1) {
+                prevCandidates.add(row);
+            }
+        }
+        lvl.setPrevCount(prevCandidates.size());
+        lvl.setPromoRate(prevCandidates.isEmpty() ? null
+                : PrdMetricsService.pct(success.size(), prevCandidates.size()));
+
+        // 失败：昨日 n-1 板，今日没出现在 n 板
+        List<TiantiVO.FailedRow> failed = new ArrayList<>();
+        Set<String> successCodes = new HashSet<>();
+        for (TiantiVO.Row r : success) {
+            successCodes.add(r.getCode());
+        }
+        for (MarketStock prev : prevCandidates) {
+            if (successCodes.contains(prev.getCode())) {
+                continue;
+            }
+            failed.add(failedRow(prev, n - 1, todayZtByCode.get(prev.getCode()),
+                    todayZbByCode.get(prev.getCode())));
+        }
+        lvl.setFailed(failed);
+        return lvl;
     }
 
-    /** 标签优先级：总龙头 > 中军 > 卡位 > 反包 > 跟风（主线内其余） > 无标签。 */
-    private static String roleOf(MarketStock row, int board, PrdMetricsService.Snapshot snap,
+    private TiantiVO.Row rowOf(MarketStock row, int n, PrdMetricsService.Snapshot snap,
+                                Set<String> zong, Set<String> zhongJun, String kaWeiCode, Set<String> fanBao) {
+        TiantiVO.Row r = new TiantiVO.Row();
+        r.setCode(row.getCode());
+        r.setName(row.getName());
+        r.setIndustry(row.getIndustry());
+        r.setBoard(n);
+        r.setChangePct(row.getChangePct());
+        r.setBreakCount(row.getBreakCount());
+        r.setSealAmount(row.getSealAmount());
+        r.setFirstSealTime(row.getFirstSealTime());
+        r.setPattern(StockPatterns.of(row));
+        r.setRole(roleOf(row, snap, zong, zhongJun, kaWeiCode, fanBao));
+        return r;
+    }
+
+    private TiantiVO.FailedRow failedRow(MarketStock prev, int prevBoardN,
+                                         MarketStock todayRow, MarketStock bombRow) {
+        TiantiVO.FailedRow f = new TiantiVO.FailedRow();
+        f.setCode(prev.getCode());
+        f.setName(prev.getName());
+        f.setIndustry(prev.getIndustry());
+        f.setPrevBoard(prevBoardN);
+        if (todayRow != null) {
+            // 今日仍封住涨停但没到 n 板（如昨 2 板今天还是 2 板/退回 1 板）
+            f.setTodayStatus("ZT");
+            f.setChangePct(todayRow.getChangePct());
+            f.setPattern(StockPatterns.of(todayRow));
+        } else if (bombRow != null) {
+            f.setTodayStatus("ZB");
+            f.setChangePct(bombRow.getChangePct());
+            f.setPullbackPct(bombRow.getPullbackPct());
+        } else {
+            // 今日既没涨停也没炸板：免费源没有全市场逐只行情，明细未覆盖就明说，不编涨跌幅
+            f.setTodayStatus("GONE");
+        }
+        return f;
+    }
+
+    /** 标签优先级：总龙头 > 中军 > 卡位 > 反包 > 跟风（日内核心内其余） > 无标签。 */
+    private static String roleOf(MarketStock row, PrdMetricsService.Snapshot snap,
                                  Set<String> zong, Set<String> zhongJun, String kaWeiCode, Set<String> fanBao) {
         String code = row.getCode();
         if (code != null && zong.contains(code)) {
@@ -180,6 +234,7 @@ public class TiantiService {
     private static TiantiVO.Dragon dragon(PrdMetricsService.Snapshot snap) {
         TiantiVO.Dragon d = new TiantiVO.Dragon();
         d.setAction(snap.zongLongAction == null ? "ABSENT" : snap.zongLongAction);
+        d.setReason(snap.dragonReason);
         if (snap.zongLong != null) {
             d.setCode(snap.zongLong.getCode());
             d.setName(snap.zongLong.getName());

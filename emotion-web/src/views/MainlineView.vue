@@ -1,23 +1,31 @@
 <template>
   <div class="mainline-page">
     <div class="page-header">
-      <h2>主线生态</h2>
+      <h2>日内核心</h2>
       <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" :clearable="false"
         :disabled-date="notBeforeToday" style="width: 168px" />
     </div>
     <el-alert class="intro" type="info" :closable="false" show-icon>
-      <template #title>主线五要素 + 生命周期 + 龙头分工 + 轮动信号，与打分引擎同源</template>
+      <template #title>日内核心五要素 + 生命周期 + 龙头分工 + 轮动信号，与打分引擎同源</template>
       <div class="intro-body">
-        <p>页面上的每个数都能在复盘页 score-detail 里找到同一个值：主线判定取涨停聚集度最高者，成交额聚集度是人工口径。</p>
+        <p>日内核心=当日涨停聚集度最高的行业；只有连续 3 个交易日（含今天）该行业涨停≥5 家，才被收集为主线龙头。成交额聚集度是人工口径。</p>
       </div>
     </el-alert>
 
-    <el-empty v-if="!loading && !vo" description="当日无主线：行情明细未回补，或当日没有涨停股" />
+    <el-empty v-if="!loading && !vo" description="当日无日内核心：行情明细未回补，或当日没有涨停股" />
 
     <template v-if="vo">
+      <!-- 主线收集状态 -->
+      <el-alert v-if="vo.mainIndustry"
+        :type="vo.mainlineConfirmed ? 'success' : 'warning'"
+        :closable="false" show-icon class="confirm-bar"
+        :title="vo.mainlineConfirmed
+          ? `「${vo.mainIndustry}」已连续 ${vo.persistenceDays} 个交易日有热度（≥5 家涨停），已收集为主线龙头`
+          : `「${vo.mainIndustry}」今日最热但热度未满连续 3 个交易日（当前 ${vo.persistenceDays ?? 0} 天），暂为日内核心，未收集为主线龙头`" />
+
       <el-alert v-if="vo.mainThemeMatched === false" type="warning" :closable="false" show-icon
-        title="题材行与主线行业没有对上：催化剂硬度取的是默认值，可信度打折（去主线龙头页登记该行业题材可修正）"
-        style="margin-bottom: 16px" />
+        title="题材行与日内核心行业没有对上：催化剂硬度取的是默认值，可信度打折（去主线龙头页登记该行业题材可修正）"
+        style="margin: 16px 0" />
 
       <!-- 生命周期轨道 -->
       <section class="block" v-loading="loading">
@@ -36,14 +44,14 @@
             <div v-if="i < (vo.lifecycle?.length || 0) - 1" class="stage-line"></div>
           </template>
         </div>
-        <p class="stage-note">{{ STAGE_NOTE[vo.lifecycleStage] || '当日无主线，生命周期不可判' }}</p>
+        <p class="stage-note">{{ STAGE_NOTE[vo.lifecycleStage] || '当日无日内核心，生命周期不可判' }}</p>
       </section>
 
       <!-- 五要素 -->
       <section class="block" v-loading="loading">
         <div class="block-head">
-          <h3>主线五要素 <span class="sub">{{ vo.mainIndustry || '—' }}</span></h3>
-          <span class="scale">主线涨停 {{ nz(vo.mainZt) }}/{{ nz(vo.ztTotal) }} · 主线最高板 {{ nz(vo.mainMaxBoard) }}/{{ nz(vo.maxBoard) }}</span>
+          <h3>日内核心五要素 <span class="sub">{{ vo.mainIndustry || '—' }}</span></h3>
+          <span class="scale">核心涨停 {{ nz(vo.mainZt) }}/{{ nz(vo.ztTotal) }} · 核心最高板 {{ nz(vo.mainMaxBoard) }}/{{ nz(vo.maxBoard) }}</span>
         </div>
         <div class="elem-grid">
           <div class="elem">
@@ -73,7 +81,7 @@
           <div class="elem">
             <span class="elem-label">持续性</span>
             <span class="elem-value">{{ vo.persistenceDays != null ? vo.persistenceDays + ' 天' : '—' }}</span>
-            <span class="elem-sub">连续活跃 · 权重 15%</span>
+            <span class="elem-sub">连续热度 · 权重 15%（≥5家/日）</span>
           </div>
         </div>
       </section>
@@ -102,12 +110,13 @@
               自涨停回撤 -{{ Number(vo.dragon.pullbackPct).toFixed(2) }}%
             </span>
           </div>
+          <p v-if="vo.dragon.reason" class="dragon-reason">判定依据：{{ vo.dragon.reason }}</p>
         </div>
         <el-alert v-else type="info" :closable="false" show-icon title="当日无总龙头（全市场没有连板股），阵眼按缺判" style="margin-bottom: 14px" />
 
         <div class="member-groups">
           <div class="member-group">
-            <h4>中军 <span class="sub">主线内其余连板 ≥2</span></h4>
+            <h4>中军 <span class="sub">日内核心内其余连板 ≥2</span></h4>
             <el-empty v-if="!vo.zhongJun?.length" description="无" :image-size="40" />
             <el-table v-else :data="vo.zhongJun" size="small">
               <el-table-column prop="code" label="代码" width="90" />
@@ -125,7 +134,7 @@
           </div>
 
           <div class="member-group">
-            <h4>跟风 <span class="sub">主线内涨停 {{ vo.genFengCount ?? '—' }} 只</span></h4>
+            <h4>跟风 <span class="sub">日内核心内涨停 {{ vo.genFengCount ?? '—' }} 只</span></h4>
             <div class="ka-wei" v-if="vo.kaWei">
               <el-tag type="warning" effect="dark" size="small">卡位</el-tag>
               <span class="member-name">{{ vo.kaWei.name }}</span>
@@ -366,6 +375,15 @@ watch(date, load)
   border-radius: 10px;
   padding: 12px 14px;
   margin-bottom: 14px;
+}
+.dragon-reason {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #d97706;
+}
+.confirm-bar {
+  margin-bottom: 16px;
 }
 .dragon-line {
   display: flex;

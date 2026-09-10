@@ -71,6 +71,8 @@ export const marketApi = {
   stocks: (date) => api.get('/market/stocks', { params: { date }, skipErrorToast: true }),
   // 大盘生态页·五大指数（公开表 t_index_close）；不传日期后端回落最近交易日
   indexes: (date) => api.get('/market/indexes', { params: { date }, skipErrorToast: true }),
+  // 大盘生态页·实时涨跌家数（东财 f104/105/106，无历史日期）
+  breadth: () => api.get('/market/breadth', { skipErrorToast: true }),
   premiumTiers: (date) => api.get('/market/premium-tiers', { params: { date } }),
   /**
    * 子项读数（第 4 维两条家数口径 + 第 8/9 维）。刻意不和 snapshot 并成一次：

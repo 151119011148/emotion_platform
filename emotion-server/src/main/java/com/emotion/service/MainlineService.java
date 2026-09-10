@@ -57,6 +57,7 @@ public class MainlineService {
         vo.setTradeDate(date);
         vo.setLifecycle(LIFECYCLE);
         vo.setMainIndustry(snap.mainIndustry);
+        vo.setMainlineConfirmed(snap.mainlineConfirmed);
         vo.setZtGatherPct(snap.ztGatherPct);
         vo.setHeightGatherPct(snap.heightGatherPct);
         vo.setPersistenceDays(snap.persistenceDays);
@@ -153,6 +154,7 @@ public class MainlineService {
     private static MainlineVO.Dragon dragon(PrdMetricsService.Snapshot snap) {
         MainlineVO.Dragon d = new MainlineVO.Dragon();
         d.setAction(snap.zongLongAction == null ? "ABSENT" : snap.zongLongAction);
+        d.setReason(snap.dragonReason);
         d.setPromoted(snap.zongLongPromoted);
         if (snap.zongLong != null) {
             d.setCode(snap.zongLong.getCode());

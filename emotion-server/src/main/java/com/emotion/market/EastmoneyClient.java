@@ -92,6 +92,46 @@ public class EastmoneyClient {
         return pool("/getTopicZBPool", "fbt%3Aasc", date);
     }
 
+    // ---------- 全市场涨跌家数 ----------
+
+    /**
+     * 全市场上涨/下跌/平盘家数：东财指数报价扩展字段 f104/f105/f106，
+     * 沪（secid=1.000001）+ 深（secid=0.399001）两行合计。
+     *
+     * <p>只有实时值、不能回溯历史日期；周末/非交易时段返回的是最近交易日收盘口径。
+     * 取不到任何一行返回 null——让调用方显示「未取到」，绝不给 0（0 家上涨是股灾，不是缺数）。
+     */
+    public int[] marketBreadth() {
+        String url = listBase + "/api/qt/ulist.np/get"
+                + "?ut=" + ut + "&fltt=2&invt=2"
+                + "&secids=1.000001,0.399001"
+                + "&fields=f104,f105,f106";
+        String body = fetcher.getText(url);
+        if (body == null) {
+            return null;
+        }
+        try {
+            JsonNode diff = mapper.readTree(body).path("data").path("diff");
+            if (!diff.isArray() || diff.size() == 0) {
+                return null;
+            }
+            int up = 0, down = 0, flat = 0, found = 0;
+            for (JsonNode node : diff) {
+                if (node.has("f104") && node.has("f105")) {
+                    up += node.path("f104").asInt(0);
+                    down += node.path("f105").asInt(0);
+                    flat += node.path("f106").asInt(0);
+                    found++;
+                }
+            }
+            // 只取到半壁（沪或深）不给数：少算一半的家数比没有更误导
+            return found == 2 ? new int[]{up, down, flat} : null;
+        } catch (IOException e) {
+            log.warn("涨跌家数响应解析失败: {}", e.getClass().getSimpleName());
+            return null;
+        }
+    }
+
     // ---------- A股代码总表 ----------
 
     /**
@@ -394,7 +434,26 @@ public class EastmoneyClient {
         // p / ztp 上游按 ×1000 传输；回撤是比值，换算会约掉，故不除 1000
         row.setPrice(decimal(node, "p"));
         row.setLimitPrice(decimal(node, "ztp"));
+        // fund 封单额（元）、fbt/lbt 首末封板时间（HHMMSS）：封单额与一字/T字形态的唯一数据源
+        row.setFund(decimal(node, "fund"));
+        row.setFbt(intOrNull(node, "fbt"));
+        row.setLbt(intOrNull(node, "lbt"));
         return row;
+    }
+
+    private static Integer intOrNull(JsonNode node, String field) {
+        JsonNode v = node.path(field);
+        if (v.isNumber()) {
+            return v.asInt();
+        }
+        if (v.isTextual()) {
+            try {
+                return Integer.valueOf(v.asText().trim());
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private static String text(JsonNode node, String field) {

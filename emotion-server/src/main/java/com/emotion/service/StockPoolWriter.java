@@ -96,6 +96,12 @@ public class StockPoolWriter {
             stock.setChangePct(round2(row.getZdp()));
             stock.setClosePrice(yuan(row.getPrice()));
             stock.setLimitPrice(yuan(row.getLimitPrice()));
+            // 形态三字段只有涨停池有意义（fund/fbt/lbt 是涨停池专属返回）
+            if (MarketStock.POOL_LIMIT_UP.equals(pool)) {
+                stock.setSealAmount(row.getFund());
+                stock.setFirstSealTime(row.getFbt());
+                stock.setLastSealTime(row.getLbt());
+            }
             boolean isBroken = MarketStock.POOL_BROKEN.equals(pool);
             stock.setPullbackPct(isBroken ? round2(row.pullbackFromLimitPct()) : null);
             stock.setBigLoss(isBroken && bigLossCodes.contains(row.getCode()) ? 1 : 0);

@@ -44,5 +44,11 @@ public class MarketStock {
     /** 自涨停回撤 %，只有炸板池有。 */
     private BigDecimal pullbackPct;
     private Integer bigLoss;
+    /** 封单额（元），东财 fund，涨停池收盘封单资金；炸板/跌停池为 null。 */
+    private BigDecimal sealAmount;
+    /** 首次封板时间 HHMMSS（东财 fbt），判一字/T字用。 */
+    private Integer firstSealTime;
+    /** 最后封板时间 HHMMSS（东财 lbt）。 */
+    private Integer lastSealTime;
     private LocalDateTime createdAt;
 }

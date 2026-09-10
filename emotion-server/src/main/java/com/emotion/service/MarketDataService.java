@@ -149,6 +149,25 @@ public class MarketDataService {
     // ---------- 明细回读 ----------
 
     /**
+     * 全市场实时涨跌家数（东财 f104/105/106，沪深合计）。
+     * 上游不可达或只取到半壁时返回 null——页面明说未取到，不把缺数显示成 0。
+     */
+    public com.emotion.vo.MarketBreadthVO breadth() {
+        int[] b = eastmoney.marketBreadth();
+        if (b == null) {
+            return null;
+        }
+        com.emotion.vo.MarketBreadthVO vo = new com.emotion.vo.MarketBreadthVO();
+        vo.setUpCount(b[0]);
+        vo.setDownCount(b[1]);
+        vo.setFlatCount(b[2]);
+        int denom = b[0] + b[1];
+        vo.setRedRatioPct(denom == 0 ? null
+                : Math.round(b[0] * 10000.0 / denom) / 100.0);
+        return vo;
+    }
+
+    /**
      * 读一日盘面明细，组出仪表盘 hover 要用的四个视图。
      *
      * 梯队、断档、首板家数在这里算而不在前端算：它们都由同一个"涨停池 lbc 分布"派生，

@@ -24,6 +24,12 @@ public class PoolRow {
     private BigDecimal limitPrice;
     /** 收盘价，上游原始值（×1000）。 */
     private BigDecimal price;
+    /** 封单额（元）= 东财 fund，收盘封单资金。 */
+    private BigDecimal fund;
+    /** 首次封板时间 HHMMSS（fbt）。92500=集合竞价封单。 */
+    private Integer fbt;
+    /** 最后封板时间 HHMMSS（lbt）。 */
+    private Integer lbt;
 
     /**
      * 从涨停价回落的日内回撤幅度 %。

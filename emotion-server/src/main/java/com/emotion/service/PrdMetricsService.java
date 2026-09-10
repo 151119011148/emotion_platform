@@ -39,8 +39,16 @@ public class PrdMetricsService {
 
     private static final Logger log = LoggerFactory.getLogger(PrdMetricsService.class);
 
-    /** 主线"活跃一天"的门槛：当日该行业涨停 ≥3 家。持续性=按此口径往回数连续活跃天数。 */
-    static final int ACTIVE_ZT_THRESHOLD = 3;
+    /**
+     * 主线"一个热度交易日"的门槛：当日该行业涨停 ≥5 家（2026-09-10 起从 3 收紧到 5）。
+     * 日内最热行业每天都有（=日内核心），但只有连续 3 个热度交易日（含今天，即 persistenceDays≥3）
+     * 才被收集为「主线龙头」。
+     */
+    static final int HOT_ZT_THRESHOLD = 5;
+    /** 轮动信号「新题材种子」的门槛维持 3 家：种子本来就是早期预警，比主线确认松一档。 */
+    static final int SEED_ZT_THRESHOLD = 3;
+    /** 连续多少个热度交易日才收集为主线龙头（含今天）。 */
+    static final int MAINLINE_CONFIRM_DAYS = 3;
     /** 持续性回看的最大窗口（交易日，按 t_market_stock 已落库日期计）。 */
     static final int PERSISTENCE_WINDOW = 30;
 
@@ -67,6 +75,10 @@ public class PrdMetricsService {
         public MarketStock zongLong;           // 总龙头=全市场最高连板（可 null）
         public boolean zongLongPromoted;       // 总龙头是否晋级（昨 H-1 今 H）
         public String zongLongAction;          // PROMOTE/HOLD/BREAK/ABSENT
+        /** 总龙头判定依据（人话）：选取规则 + 同板高 tie-break + 今日状态证据。 */
+        public String dragonReason;
+        /** 日内核心连续热度天数（今日≥5 家起算）；不足 {@link #MAINLINE_CONFIRM_DAYS} 不收集为主线龙头。 */
+        public boolean mainlineConfirmed;
         public List<MarketStock> zhongJun = new ArrayList<>();  // 主线内其余连板≥2（中军候选）
         public int genFengCount;               // 主线内跟风涨停家数（扣掉总龙/中军）
         public MarketStock kaWei;              // 他题材最高标（封住）/昨日他题材高标今炸
@@ -166,13 +178,24 @@ public class PrdMetricsService {
         s.mainIndustry = main;
         s.mainZt = mainZt;
 
-        // ---------- 高度 ----------
+        // ---------- 高度（总龙头=最高连板；同板高取涨幅最大，同涨幅取代码保证确定性） ----------
         int maxBoard = 0;
         MarketStock zongLong = null;
         for (MarketStock row : todayZT) {
             int n = row.getConsecutive() == null ? 1 : row.getConsecutive();
-            if (n > maxBoard) {
+            if (n < maxBoard) {
+                continue;
+            }
+            if (n > maxBoard || zongLong == null) {
                 maxBoard = n;
+                zongLong = row;
+                continue;
+            }
+            BigDecimal ca = row.getChangePct();
+            BigDecimal cb = zongLong.getChangePct();
+            if (ca != null && (cb == null || ca.compareTo(cb) > 0
+                    || (ca.compareTo(cb) == 0 && row.getCode() != null
+                        && row.getCode().compareTo(zongLong.getCode() == null ? "" : zongLong.getCode()) < 0))) {
                 zongLong = row;
             }
         }
@@ -201,14 +224,14 @@ public class PrdMetricsService {
             s.heightGatherPct = pct(mainMax, maxBoard);
             s.metrics.put("height_gather_pct", bd(s.heightGatherPct));
         }
-        // 持续性：主线行业从 date 往回数连续"活跃日"（当日 ZT≥3）。
+        // 持续性：日内核心行业从 date 往回数连续"热度交易日"（当日该行业 ZT≥5）。
         if (main != null) {
             int days = 0;
             LocalDate cursor = date;
             for (int i = 0; i < PERSISTENCE_WINDOW; i++) {
                 Map<String, Integer> byIndustry = dailyIndustryZt.get(cursor);
                 Integer n = byIndustry == null ? null : byIndustry.get(main);
-                if (n == null || n < ACTIVE_ZT_THRESHOLD) {
+                if (n == null || n < HOT_ZT_THRESHOLD) {
                     break;
                 }
                 days++;
@@ -216,6 +239,7 @@ public class PrdMetricsService {
             }
             // 当日活跃但窗口内一个活跃日都没有的边界由 days=0 覆盖；cursor 走出窗口自然停。
             s.persistenceDays = days;
+            s.mainlineConfirmed = days >= MAINLINE_CONFIRM_DAYS;
             s.metrics.put("persistence_days", BigDecimal.valueOf(days));
         }
         // 催化剂硬度：题材名与主线行业完全一致才认（industry≠题材的已知口径差，宁缺勿错）。
@@ -241,32 +265,54 @@ public class PrdMetricsService {
             s.zongLongAction = s.zongLongPromoted ? "PROMOTE" : "HOLD";
             double score = s.zongLongPromoted ? Math.min(100, 60 + n * 6.0) : 55;
             s.metrics.put("dragon_zong_long", bd(score));
+            StringBuilder r = new StringBuilder();
+            r.append("选取：全市场最高连板 H=").append(n).append(" 板（同板高取涨幅最大）");
+            if (s.zongLongPromoted) {
+                r.append("；今日晋级（昨日 ").append(n - 1).append(" 板 → 今日 ").append(n).append(" 板），进分 ")
+                        .append(Math.round(Math.min(100, 60 + n * 6.0))).append("。");
+            } else if (prevN != null) {
+                r.append("；今日持稳在 ").append(n).append(" 板（昨日同为 ").append(prevN)
+                        .append(" 板，非晋级），进分 55。");
+            } else {
+                r.append("；昨日明细中无该股，无法确认晋级路径，按持稳计 55。");
+            }
+            s.dragonReason = r.toString();
         } else {
             // 今日无涨停池（或最高板缺失）：看昨日最高板的下场
             MarketStock prevTop = topBoard(prevZT);
             if (prevTop != null) {
                 s.zongLong = prevTop; // 供页面展示"谁断的"
+                int prevN = prevTop.getConsecutive() == null ? 1 : prevTop.getConsecutive();
                 MarketStock todayRow = findByCode(todayZT, prevTop.getCode());
                 MarketStock bombRow = findByCode(todayZB, prevTop.getCode());
+                StringBuilder r = new StringBuilder();
+                r.append("选取：昨日最高连板 ").append(prevN).append(" 板（").append(prevTop.getName()).append("）");
                 if (todayRow != null) {
                     s.zongLongAction = "HOLD";
                     s.metrics.put("dragon_zong_long", bd(55));
+                    r.append("；今日仍在涨停池，进分 55。");
                 } else if (bombRow != null) {
                     // 断板：收跌>5% 或日内大幅回撤 → 重罚；否则 25
                     BigDecimal chg = bombRow.getChangePct();
                     BigDecimal pull = bombRow.getPullbackPct();
-                    if (chg != null && chg.compareTo(new BigDecimal("-5")) < 0
-                            || pull != null && pull.compareTo(new BigDecimal("7")) >= 0) {
-                        s.zongLongAction = "BREAK";
-                        s.metrics.put("dragon_zong_long", bd(10));
-                    } else {
-                        s.zongLongAction = "BREAK";
-                        s.metrics.put("dragon_zong_long", bd(25));
+                    boolean severe = (chg != null && chg.compareTo(new BigDecimal("-5")) < 0)
+                            || (pull != null && pull.compareTo(new BigDecimal("7")) >= 0);
+                    s.zongLongAction = "BREAK";
+                    s.metrics.put("dragon_zong_long", bd(severe ? 10 : 25));
+                    r.append("；今日断板落入炸板池");
+                    if (chg != null) {
+                        r.append("，收涨 ").append(chg).append("%");
                     }
+                    if (pull != null) {
+                        r.append("，自涨停回撤 ").append(pull).append("%");
+                    }
+                    r.append(severe ? "（收跌>5% 或回撤≥7%），进分 10。" : "，未触发重罚线，进分 25。");
                 } else {
                     s.zongLongAction = "ABSENT";
                     s.metrics.put("dragon_zong_long", bd(30));
+                    r.append("；今日既未涨停也未进炸板池（缺席/明细未覆盖），进分 30。");
                 }
+                s.dragonReason = r.toString();
             }
         }
         // 中军：主线内除总龙头外的连板≥2（容量担当候选），均涨幅映射
@@ -380,7 +426,7 @@ public class PrdMetricsService {
             }
             List<String> seeds = new ArrayList<String>();
             for (Map.Entry<String, Integer> e : todayByInd.entrySet()) {
-                if (e.getValue() >= ACTIVE_ZT_THRESHOLD && countIndustry(prevZT, e.getKey()) == 0) {
+                if (e.getValue() >= SEED_ZT_THRESHOLD && countIndustry(prevZT, e.getKey()) == 0) {
                     seeds.add(e.getKey() + "(" + e.getValue() + ")");
                 }
             }

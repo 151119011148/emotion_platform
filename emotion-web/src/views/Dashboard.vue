@@ -47,18 +47,20 @@
 
     <IndicatorCards :record="headRecord" />
 
-    <!-- PRD 2.0：主线状态条。没有主线时整条隐藏，不打扰 -->
+    <!-- PRD 2.0：主线状态条。日内核心每天显示，连续3热度日才标「主线」 -->
     <section class="block mainline-bar" v-if="mainline && mainline.mainIndustry">
       <div class="bar-head">
-        <span class="bar-title">主线</span>
+        <span class="bar-title">日内核心</span>
         <span class="main-industry">{{ mainline.mainIndustry }}</span>
-        <el-tag v-if="mainline.lifecycleStage" :type="STAGE_TYPE[mainline.lifecycleStage] || 'info'"
-          size="small" effect="dark">{{ mainline.lifecycleStage }}</el-tag>
-        <span class="bar-elems">
-          涨停聚集 {{ pctOrNA(mainline.ztGatherPct) }} · 高度聚集 {{ pctOrNA(mainline.heightGatherPct) }}
-          · 持续 {{ mainline.persistenceDays ?? '—' }} 天 · 硬度 {{ mainline.catalystHardness ?? '—' }}/5
-        </span>
-        <router-link class="bar-link" to="/mainline">主线生态 →</router-link>
+        <el-tag v-if="mainline.lifecycleStage" :type="STAGE_TYPE[mainline.lifecycleStage] || 'info'" effect="dark" size="small">{{ mainline.lifecycleStage }}</el-tag>
+        <el-tag :type="mainline.mainlineConfirmed ? 'success' : 'warning'" size="small">
+          {{ mainline.mainlineConfirmed ? '已成主线' : `热度${mainline.persistenceDays ?? 0}/3日` }}
+        </el-tag>
+      </div>
+      <div class="bar-elems">
+        <span>涨停聚集 {{ pctOrNA(mainline.ztGatherPct) }} · 高度聚集 {{ pctOrNA(mainline.heightGatherPct) }}
+          · 持续 {{ mainline.persistenceDays ?? '—' }} 天 · 硬度 {{ mainline.catalystHardness ?? '—' }}/5</span>
+        <router-link class="bar-link" to="/mainline">日内核心 →</router-link>
       </div>
     </section>
 

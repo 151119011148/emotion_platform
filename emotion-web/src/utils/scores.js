@@ -18,7 +18,7 @@
 /** 五维一级维：dimNo / label / weight（维权和=1.00）。 */
 export const FIVE_DIM_DIMS = {
   market: { dim: 1, label: '大盘生态', weight: 0.25, recordColumn: 'scoreMarket' },
-  theme_main: { dim: 2, label: '主线生态', weight: 0.20, recordColumn: 'scoreThemeMain' },
+  theme_main: { dim: 2, label: '日内核心', weight: 0.20, recordColumn: 'scoreThemeMain' },
   board: { dim: 3, label: '连板生态', weight: 0.25, recordColumn: 'scoreBoard' },
   first: { dim: 4, label: '首板生态', weight: 0.15, recordColumn: 'scoreFirst' },
   anchor: { dim: 5, label: '阵眼', weight: 0.15, recordColumn: 'scoreAnchor' }

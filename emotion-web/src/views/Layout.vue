@@ -28,7 +28,7 @@
         </el-menu-item>
         <el-menu-item index="/mainline">
           <el-icon><Aim /></el-icon>
-          <span>主线生态</span>
+          <span>日内核心</span>
         </el-menu-item>
         <el-menu-item index="/surveillance">
           <el-icon><Warning /></el-icon>

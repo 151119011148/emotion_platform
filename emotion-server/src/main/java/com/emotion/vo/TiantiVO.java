@@ -7,9 +7,8 @@ import java.util.List;
 import lombok.Data;
 
 /**
- * 连板天梯（PRD P2）：当日涨停池 ≥2 板的连板股按四层分组，逐只挂龙头分工标签
- * （🔴总龙头 🔵中军 🟢跟风 🟡卡位 🟣反包）。标签由 {@link com.emotion.service.PrdMetricsService}
- * 的龙头分工判定推导，与打分引擎用的是同一份结论。
+ * 连板生态（PRD P2）：当日涨停池 ≥2 板按<b>板高逐层</b>组成金字塔，逐只挂龙头分工标签与形态
+ * （一字/T字/换手），每层给出晋级成功/失败名单与晋级率。标签、形态、晋级均与打分引擎同源。
  */
 @Data
 public class TiantiVO {
@@ -17,13 +16,12 @@ public class TiantiVO {
     private LocalDate tradeDate;
     /** 全市场最高连板 H。 */
     private Integer maxBoard;
-    /** 主线行业（涨停聚集度最高者）。 */
+    /** 日内核心行业（涨停聚集度最高者）；连续 3 热度交易日才确认为主线龙头。 */
     private String mainIndustry;
-    /** 主线 5 要素速览：涨停聚集度 %。 */
+    /** 日内核心是否已被收集为主线龙头（连续热度 ≥3 个交易日）。 */
+    private Boolean mainlineConfirmed;
     private Double ztGatherPct;
-    /** 高度聚集度 %。 */
     private Double heightGatherPct;
-    /** 主线连续活跃天数。 */
     private Integer persistenceDays;
     private Integer ztTotal;
     private Integer zbTotal;
@@ -31,8 +29,11 @@ public class TiantiVO {
     /** 总龙头状态卡：即使只有首板（梯子空）也照常给出。 */
     private Dragon dragon;
 
-    /** 四层分组，顺序极高→中高→中→低；当日该层无股则 rows 空但档位保留（断档本身就是信息）。 */
-    private List<Tier> tiers;
+    /**
+     * 金字塔层，从最高板到 2 板逐层一个；空层保留（断档本身就是信息）。
+     * 旧的四层（极高/中高/中/低）动态归属用 {@link Level#layerLabel} 表达，分层口径与打分一致。
+     */
+    private List<Level> levels;
 
     @Data
     public static class Dragon {
@@ -43,15 +44,29 @@ public class TiantiVO {
         private String action;      // PROMOTE / HOLD / BREAK / ABSENT
         private Boolean promoted;
         private BigDecimal changePct;
+        /** 判定依据：选取规则 + tie-break + 今日状态证据。 */
+        private String reason;
     }
 
     @Data
-    public static class Tier {
-        private String key;         // top / midhigh / mid / low
-        private String label;       // 极高位 / 中高位 / 中位 / 低位
-        private String boardRange;  // 如 "5-6板"、"2板"
+    public static class Level {
+        /** 本层板高 n（2..H）。 */
+        private Integer board;
+        /** 打分四层归属：极高位/中高位/中位/低位。 */
+        private String layerLabel;
+        /** 今日在板的个股（含晋级成功与持稳）。 */
         private Integer count;
         private List<Row> rows;
+        /** 昨日 n-1 板家数（晋级率分母）。 */
+        private Integer prevCount;
+        /** 今日成功晋级 n 板家数。 */
+        private Integer promotedCount;
+        /** 晋级率 %，昨日无 n-1 板时 null。 */
+        private Double promoRate;
+        /** 晋级成功名单（今日 n 板且昨日 n-1 板）。 */
+        private List<Row> success;
+        /** 晋级失败名单（昨日 n-1 板今日未到 n 板）。 */
+        private List<FailedRow> failed;
     }
 
     @Data
@@ -68,5 +83,25 @@ public class TiantiVO {
         private String role;
         /** 昨日同代码连板数=今日-1 即 true；昨日无明细=null。 */
         private Boolean promoted;
+        /** 封单额（元）。 */
+        private BigDecimal sealAmount;
+        /** 首次封板时间 HHMMSS。 */
+        private Integer firstSealTime;
+        /** 形态：ONE_LINE 一字 / T_SHAPE T字 / TURNOVER 换手；历史明细=null。 */
+        private String pattern;
+    }
+
+    /** 晋级失败：昨日 n-1 板，今日未封住 n 板。 */
+    @Data
+    public static class FailedRow {
+        private String code;
+        private String name;
+        private String industry;
+        private Integer prevBoard;
+        /** ZT=今日仍涨停（停在低板）/ ZB=今日炸板 / GONE=未触板（明细未覆盖）。 */
+        private String todayStatus;
+        private BigDecimal changePct;
+        private BigDecimal pullbackPct;
+        private String pattern;
     }
 }

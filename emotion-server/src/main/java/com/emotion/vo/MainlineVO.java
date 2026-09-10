@@ -15,8 +15,13 @@ import lombok.Data;
 public class MainlineVO {
 
     private LocalDate tradeDate;
-    /** 主线行业（涨停聚集度最高者）；当日无涨停=null，生命周期亦为 null。 */
+    /** 日内核心行业（涨停聚集度最高者）；当日无涨停=null，生命周期亦为 null。 */
     private String mainIndustry;
+    /**
+     * 日内核心是否已收集为主线龙头：当日该行业涨停≥5 家且连续 3 个热度交易日（含今天）。
+     * false 时页面仍展示日内核心，但标注「热度未满 3 日，暂未成主线」。
+     */
+    private Boolean mainlineConfirmed;
     /** 生命周期阶段：萌芽/确认/扩散/亢奋/退潮。 */
     private String lifecycleStage;
     /** 固定五段顺序，供前端画 [萌芽]─[确认]─[扩散]─[亢奋]─[退潮] 轨道。 */
@@ -60,6 +65,8 @@ public class MainlineVO {
         private Integer board;
         private String action;
         private Boolean promoted;
+        /** 判定依据（选取规则 + 今日状态证据）。 */
+        private String reason;
         private BigDecimal changePct;
         private BigDecimal pullbackPct;
     }

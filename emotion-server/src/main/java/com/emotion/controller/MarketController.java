@@ -25,6 +25,7 @@ import com.emotion.service.MarketDataService;
 import com.emotion.service.ScoreContextService;
 import com.emotion.service.SurveillanceService;
 import com.emotion.vo.ApiResponse;
+import com.emotion.vo.MarketBreadthVO;
 import com.emotion.vo.MarketIndexesVO;
 import com.emotion.vo.MarketSnapshotVO;
 import com.emotion.vo.MarketStocksVO;
@@ -64,6 +65,15 @@ public class MarketController {
         this.surveillanceService = surveillanceService;
         this.scoreContextService = scoreContextService;
         this.indexCloseStore = indexCloseStore;
+    }
+
+    /**
+     * 全市场实时涨跌家数（东财 f104/105/106）。无日期参数：上游只有当前时刻，
+     * 非交易时段给最近交易日收盘口径；历史日期的涨跌家数在每日复盘 md 里。
+     */
+    @GetMapping("/breadth")
+    public ApiResponse<MarketBreadthVO> breadth() {
+        return ApiResponse.ok(marketDataService.breadth());
     }
 
     /**

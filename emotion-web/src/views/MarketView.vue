@@ -45,11 +45,11 @@
       <div class="stat">
         <span class="stat-label">上涨 / 下跌家数</span>
         <span class="stat-value">
-          <span class="up">{{ record?.upCount ?? '—' }}</span>
+          <span class="up">{{ breadthText.up }}</span>
           <span class="sep">/</span>
-          <span class="down">{{ record?.downCount ?? '—' }}</span>
+          <span class="down">{{ breadthText.down }}</span>
         </span>
-        <span class="stat-sub">红盘率 {{ redRatioText }}</span>
+        <span class="stat-sub">{{ breadthText.sub }}</span>
       </div>
       <div class="stat">
         <span class="stat-label">涨停 / 跌停</span>
@@ -113,10 +113,25 @@ const record = ref(null)
 const metrics = computed(() => scoring.detail?.metrics || {})
 const marketDim = computed(() => (scoring.detail?.dims || []).find((d) => d.key === 'market') || null)
 
-const redRatioText = computed(() => {
-  const v = metrics.value.red_ratio
-  if (v == null) return '—'
-  return (Number(v) * 100).toFixed(1) + '%'
+// 实时涨跌家数（东财 f104/105/106，仅当前时刻）；历史日期用 md 导入的 upCount/downCount
+const liveBreadth = ref(null)
+const isLatestDay = computed(() => date.value === todayStr)
+const breadthText = computed(() => {
+  const r = record.value
+  if (r?.upCount != null && r?.downCount != null) {
+    const denom = r.upCount + r.downCount
+    const ratio = denom ? ((r.upCount / denom) * 100).toFixed(1) + '%' : '—'
+    return { up: r.upCount, down: r.downCount, sub: '复盘导入 · 红盘率 ' + ratio }
+  }
+  if (isLatestDay.value && liveBreadth.value) {
+    return {
+      up: liveBreadth.value.upCount,
+      down: liveBreadth.value.downCount,
+      sub: '实时 · 红盘率 ' + (liveBreadth.value.redRatioPct ?? '—') + '%' +
+        (liveBreadth.value.flatCount != null ? ' · 平 ' + liveBreadth.value.flatCount : '')
+    }
+  }
+  return { up: '—', down: '—', sub: isLatestDay.value ? '实时未取到' : '历史日无导入数据' }
 })
 
 function ratioText(v) {
@@ -157,6 +172,12 @@ async function load() {
     indexes.value = idxRes?.data?.indexes || []
     idxTradeDate.value = idxRes?.data?.tradeDate || ''
     record.value = recRes?.data || null
+    // 实时家数只在看今天时有意义
+    liveBreadth.value = null
+    if (date.value === todayStr) {
+      const b = await marketApi.breadth().catch(() => null)
+      liveBreadth.value = b?.data || null
+    }
     await scoring.loadDetail(date.value, true)
   } finally {
     loading.value = false
