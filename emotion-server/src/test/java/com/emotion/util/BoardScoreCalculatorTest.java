@@ -53,7 +53,7 @@ class BoardScoreCalculatorTest {
     @Test
     void builtinTree_structure() {
         ScoringTree t = BoardScoreCalculator.builtinTree();
-        assertEquals("five_dim", t.getModelKey());
+        assertEquals("five_dim_v2", t.getModelKey());
         assertEquals(100.0, t.getMaxScore(), 1e-9);
         assertEquals(5, t.getDims().size());
 
@@ -67,6 +67,13 @@ class BoardScoreCalculatorTest {
         assertEquals(4, market.getSubs().size());
         assertEquals(1.0, weightSum(market.getSubs()), 1e-9);
 
+        // PRD 2.0：D2 五要素（涨停/高度/成交额聚集度 + 催化剂硬度 + 持续性）
+        DimNode theme = dim(t, "theme_main");
+        assertEquals(5, theme.getSubs().size());
+        assertEquals("zt_gather_pct", theme.getSubs().get(0).getSourceKey());
+        assertEquals("catalyst_hardness", theme.getSubs().get(3).getSourceKey());
+        assertEquals(1.0, weightSum(theme.getSubs()), 1e-9);
+
         DimNode board = dim(t, "board");
         assertEquals(5, board.getSubs().size());
         SubNode promo = byKey(board.getSubs(), "promo");
@@ -76,11 +83,15 @@ class BoardScoreCalculatorTest {
         assertEquals("jr_low", promo.getChildren().get(0).getSourceKey());
         assertEquals("jr_top", promo.getChildren().get(3).getSourceKey());
 
+        // PRD 2.0：D5 龙头分工（总龙头50/中军20/跟风15/卡位10/反包5）
         DimNode anchor = dim(t, "anchor");
-        assertEquals(1, anchor.getSubs().size());
-        assertEquals(1.0, anchor.getSubs().get(0).getWeight(), 1e-9);
-        assertEquals("STRATEGY", anchor.getSubs().get(0).getScoringKind());
-        assertEquals("board_anchor", anchor.getSubs().get(0).getSourceKey());
+        assertEquals(5, anchor.getSubs().size());
+        assertEquals(1.0, weightSum(anchor.getSubs()), 1e-9);
+        SubNode zong = byKey(anchor.getSubs(), "dragon_zong_long");
+        assertEquals("MANUAL", zong.getScoringKind());
+        assertEquals("dragon_zong_long", zong.getSourceKey());
+        assertEquals(0.5, zong.getWeight(), 1e-9);
+        assertEquals("dragon_fan_bao", anchor.getSubs().get(4).getSourceKey());
     }
 
     private static DimNode dim(ScoringTree t, String key) {
@@ -148,8 +159,10 @@ class BoardScoreCalculatorTest {
     void boardFull_noWhistle_directSum() {
         Map<String, BigDecimal> metrics = boardBase("70");
         Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
-        assertAmount("95", r.getDimScores().get("board"));
-        assertAmount("95", r.getTotal());
+        // promo=95（四层全 70→GTE60）；premium=95（全 5→GT3）；bigloss=95（全 0→EQ0）；
+        // bq=95（90→GTE85、80→GTE75）；count=95（30→GTE25）→ 五子全 95 → board=95.00
+        assertAmount("95.00", r.getDimScores().get("board"));
+        assertAmount("95.00", r.getTotal());
         assertEquals(BoardScoreCalculator.STAGE_CLIMAX, r.getStage());
         assertTrue(r.getSignalFlags().isEmpty());
         assertFalse(r.isForcedEbb());
@@ -159,8 +172,8 @@ class BoardScoreCalculatorTest {
     void boardWhistle_appliesMultiplier() {
         Map<String, BigDecimal> metrics = boardBase("10"); // 中位晋级 10% → 中位吹哨 → 连板维 ×0.8
         Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
-        // promo = (0.15*95+0.25*20+0.20*95+0.40*95)/1 = 76.25
-        // board raw = .25*76.25 + .20*95 + .20*95 + .15*95 + .10*95 = 80.8125; 子权重和=0.90 -> 归一 89.79；×0.8 = 64.65
+        // promo = 0.15*95 + 0.25*20(jr_mid=10→ELSE) + 0.20*95 + 0.40*95 = 76.25
+        // board num = .25*76.25 + .65*95 = 80.8125；五子权和=0.90 → raw=80.8125/0.90=89.7917；×0.8 = 71.83
         assertAmount("71.83", r.getDimScores().get("board"));
         assertAmount("71.83", r.getTotal());
         assertTrue(r.getSignalFlags().contains(BoardScoreCalculator.SIG_WHISTLE));
@@ -180,21 +193,26 @@ class BoardScoreCalculatorTest {
 
     @Test
     void manual_isClamped0to100() {
-        Map<String, BigDecimal> metrics = m("ladder_complete_score", 150); // 越界人工分
+        Map<String, BigDecimal> metrics = m("dragon_zong_long", 150); // 越界人工分
         Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
-        assertAmount("100", r.getDimScores().get("theme_main")); // 唯一可评子 → 维分=100
+        assertAmount("100", r.getDimScores().get("anchor")); // 唯一可评子 → 维分=100
         assertAmount("100", r.getTotal());
     }
 
     @Test
-    void unmatchedLadder_isUnscored_notZero() {
-        // persistence_days=0 无命中档(EQ1/GTE2/GTE3) → 该子未评；主题维其它子也缺 → 整维不出分
+    void v2LaddersEndWithElse_missingKeyStillUnscored() {
+        // v2 每条 BAND_LADDER 都有 ELSE 兜底档：0 值照样命中 ELSE 出分（持续性 0 → 25），
+        // "未评"只能来自缺键——缺键时整维不出分、total/stage 都不落，绝不兜 0。
         Map<String, BigDecimal> metrics = m("persistence_days", 0);
         Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
-        assertFalse(r.getDimScores().containsKey("theme_main"));
-        assertTrue(r.getDimScores().isEmpty());
-        assertNull(r.getTotal());
-        assertNull(r.getStage());
+        assertAmount("25", r.getDimScores().get("theme_main"));
+        assertAmount("25", r.getTotal());
+
+        Result none = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(),
+                new TreeMap<String, BigDecimal>());
+        assertTrue(none.getDimScores().isEmpty());
+        assertNull(none.getTotal());
+        assertNull(none.getStage());
     }
 
     @Test
@@ -202,19 +220,22 @@ class BoardScoreCalculatorTest {
         Map<String, BigDecimal> metrics = boardBase("70");
         metrics.putAll(m("index1_pct", 1.5, "index2_pct", 1.5, "index3_pct", 1.5,
                 "turnover_ratio", 1.3, "red_ratio", 0.7, "limit_up_count", 90, "limit_down_count", 0,
-                "sector_limit_up_count", 15, "ladder_complete_score", 90, "sector_premium_pct", 4, "persistence_days", 3,
+                "zt_gather_pct", 40, "height_gather_pct", 90, "amount_gather_pct", 40,
+                "catalyst_hardness", 5, "persistence_days", 5,
                 "first_count", 60, "first_sealed_rate", 85, "first_premium_pct", 4, "first_promo_1to2_rate", 30,
-                "first_1to2_big_count", 0, "anchor_sealed", 1));
+                "first_1to2_big_count", 0,
+                "dragon_zong_long", 95, "dragon_zhong_jun", 95, "dragon_gen_feng", 95,
+                "dragon_ka_wei", 95, "dragon_fan_bao", 95));
         Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
         // market: 100*.35 + 90*.25 + 85*.20 + 95*.20 = 93.50
         assertAmount("93.50", r.getDimScores().get("market"));
-        // theme: 90*.30 + 90*.30 + 90*.25 + 85*.15 = 89.25
-        assertAmount("89.25", r.getDimScores().get("theme_main"));
+        // theme: 95*.25 + 95*.25 + 95*.20 + 100*.15 + 95*.15 = 95.75
+        assertAmount("95.75", r.getDimScores().get("theme_main"));
         assertAmount("95.00", r.getDimScores().get("board"));
         assertAmount("95.00", r.getDimScores().get("first"));
         assertAmount("95.00", r.getDimScores().get("anchor"));
-        // 总分（先按维四舍五入再加权，分母=1）：23.375 + 17.85 + 23.75 + 14.25 + 14.25 = 93.475 → 93.48
-        assertAmount("93.48", r.getTotal());
+        // 总分（先按维四舍五入再加权，分母=1）：23.375 + 19.15 + 23.75 + 14.25 + 14.25 = 94.775 → 94.78
+        assertAmount("94.78", r.getTotal());
         assertEquals(BoardScoreCalculator.STAGE_CLIMAX, r.getStage());
     }
 
@@ -351,9 +372,12 @@ class BoardScoreCalculatorTest {
         metrics.putAll(m(
                 "index1_pct", 1.5, "index2_pct", 1.5, "index3_pct", 1.5,
                 "turnover_ratio", 1.3, "red_ratio", 0.7, "limit_up_count", 90, "limit_down_count", 0,
-                "sector_limit_up_count", 15, "ladder_complete_score", 90, "sector_premium_pct", 4, "persistence_days", 3,
+                "zt_gather_pct", 40, "height_gather_pct", 90, "amount_gather_pct", 40,
+                "catalyst_hardness", 5, "persistence_days", 5,
                 "first_count", 60, "first_sealed_rate", 85, "first_premium_pct", 4, "first_promo_1to2_rate", 30,
-                "first_1to2_big_count", 0, "anchor_sealed", 1));
+                "first_1to2_big_count", 0,
+                "dragon_zong_long", 95, "dragon_zhong_jun", 95, "dragon_gen_feng", 95,
+                "dragon_ka_wei", 95, "dragon_fan_bao", 95));
         return metrics;
     }
 

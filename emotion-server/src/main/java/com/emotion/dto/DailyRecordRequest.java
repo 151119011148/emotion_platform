@@ -73,6 +73,8 @@ public class DailyRecordRequest {
     /** 极高位是否爆量断板未回封：1=是 0=否。null=未判=强制退潮条件 4 不参与。 */
     private Integer manualTopHighBreak;
     private BigDecimal manualAnchorSupervisionDiscount;
+    /** v2 五维手填：主线成交额聚集度(%)，自动取数未覆盖时的人工兜底。 */
+    private BigDecimal manualAmountGatherPct;
 
     private String mainTheme;
     private String leadingStock;

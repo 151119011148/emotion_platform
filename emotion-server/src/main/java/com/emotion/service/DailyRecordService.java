@@ -369,6 +369,7 @@ public class DailyRecordService {
         if (present.contains("manualFirstSealedRate")) record.setManualFirstSealedRate(req.getManualFirstSealedRate());
         if (present.contains("manualTopHighBreak")) record.setManualTopHighBreak(req.getManualTopHighBreak());
         if (present.contains("manualAnchorSupervisionDiscount")) record.setManualAnchorSupervisionDiscount(req.getManualAnchorSupervisionDiscount());
+        if (present.contains("manualAmountGatherPct")) record.setManualAmountGatherPct(req.getManualAmountGatherPct());
 
         if (req.getMainTheme() != null) record.setMainTheme(req.getMainTheme());
         if (req.getLeadingStock() != null) record.setLeadingStock(req.getLeadingStock());

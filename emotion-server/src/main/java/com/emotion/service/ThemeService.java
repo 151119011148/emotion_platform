@@ -43,6 +43,7 @@ public class ThemeService {
         if (theme.getName() != null) existing.setName(theme.getName());
         if (theme.getStatus() != null) existing.setStatus(theme.getStatus());
         if (theme.getStrength() != null) existing.setStrength(theme.getStrength());
+        if (theme.getCatalystHardness() != null) existing.setCatalystHardness(theme.getCatalystHardness());
         themeMapper.updateById(existing);
         return existing;
     }

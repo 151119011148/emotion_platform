@@ -9,8 +9,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.AbstractMap;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 五大指数收盘的读写。公开数据、不绑用户，和 {@code t_market_stock} 同一族。
@@ -85,5 +88,23 @@ public class IndexCloseStore {
         return mapper.selectList(new LambdaQueryWrapper<IndexClose>()
                 .eq(IndexClose::getTradeDate, date)
                 .orderByAsc(IndexClose::getId));
+    }
+
+    /**
+     * 大盘生态页默认入口：不传日期时回落到表里<b>最近一个有指数行的交易日</b>，
+     * 周末/节假日进来不该看到一屏空。返回 null 日期表示库里一行都没有。
+     */
+    public Map.Entry<LocalDate, List<IndexClose>> readOrLatest(LocalDate date) {
+        LocalDate target = date;
+        if (target == null) {
+            IndexClose latest = mapper.selectOne(new LambdaQueryWrapper<IndexClose>()
+                    .orderByDesc(IndexClose::getTradeDate)
+                    .last("LIMIT 1"));
+            if (latest == null) {
+                return new AbstractMap.SimpleEntry<>(null, Collections.emptyList());
+            }
+            target = latest.getTradeDate();
+        }
+        return new AbstractMap.SimpleEntry<>(target, read(target));
     }
 }

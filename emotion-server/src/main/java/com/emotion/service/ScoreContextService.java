@@ -60,6 +60,7 @@ public class ScoreContextService {
     private final SurveillanceService surveillance;
     private final ScoringModelStore scoringModelStore;
     private final LadderMetricsService ladderMetrics;
+    private final PrdMetricsService prdMetrics;
     private final DailyRecordMapper dailyRecordMapper;
 
     public ScoreContextService(PremiumTierStore premiumTierStore,
@@ -68,6 +69,7 @@ public class ScoreContextService {
                               SurveillanceService surveillance,
                               ScoringModelStore scoringModelStore,
                               LadderMetricsService ladderMetrics,
+                              PrdMetricsService prdMetrics,
                               DailyRecordMapper dailyRecordMapper) {
         this.premiumTierStore = premiumTierStore;
         this.marketStockMapper = marketStockMapper;
@@ -75,6 +77,7 @@ public class ScoreContextService {
         this.surveillance = surveillance;
         this.scoringModelStore = scoringModelStore;
         this.ladderMetrics = ladderMetrics;
+        this.prdMetrics = prdMetrics;
         this.dailyRecordMapper = dailyRecordMapper;
     }
 
@@ -100,6 +103,16 @@ public class ScoreContextService {
             }
         } catch (RuntimeException e) {
             log.warn("五维自动取数失败 date={} 原因={}（对应子指标未评，不兜 0）", date, e.toString());
+        }
+        // PRD 2.0（five_dim_v2）：主线 5 要素（zt/height/amount 聚集度、催化剂硬度、持续性）与
+        // 阵眼龙头分工 5 分。失败同样不兜 0——主线当天没涨停池，"聚集度 0 分"和"未评"是两个世界。
+        try {
+            PrdMetricsService.Snapshot ps = prdMetrics.snapshot(userId, date);
+            for (Map.Entry<String, BigDecimal> e : ps.metrics.entrySet()) {
+                metrics.put(e.getKey(), e.getValue());
+            }
+        } catch (RuntimeException e) {
+            log.warn("PRD 主线要素/龙头分工取数失败 date={} 原因={}（对应子指标未评，不兜 0）", date, e.toString());
         }
         applyManualMetrics(in, record);
         return in;
@@ -231,6 +244,9 @@ public class ScoreContextService {
             metrics.put("persistence_days", BigDecimal.valueOf(pd));
             in.getMetricNotes().put("persistence_days", "人工覆盖：主线连续活跃 " + pd + " 日");
         }
+        // PRD 2.0 要素3：成交额聚集度只有人工口径（自动取数未覆盖），PrdMetricsService 不产这个键。
+        overlayDecimal(metrics, in.getMetricNotes(), "amount_gather_pct", record.getManualAmountGatherPct(),
+                "人工覆盖：主线成交额聚集度 ", "%");
         overlayDecimal(metrics, in.getMetricNotes(), "top_high_turnover_pct", record.getManualTopHighTurnoverPct(),
                 "人工覆盖：极高位龙头当日换手 ", "%");
         overlayDecimal(metrics, in.getMetricNotes(), "first_premium_pct", record.getManualFirstPremiumPct(),

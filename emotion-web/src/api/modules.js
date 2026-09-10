@@ -52,12 +52,25 @@ export const nodeApi = {
   adopt: (id, fingerprint) => api.post(`/nodes/${id}/adopt`, { fingerprint })
 }
 
+/**
+ * PRD 2.0 三条只读页面：连板天梯 / 首板池 / 主线详情。
+ * 明细是本地表，但主线判定与龙头分工可能顺带补拉日 K，超时放宽到 25s 与 snapshot 同档；
+ * 取不到时页面自己印空态，不弹红条把"没数据"说成事故。
+ */
+export const prdApi = {
+  tianti: (date) => api.get('/tianti', { params: { date }, timeout: 25000, skipErrorToast: true }),
+  shouban: (date) => api.get('/shouban', { params: { date }, timeout: 25000, skipErrorToast: true }),
+  mainline: (date) => api.get('/mainline', { params: { date }, timeout: 25000, skipErrorToast: true })
+}
+
 export const marketApi = {
   // 后端拉行情最长 12s，实例默认 10s 会先超时弹红条，这里必须单独放宽
   snapshot: (date, refresh = false) =>
     api.get('/market/snapshot', { params: { date, refresh }, timeout: 25000 }),
   // 明细是本地表，不打上游，用默认超时即可。取砸了只空掉复盘页那排大面 chips，不弹红条
   stocks: (date) => api.get('/market/stocks', { params: { date }, skipErrorToast: true }),
+  // 大盘生态页·五大指数（公开表 t_index_close）；不传日期后端回落最近交易日
+  indexes: (date) => api.get('/market/indexes', { params: { date }, skipErrorToast: true }),
   premiumTiers: (date) => api.get('/market/premium-tiers', { params: { date } }),
   /**
    * 子项读数（第 4 维两条家数口径 + 第 8/9 维）。刻意不和 snapshot 并成一次：

@@ -14,9 +14,21 @@
           <el-icon><EditPen /></el-icon>
           <span>每日复盘</span>
         </el-menu-item>
-        <el-menu-item index="/themes">
-          <el-icon><TrendCharts /></el-icon>
-          <span>主线龙头</span>
+        <el-menu-item index="/market">
+          <el-icon><DataLine /></el-icon>
+          <span>大盘生态</span>
+        </el-menu-item>
+        <el-menu-item index="/tianti">
+          <el-icon><Histogram /></el-icon>
+          <span>连板生态</span>
+        </el-menu-item>
+        <el-menu-item index="/shouban">
+          <el-icon><Wallet /></el-icon>
+          <span>首板生态</span>
+        </el-menu-item>
+        <el-menu-item index="/mainline">
+          <el-icon><Aim /></el-icon>
+          <span>主线生态</span>
         </el-menu-item>
         <el-menu-item index="/surveillance">
           <el-icon><Warning /></el-icon>
@@ -29,6 +41,10 @@
         <el-menu-item index="/history">
           <el-icon><Calendar /></el-icon>
           <span>历史回看</span>
+        </el-menu-item>
+        <el-menu-item index="/themes">
+          <el-icon><TrendCharts /></el-icon>
+          <span>主线龙头</span>
         </el-menu-item>
         <el-menu-item index="/scoring">
           <el-icon><SetUp /></el-icon>

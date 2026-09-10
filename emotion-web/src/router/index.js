@@ -29,6 +29,26 @@ const routes = [
         component: () => import('../views/ReviewView.vue')
       },
       {
+        path: 'market',
+        name: 'Market',
+        component: () => import('../views/MarketView.vue')
+      },
+      {
+        path: 'tianti',
+        name: 'Tianti',
+        component: () => import('../views/TiantiView.vue')
+      },
+      {
+        path: 'shouban',
+        name: 'Shouban',
+        component: () => import('../views/ShoubanView.vue')
+      },
+      {
+        path: 'mainline',
+        name: 'Mainline',
+        component: () => import('../views/MainlineView.vue')
+      },
+      {
         path: 'themes',
         name: 'Themes',
         component: () => import('../views/ThemeView.vue')

@@ -16,5 +16,7 @@ public class Theme {
     private LocalDate startDate;
     private String status;
     private Integer strength;
+    /** 题材催化硬度1-5（5=政策/产业级，1=Pure情绪）；PRD D2·催化剂硬度取数源。 */
+    private Integer catalystHardness;
     private LocalDateTime createdAt;
 }

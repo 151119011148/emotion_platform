@@ -47,6 +47,51 @@
 
     <IndicatorCards :record="headRecord" />
 
+    <!-- PRD 2.0：主线状态条。没有主线时整条隐藏，不打扰 -->
+    <section class="block mainline-bar" v-if="mainline && mainline.mainIndustry">
+      <div class="bar-head">
+        <span class="bar-title">主线</span>
+        <span class="main-industry">{{ mainline.mainIndustry }}</span>
+        <el-tag v-if="mainline.lifecycleStage" :type="STAGE_TYPE[mainline.lifecycleStage] || 'info'"
+          size="small" effect="dark">{{ mainline.lifecycleStage }}</el-tag>
+        <span class="bar-elems">
+          涨停聚集 {{ pctOrNA(mainline.ztGatherPct) }} · 高度聚集 {{ pctOrNA(mainline.heightGatherPct) }}
+          · 持续 {{ mainline.persistenceDays ?? '—' }} 天 · 硬度 {{ mainline.catalystHardness ?? '—' }}/5
+        </span>
+        <router-link class="bar-link" to="/mainline">主线生态 →</router-link>
+      </div>
+    </section>
+
+    <!-- PRD 2.0：龙头状态卡 + 轮动信号栏 -->
+    <div class="prd-row" v-if="mainline && mainline.mainIndustry">
+      <section class="block dragon-mini">
+        <div class="block-head">
+          <h3>总龙头</h3>
+          <el-tag v-if="mainline.dragon" :type="ACTION_TYPE[mainline.dragon.action] || 'info'" size="small">
+            {{ ACTION_LABEL[mainline.dragon.action] || '—' }}
+          </el-tag>
+        </div>
+        <template v-if="mainline.dragon">
+          <div class="dragon-line">
+            <span class="dragon-name">{{ mainline.dragon.name }}</span>
+            <span class="dragon-board">{{ mainline.dragon.board }} 板</span>
+            <span :class="Number(mainline.dragon.changePct) > 0 ? 'up' : 'down'">
+              {{ signed(mainline.dragon.changePct) }}%
+            </span>
+          </div>
+          <router-link class="bar-link" to="/tianti">连板天梯 →</router-link>
+        </template>
+        <p v-else class="none-note">当日无总龙头（全市场没有连板股）</p>
+      </section>
+      <section class="block rotation-mini">
+        <div class="block-head"><h3>轮动信号</h3></div>
+        <p v-if="!mainline.rotationSignals?.length" class="none-note">暂无轮动信号</p>
+        <ul v-else class="rotation-list">
+          <li v-for="(s, i) in mainline.rotationSignals" :key="i">{{ s }}</li>
+        </ul>
+      </section>
+    </div>
+
     <div class="bottom-row">
       <StageLocator :stage="currentStage" :direction="headRecord?.stageDirection" :record="headRecord" />
       <StageAdvice :advice="advice" :record="headRecord" />
@@ -55,14 +100,24 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { recordApi } from '../api/modules'
+import { ref, computed, onMounted, watch } from 'vue'
+import { recordApi, prdApi } from '../api/modules'
 import { useScoringStore } from '../stores/scoring'
 import { stageColorOf, seqOnly } from '../utils/stages'
+import { signed } from '../utils/scores'
 import TemperatureChart from '../components/TemperatureChart.vue'
 import IndicatorCards from '../components/IndicatorCards.vue'
 import StageLocator from '../components/StageLocator.vue'
 import StageAdvice from '../components/StageAdvice.vue'
+
+// PRD 2.0 主线状态条/龙头卡/轮动信号栏的展示常量
+const ACTION_LABEL = { PROMOTE: '晋级', HOLD: '在位', BREAK: '断板', ABSENT: '缺席' }
+const ACTION_TYPE = { PROMOTE: 'success', HOLD: 'primary', BREAK: 'danger', ABSENT: 'info' }
+const STAGE_TYPE = { 萌芽: 'info', 确认: 'primary', 扩散: 'warning', 亢奋: 'danger', 退潮: 'info' }
+
+function pctOrNA(v) {
+  return v == null ? '—' : Number(v).toFixed(1) + '%'
+}
 
 // 本地日期，不能用 toISOString()：那是 UTC，00:00–07:59 会算成前一天
 const todayStr = new Date().toLocaleDateString('en-CA')
@@ -195,6 +250,24 @@ async function loadAdvice() {
     advice.value = res.data
   } catch (e) { /* ignore */ }
 }
+
+// PRD 2.0：主线状态条/龙头卡/轮动信号。头部记录落在哪天就看哪天；接口挂了静默降级整条隐藏
+const mainline = ref(null)
+async function loadMainline() {
+  const d = headRecord.value?.tradeDate
+  if (!d) {
+    mainline.value = null
+    return
+  }
+  try {
+    const res = await prdApi.mainline(d)
+    mainline.value = res?.data || null
+  } catch (e) {
+    mainline.value = null
+  }
+}
+
+watch(() => headRecord.value?.tradeDate, loadMainline)
 
 onMounted(() => {
   scoring.load()
@@ -338,4 +411,99 @@ onMounted(() => {
   gap: 20px;
   margin-top: 20px;
 }
+
+/* ---- PRD 2.0 主线状态条 / 龙头卡 / 轮动信号栏 ---- */
+.block {
+  background: #1a2332;
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+.block-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.block-head h3 {
+  margin: 0;
+  font-size: 14px;
+  color: #e1e8ed;
+}
+.mainline-bar {
+  margin-bottom: 20px;
+}
+.bar-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.bar-title {
+  font-size: 12px;
+  color: #8899a6;
+}
+.main-industry {
+  font-size: 16px;
+  font-weight: 700;
+  color: #fbbf24;
+}
+.bar-elems {
+  font-size: 12px;
+  color: #8899a6;
+  flex: 1;
+  min-width: 200px;
+}
+.bar-link {
+  font-size: 12px;
+  color: #3b82f6;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.bar-link:hover {
+  text-decoration: underline;
+}
+.prd-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 20px;
+  margin-bottom: 20px;
+}
+.dragon-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.dragon-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: #e1e8ed;
+}
+.dragon-board {
+  color: #fbbf24;
+  font-weight: 700;
+  font-size: 14px;
+}
+.rotation-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rotation-list li {
+  padding: 4px 0;
+  font-size: 12px;
+  color: #cbd5e1;
+  border-bottom: 1px dashed #2d3748;
+}
+.rotation-list li:last-child {
+  border-bottom: none;
+}
+.none-note {
+  margin: 0;
+  font-size: 12px;
+  color: #8899a6;
+}
+.up { color: #ef4444; }
+.down { color: #3b82f6; }
 </style>

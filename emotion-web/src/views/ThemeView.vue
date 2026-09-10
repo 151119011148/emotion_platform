@@ -35,6 +35,11 @@
           <div class="theme-meta">
             <span>启动：{{ theme.startDate }}</span>
             <span>强度：{{ theme.strength }}%</span>
+            <span class="hardness" title="主线五要素之一（权重 15%），与主线行业同名才生效">
+              硬度：
+              <el-rate :model-value="theme.catalystHardness ?? 3" :max="5"
+                @change="(val) => handleHardness(theme, val)" />
+            </span>
           </div>
         </div>
         <el-progress :percentage="theme.strength" :color="getStrengthColor(theme.strength)"
@@ -80,6 +85,12 @@
         <el-form-item label="强度(0-100)">
           <el-slider v-model="themeForm.strength" :max="100" />
         </el-form-item>
+        <el-form-item label="催化剂硬度(1-5)：" >
+          <div class="hardness-form">
+            <el-rate v-model="themeForm.catalystHardness" :max="5" />
+            <span class="hardness-hint">5=政策级硬催化 · 与主线行业同名才进分</span>
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showThemeDialog = false">取消</el-button>
@@ -118,11 +129,14 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { themeApi, recordApi, anchorApi } from '../api/modules'
 import { ElMessage } from 'element-plus'
 import TemperatureChart from '../components/TemperatureChart.vue'
 import AnchorSpanChart from '../components/AnchorSpanChart.vue'
 import AnchorPanel from '../components/AnchorPanel.vue'
+
+const route = useRoute()
 
 const themes = ref([])
 const stocksMap = ref({})
@@ -131,7 +145,8 @@ const showStockDialog = ref(false)
 const currentThemeId = ref(null)
 
 const days = ref(20)
-const viewDate = ref('')
+// 仪表盘「阵眼」卡跳来带 ?date=：直接停在那天；否则由曲线最后一个交易日回落
+const viewDate = ref(route.query.date || '')
 const curveData = ref({ dates: [], temperatures: [], stages: [] })
 const spans = ref([])
 const anchorSeries = ref([])
@@ -149,7 +164,8 @@ const themeForm = reactive({
   name: '',
   startDate: '',
   status: '萌芽',
-  strength: 50
+  strength: 50,
+  catalystHardness: 3
 })
 
 const stockForm = reactive({
@@ -160,13 +176,13 @@ const stockForm = reactive({
 })
 
 function themeStatusType(status) {
-  const map = { '萌芽': '', '确认': 'success', '扩散': 'warning', '亢奋': 'danger', '退潮': 'info' }
-  return map[status] || ''
+  const map = { '萌芽': 'info', '确认': 'success', '扩散': 'warning', '亢奋': 'danger', '退潮': 'info' }
+  return map[status] || 'info'
 }
 
 function roleTagType(role) {
-  const map = { '总龙头': 'danger', '中军': 'warning', '跟风': '', '卡位': 'success', '反包龙': 'info' }
-  return map[role] || ''
+  const map = { '总龙头': 'danger', '中军': 'warning', '跟风': 'success', '卡位': 'primary', '反包龙': 'info' }
+  return map[role] || 'info'
 }
 
 function getStrengthColor(val) {
@@ -266,6 +282,19 @@ async function handleCreateTheme() {
     loadThemes()
   } catch (e) {
     ElMessage.error('添加失败')
+  }
+}
+
+/** 硬度是主线五要素里唯一的人工口径：改完立即落库，下一天打分就按新值走。 */
+async function handleHardness(theme, val) {
+  if (!val) return
+  try {
+    await themeApi.update(theme.id, { catalystHardness: val })
+    theme.catalystHardness = val
+    ElMessage.success(`${theme.name} 催化剂硬度已设为 ${val}`)
+  } catch (e) {
+    ElMessage.error('硬度保存失败')
+    loadThemes()
   }
 }
 
@@ -412,5 +441,19 @@ onMounted(() => {
   color: #4a5568;
   font-size: 13px;
   padding: 8px;
+}
+.hardness {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.hardness-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.hardness-hint {
+  font-size: 12px;
+  color: #8899a6;
 }
 </style>

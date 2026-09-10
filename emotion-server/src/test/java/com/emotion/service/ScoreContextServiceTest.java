@@ -347,6 +347,24 @@ class ScoreContextServiceTest {
         assertTrue(notes.get("top_high_break").contains("是"), notes.get("top_high_break"));
     }
 
+    /** PRD 2.0 要素3：成交额聚集度只有人工口径（manual_amount_gather_pct → amount_gather_pct），且 null 不写=保持未评。 */
+    @Test
+    void manualAmountGatherPctFeedsTheOnlyHumanSourcedGatherKey() {
+        ScoreInputs in = ScoreInputs.empty();
+        DailyRecord record = new DailyRecord();
+        record.setManualAmountGatherPct(new BigDecimal("28.50"));
+
+        ScoreContextService.applyManualMetrics(in, record);
+
+        assertEquals(0, new BigDecimal("28.50").compareTo(in.getMetrics().get("amount_gather_pct")));
+        assertTrue(in.getMetricNotes().get("amount_gather_pct").contains("人工覆盖"),
+                in.getMetricNotes().get("amount_gather_pct"));
+
+        ScoreInputs none = ScoreInputs.empty();
+        ScoreContextService.applyManualMetrics(none, new DailyRecord());
+        assertFalse(none.getMetrics().containsKey("amount_gather_pct"), "没填就不许兜 0");
+    }
+
     /**
      * 强制退潮条件 4 的三道闸门里，「极高位爆量断板未回封」这一道此前<b>没有任何生产者</b>：
      * 引擎读不到 {@code top_high_break} 就永远不判 cond 4，界面上看到的就是「换手 40%、H=8 却不出退潮」。

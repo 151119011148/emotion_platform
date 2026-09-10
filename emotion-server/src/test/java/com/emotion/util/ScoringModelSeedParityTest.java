@@ -23,13 +23,16 @@ import org.junit.jupiter.api.Test;
  * 钉住 {@code schema.sql} 的 t_scoring_model / t_scoring_dim / t_scoring_sub / t_scoring_rule 幂等种子，
  * 逐字段对齐引擎的内置兜底：
  *   - 旧 {@code TemperatureCalculator.builtinModel()} 对应 ultra_short 的 9 维行（dim_key 前缀 @mid）。
- *   - 新 {@code BoardScoreCalculator.builtinTree()} 对应 five_dim 的 5 维 + 全 subs + 各 BAND_LADDER 阶梯（@fid）。
+ *   - 新 {@code BoardScoreCalculator.builtinTree()} 对应 five_dim_v2 的 5 维 + 全 subs + 各 BAND_LADDER 阶梯（@fid2，
+ *     PRD 2.0：D2 五要素 + D5 龙头分工）。
+ *   - 中间代 five_dim（@fid）已随 v2 退役：种子保留作历史留痕，但代码里已无对应树，
+ *     只由「元组宽度」测试兜形状，不再逐字段比对。
  *
  * <p>为什么值得单独一个测试：改引擎常量与改种子是两条独立通道，任何一条静默漂移都会导致
  * "无 DB 时走内置兜底"与"有 DB 时走注册表"产出两套分数；golden 只能抓其一。这个测试是 R1 风险的
  * 主防线：改种子必须同步改引擎常量（或反之），否则本测试立刻红。
  *
- * <p>不连 DB、纯文本扫描 VALUES 元组；同一 anchor 支持多 INSERT 块（ultra_short/five_dim 各自一批）。
+ * <p>不连 DB、纯文本扫描 VALUES 元组；同一 anchor 支持多 INSERT 块（各代模型各自一批）。
  */
 class ScoringModelSeedParityTest {
 
@@ -40,12 +43,12 @@ class ScoringModelSeedParityTest {
 
     // ==================== 模型行 ====================
 
-    /** t_scoring_model 种子：ultra_short(旧，max_score=NULL) + five_dim(新，max_score=100) 都种上；ultra_short 由紧随的 UPDATE 下线。 */
+    /** t_scoring_model 种子：ultra_short(旧) + five_dim(中代) + five_dim_v2(现行) 三行都种上；仅 v2 active=1。 */
     @Test
-    void seedModelsIncludeBothUltraShortRetiredAndFiveDimActive() throws Exception {
+    void seedModelsCoverAllThreeGenerationsAndOnlyV2IsActive() throws Exception {
         String sql = readSchema();
         List<List<String>> models = parseAllValueTuples(sql, MODEL_ANCHOR);
-        assertEquals(2, models.size(), "t_scoring_model 应有两行种子：ultra_short + five_dim");
+        assertEquals(3, models.size(), "t_scoring_model 应有三行种子：ultra_short + five_dim + five_dim_v2");
 
         Map<String, List<String>> byKey = new LinkedHashMap<>();
         for (List<String> m : models) {
@@ -57,15 +60,23 @@ class ScoringModelSeedParityTest {
                 "旧 9 维模型 max_score 保持 NULL(=按权重和推导分母 39)，改动会连带 golden 分母重定标");
 
         List<String> five = byKey.get("five_dim");
-        assertNotNull(five, "缺 five_dim 种子");
+        assertNotNull(five, "缺 five_dim 种子（中代留痕）");
         assertEquals(0, new BigDecimal("100.00").compareTo(new BigDecimal(five.get(2).trim())),
-                "five_dim 总分满分列 max_score 应为 100.00(0-100 直加权)");
-        assertEquals("1", five.get(3).trim(), "five_dim 种子默认 active=1");
+                "five_dim 总分满分列 max_score 应为 100.00");
 
-        // ultra_short 必须紧随一个 UPDATE 显式下线（幂等种子让 active=1 起、由 UPDATE 收敛为 0）。
+        List<String> v2 = byKey.get("five_dim_v2");
+        assertNotNull(v2, "缺 five_dim_v2 种子（现行模型）");
+        assertEquals(0, new BigDecimal("100.00").compareTo(new BigDecimal(v2.get(2).trim())),
+                "five_dim_v2 总分满分列 max_score 应为 100.00(0-100 直加权)");
+        assertEquals("1", v2.get(3).trim(), "five_dim_v2 种子默认 active=1（现行唯一生效模型）");
+
+        // 两个旧代都必须被 UPDATE 显式下线（幂等种子让 active=1 起、由 UPDATE 收敛为 0）。
         assertTrue(
                 sql.contains("UPDATE t_scoring_model SET active = 0 WHERE model_key = 'ultra_short'"),
-                "ultra_short 应被 UPDATE 显式置 active=0；否则两张模型都 active=1 时 store 会选错");
+                "ultra_short 应被 UPDATE 显式置 active=0；否则多张模型 active=1 时 store 会选错");
+        assertTrue(
+                sql.contains("UPDATE t_scoring_model SET active = 0 WHERE model_key = 'five_dim'"),
+                "five_dim 应被 UPDATE 显式置 active=0；active 全平台只应有一行 1");
     }
 
     // ==================== 9 维（legacy ultra_short，仅种子保留、不再装配）====================
@@ -113,20 +124,20 @@ class ScoringModelSeedParityTest {
                 "旧 9 维权重和应=13.0（温度分母=39 与 golden 对齐）");
     }
 
-    // ==================== 5 维（新 active=five_dim）====================
+    // ==================== 5 维（现行 active=five_dim_v2）====================
 
     /** 5 个一级维度：dimKey / label / weight / dimNo / recordColumn 与 builtinTree().dims 逐字段一致；维权和=1。 */
     @Test
-    void fiveDimSeedDimsMatchBuiltinTreeDims() throws Exception {
+    void v2SeedDimsMatchBuiltinTreeDims() throws Exception {
         String sql = readSchema();
-        List<List<String>> dimRows = filterModelRef(parseAllValueTuples(sql, DIM_ANCHOR), 0, "@fid");
+        List<List<String>> dimRows = filterModelRef(parseAllValueTuples(sql, DIM_ANCHOR), 0, "@fid2");
         ScoringTree tree = BoardScoreCalculator.builtinTree();
-        assertEquals(tree.getDims().size(), dimRows.size(), "five_dim 种子维数应与 builtinTree 一致");
+        assertEquals(tree.getDims().size(), dimRows.size(), "five_dim_v2 种子维数应与 builtinTree 一致");
 
         Map<String, List<String>> seed = new LinkedHashMap<>();
         for (List<String> row : dimRows) {
             String key = unq(row.get(1));
-            assertTrue(seed.put(key, row) == null, "five_dim 种子重复：" + key);
+            assertTrue(seed.put(key, row) == null, "five_dim_v2 种子重复：" + key);
         }
 
         double weightSum = 0;
@@ -134,35 +145,35 @@ class ScoringModelSeedParityTest {
         for (DimNode d : tree.getDims()) {
             builtinKeys.add(d.getDimKey());
             List<String> row = seed.get(d.getDimKey());
-            assertNotNull(row, "five_dim 种子缺维度：" + d.getDimKey());
+            assertNotNull(row, "five_dim_v2 种子缺维度：" + d.getDimKey());
 
             assertEquals(d.getDimNo(), Integer.parseInt(row.get(2).trim()),
-                    "five_dim dim_no 不一致：" + d.getDimKey());
+                    "five_dim_v2 dim_no 不一致：" + d.getDimKey());
             assertEquals(d.getLabel(), unq(row.get(3)),
-                    "five_dim label 不一致：" + d.getDimKey());
+                    "five_dim_v2 label 不一致：" + d.getDimKey());
             BigDecimal seedWeight = new BigDecimal(row.get(4).trim());
             assertEquals(0, BigDecimal.valueOf(d.getWeight()).compareTo(seedWeight),
-                    "five_dim 维权不一致：" + d.getDimKey());
+                    "five_dim_v2 维权不一致：" + d.getDimKey());
             assertEquals(d.getRecordColumn(), unq(row.get(6)),
-                    "five_dim recordColumn 不一致：" + d.getDimKey());
+                    "five_dim_v2 recordColumn 不一致：" + d.getDimKey());
             assertEquals("WEIGHTED_SUM", unq(row.get(7)),
-                    "five_dim 维 rule_engine 应=WEIGHTED_SUM：" + d.getDimKey());
+                    "five_dim_v2 维 rule_engine 应=WEIGHTED_SUM：" + d.getDimKey());
             weightSum += d.getWeight();
         }
-        assertEquals(builtinKeys, seed.keySet(), "five_dim 维集合与 builtinTree 不一致");
-        assertWeightSumOne(weightSum, "five_dim 维权和");
+        assertEquals(builtinKeys, seed.keySet(), "five_dim_v2 维集合与 builtinTree 不一致");
+        assertWeightSumOne(weightSum, "five_dim_v2 维权和");
     }
 
     /** 每一维下的所有一级 sub（parent='-')与 builtinTree 一致；子权重和=1；层同理。 */
     @Test
-    void fiveDimSeedSubsMatchBuiltinTreeSubs() throws Exception {
+    void v2SeedSubsMatchBuiltinTreeSubs() throws Exception {
         String sql = readSchema();
-        List<List<String>> subRows = filterModelRef(parseAllValueTuples(sql, SUB_ANCHOR), 0, "@fid");
+        List<List<String>> subRows = filterModelRef(parseAllValueTuples(sql, SUB_ANCHOR), 0, "@fid2");
         // (model_id, dim_key, sub_key, parent_sub_key, label, weight, scoring_kind, source_key, sort_no, note)
         Map<String, List<String>> byDimSub = new LinkedHashMap<>();
         for (List<String> row : subRows) {
             String key = unq(row.get(1)) + "|" + unq(row.get(2));
-            assertTrue(byDimSub.put(key, row) == null, "five_dim sub 重复：" + key);
+            assertTrue(byDimSub.put(key, row) == null, "five_dim_v2 sub 重复：" + key);
         }
 
         ScoringTree tree = BoardScoreCalculator.builtinTree();
@@ -174,7 +185,7 @@ class ScoringModelSeedParityTest {
             }
         }
         assertEquals(expectedCount, byDimSub.size(),
-                "five_dim sub 种子行数与 builtinTree 展开数不一致（多/少=某层或某叶未同步）");
+                "five_dim_v2 sub 种子行数与 builtinTree 展开数不一致（多/少=某层或某叶未同步）");
 
         // 权重和口径:D1/D2/D4/D5 一级 sub=1.00,LAYER 层=1.00,炸板质量叶=1.00;
         // D3(board)按 spec 25/20/20/15/10=0.90(引擎按已评子权重和归一化,允许 ≠1)。
@@ -196,9 +207,9 @@ class ScoringModelSeedParityTest {
 
     /** 每个 BAND_LADDER 子（含四层叶子）：种子阶梯按 rule_no 顺序，operator/低/高/分数与 builtinTree 一致。 */
     @Test
-    void fiveDimSeedRulesMatchBuiltinTreeLadders() throws Exception {
+    void v2SeedRulesMatchBuiltinTreeLadders() throws Exception {
         String sql = readSchema();
-        List<List<String>> ruleRows = filterModelRef(parseAllValueTuples(sql, RULE_ANCHOR), 0, "@fid");
+        List<List<String>> ruleRows = filterModelRef(parseAllValueTuples(sql, RULE_ANCHOR), 0, "@fid2");
         // (model_id, dim_key, sub_key, rule_no, operator, threshold_low, threshold_high, score, formula, note)
         Map<String, List<List<String>>> bySub = new HashMap<>();
         for (List<String> row : ruleRows) {
@@ -223,17 +234,17 @@ class ScoringModelSeedParityTest {
     private static void checkSub(String dimKey, SubNode s, Map<String, List<String>> byDimSub) {
         String key = dimKey + "|" + s.getSubKey();
         List<String> row = byDimSub.get(key);
-        assertNotNull(row, "five_dim 种子缺 sub：" + key);
+        assertNotNull(row, "five_dim_v2 种子缺 sub：" + key);
 
-        assertEquals(s.getLabel(), unq(row.get(4)), "five_dim sub.label 不一致：" + key);
+        assertEquals(s.getLabel(), unq(row.get(4)), "five_dim_v2 sub.label 不一致：" + key);
         BigDecimal seedW = new BigDecimal(row.get(5).trim());
         assertEquals(0, BigDecimal.valueOf(s.getWeight()).compareTo(seedW),
-                "five_dim sub.weight 不一致：" + key);
+                "five_dim_v2 sub.weight 不一致：" + key);
         assertEquals(s.getScoringKind(), unq(row.get(6)),
-                "five_dim sub.scoringKind 不一致：" + key);
+                "five_dim_v2 sub.scoringKind 不一致：" + key);
         // source_key 可空（父节点/复合节点）
         String seedSrc = row.size() > 7 && !"NULL".equalsIgnoreCase(row.get(7).trim()) ? unq(row.get(7)) : null;
-        assertEquals(s.getSourceKey(), seedSrc, "five_dim sub.sourceKey 不一致：" + key);
+        assertEquals(s.getSourceKey(), seedSrc, "five_dim_v2 sub.sourceKey 不一致：" + key);
 
         if (s.getChildren() != null) {
             for (SubNode child : s.getChildren()) {

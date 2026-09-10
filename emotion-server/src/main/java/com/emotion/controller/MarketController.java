@@ -17,12 +17,15 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.emotion.dto.PremiumTierRequest;
+import com.emotion.entity.IndexClose;
 import com.emotion.market.MarketDataException;
 import com.emotion.market.TencentClient;
+import com.emotion.service.IndexCloseStore;
 import com.emotion.service.MarketDataService;
 import com.emotion.service.ScoreContextService;
 import com.emotion.service.SurveillanceService;
 import com.emotion.vo.ApiResponse;
+import com.emotion.vo.MarketIndexesVO;
 import com.emotion.vo.MarketSnapshotVO;
 import com.emotion.vo.MarketStocksVO;
 import com.emotion.vo.PremiumPoolVO;
@@ -51,13 +54,36 @@ public class MarketController {
     private final MarketDataService marketDataService;
     private final SurveillanceService surveillanceService;
     private final ScoreContextService scoreContextService;
+    private final IndexCloseStore indexCloseStore;
 
     public MarketController(MarketDataService marketDataService,
                             SurveillanceService surveillanceService,
-                            ScoreContextService scoreContextService) {
+                            ScoreContextService scoreContextService,
+                            IndexCloseStore indexCloseStore) {
         this.marketDataService = marketDataService;
         this.surveillanceService = surveillanceService;
         this.scoreContextService = scoreContextService;
+        this.indexCloseStore = indexCloseStore;
+    }
+
+    /**
+     * 大盘生态页·五大指数区块：公开表 t_index_close，不绑登录态。
+     * 不传 date 回落到最近一个有指数行的交易日（周末进来不空屏）。
+     */
+    @GetMapping("/indexes")
+    public ApiResponse<MarketIndexesVO> indexes(@RequestParam(required = false) String date) {
+        Map.Entry<LocalDate, List<IndexClose>> hit = indexCloseStore.readOrLatest(parse(date));
+        MarketIndexesVO vo = new MarketIndexesVO();
+        vo.setTradeDate(hit.getKey());
+        for (IndexClose row : hit.getValue()) {
+            MarketIndexesVO.Item item = new MarketIndexesVO.Item();
+            item.setCode(row.getIndexCode());
+            item.setName(row.getIndexName());
+            item.setClose(row.getClosePrice());
+            item.setChangePct(row.getChangePct());
+            vo.getIndexes().add(item);
+        }
+        return ApiResponse.ok(vo);
     }
 
     @GetMapping("/snapshot")

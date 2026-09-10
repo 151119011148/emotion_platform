@@ -145,35 +145,32 @@ class DailyRecordServiceFiveDimTest {
     }
 
     /**
-     * D2 主线明确度是五维里唯一「整维全靠人工」的一维：四个子指标没有任何自动生产者。
-     *
-     * <p>所以这一维的形状是：一格不填 → 整维未评（score_theme_main=null、scored_dims=4，
-     * 总分按剩下四维的权重归一化）；四格填上 → 该维出分且 scored_dims=5。
-     * 这条断言钉的就是 Stage 10 那条写链真的通到了打分结果上。
+     * D2 主线明确度（v2 五要素）：涨停/高度聚集度、催化剂硬度、持续性由 PrdMetricsService 自动取数，
+     * 成交额聚集度只有人工列——本测试不走 DB，直接喂 metrics 验证「有读数才进分母」的形状。
      */
     @Test
     void themeDimJoinsTheDenominatorOnlyWhenHumanReadingsArrive() {
-        // 先把 D2 唯一一个有值的读数也拿掉：整维无可评子
+        // 把 D2 五个键全拿掉：整维无可评子
         Map<String, BigDecimal> bare = allDimMetrics();
-        bare.remove("sector_premium_pct");
+        bare.remove("zt_gather_pct");
+        bare.remove("height_gather_pct");
+        bare.remove("amount_gather_pct");
+        bare.remove("catalyst_hardness");
+        bare.remove("persistence_days");
         DailyRecord r1 = newRecord();
         ScoreInputs in1 = ScoreInputs.empty();
         in1.setMetrics(bare);
         DailyRecordService.applyFiveDimScore(r1, in1);
-        assertNull(r1.getScoreThemeMain(), "D2 四格全空时整维应未评，而不是兜 0");
+        assertNull(r1.getScoreThemeMain(), "D2 五键全空时整维应未评，而不是兜 0");
         assertEquals(4, r1.getScoredDims().intValue(), "未评的维剔出分母，只剩 4 维");
 
-        // 再按复盘页那四格的落库口径填上 D2
+        // 再按 v2 五要素口径填上 D2
         Map<String, BigDecimal> filled = allDimMetrics();
-        filled.put("sector_limit_up_count", new BigDecimal("8"));
-        filled.put("ladder_complete_score", new BigDecimal("90"));
-        filled.put("sector_premium_pct", new BigDecimal("3.2"));
-        filled.put("persistence_days", new BigDecimal("4"));
         DailyRecord r2 = newRecord();
         ScoreInputs in2 = ScoreInputs.empty();
         in2.setMetrics(filled);
         DailyRecordService.applyFiveDimScore(r2, in2);
-        assertNotNull(r2.getScoreThemeMain(), "四格填了 D2 就该出分");
+        assertNotNull(r2.getScoreThemeMain(), "五要素齐了 D2 就该出分");
         assertEquals(5, r2.getScoredDims().intValue(), "五维都参与打分");
         assertTrue(r2.getTemperature().compareTo(r1.getTemperature()) != 0,
                 "多一维进分母后总分应跟着变（不是把 0 摊薄）");
@@ -202,9 +199,12 @@ class DailyRecordServiceFiveDimTest {
         m.put("limit_up_count", new BigDecimal("50"));
         m.put("limit_down_count", new BigDecimal("3"));
 
-        // 主线:人工列全空 -> sector_limit_up/persistence 阶梯未评,ladder_complete MANUAL 未评;
-        // 只喂 sector_premium 让本维至少有一子可评.
-        m.put("sector_premium_pct", new BigDecimal("1.5")); // 55
+        // 主线（v2 五要素）：涨停/高度/成交额聚集度 + 催化剂硬度 + 持续性，PrdMetricsService 口径
+        m.put("zt_gather_pct", new BigDecimal("35"));
+        m.put("height_gather_pct", new BigDecimal("75"));
+        m.put("amount_gather_pct", new BigDecimal("20"));
+        m.put("catalyst_hardness", new BigDecimal("4"));
+        m.put("persistence_days", new BigDecimal("4"));
 
         // 连板:喂四层完整的晋级/溢价/大面 + 炸板率 + 数量高度,让连板维可评
         m.put("jr_low", new BigDecimal("30"));
@@ -230,8 +230,12 @@ class DailyRecordServiceFiveDimTest {
         m.put("first_promo_1to2_rate", new BigDecimal("18"));
         m.put("first_1to2_big_count", new BigDecimal("2"));
 
-        // 阵眼:走 sealed 状态 + 无监管折扣
-        m.put("anchor_sealed", BigDecimal.ONE);
+        // 阵眼（v2 龙头分工）：五分齐出（PrdMetricsService 自动算好的 0-100 策略分）
+        m.put("dragon_zong_long", new BigDecimal("70"));
+        m.put("dragon_zhong_jun", new BigDecimal("60"));
+        m.put("dragon_gen_feng", new BigDecimal("40"));
+        m.put("dragon_ka_wei", new BigDecimal("80"));
+        m.put("dragon_fan_bao", new BigDecimal("20"));
         return m;
     }
 

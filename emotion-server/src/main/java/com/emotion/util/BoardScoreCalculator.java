@@ -17,7 +17,7 @@ import lombok.Data;
  * MANUAL 直接夹 0-100。维分/子分/层分一律 0-100，未评（缺读数）从分母剔除不兜 0，总分=Σ(维分×维权)（全维评了即直加权和）。
  * 求完连板维后按结构信号「中位吹哨」施加 ×0.8；再判 5 个结构信号、4 条强制退潮；最后落 4 个交易纪律带。
  *
- * {@link #builtinTree()} 与 schema.sql 的 five_dim 种子逐字对齐，由 ScoringModelSeedParityTest 钉住（R1：改引擎常量或种子必须跑它）。
+ * {@link #builtinTree()} 与 schema.sql 的 five_dim_v2 种子逐字对齐，由 ScoringModelSeedParityTest 钉住（R1：改引擎常量或种子必须跑它）。
  */
 public final class BoardScoreCalculator {
 
@@ -540,7 +540,7 @@ public final class BoardScoreCalculator {
         dims.add(boardDim());
         dims.add(firstDim());
         dims.add(anchorDim());
-        return new ScoringTree("five_dim", "五维双层情绪模型", 100.0, dims);
+        return new ScoringTree("five_dim_v2", "五维双层情绪模型 v2(PRD)", 100.0, dims);
     }
 
     private static DimNode marketDim() {
@@ -561,23 +561,40 @@ public final class BoardScoreCalculator {
     }
 
     private static DimNode themeMainDim() {
+        // PRD 2.0 五要素：涨停聚集度25/高度聚集度25/成交额聚集度20/催化剂硬度15/持续性15。
+        // 自动取数在 PrdMetricsService；成交额聚集度自动取数未覆盖，走人工列 manual_amount_gather_pct。
         List<SubNode> subs = new ArrayList<>();
-        subs.add(SubNode.band("sector_limit_up", "板块涨停数", 0.30, "sector_limit_up_count", ladder(
-                BandRule.of("GTE", 15.0, null, 90),
-                BandRule.of("GTE", 10.0, null, 78),
-                BandRule.of("GTE", 6.0, null, 65),
-                BandRule.of("GTE", 3.0, null, 45),
-                BandRule.of("ELSE", null, null, 30))));
-        subs.add(SubNode.manual("ladder_complete", "梯队完整性", 0.30, "ladder_complete_score"));
-        subs.add(SubNode.band("sector_premium", "板块溢价", 0.25, "sector_premium_pct", ladder(
-                BandRule.of("GT", 3.0, null, 90),
-                BandRule.of("GTE", 0.0, null, 55),
-                BandRule.of("ELSE", null, null, 20))));
+        subs.add(SubNode.band("zt_gather", "涨停聚集度", 0.25, "zt_gather_pct", ladder(
+                BandRule.of("GTE", 40.0, null, 95),
+                BandRule.of("GTE", 30.0, null, 82),
+                BandRule.of("GTE", 20.0, null, 68),
+                BandRule.of("GTE", 10.0, null, 48),
+                BandRule.of("ELSE", null, null, 28))));
+        subs.add(SubNode.band("height_gather", "高度聚集度", 0.25, "height_gather_pct", ladder(
+                BandRule.of("GTE", 90.0, null, 95),
+                BandRule.of("GTE", 70.0, null, 85),
+                BandRule.of("GTE", 50.0, null, 70),
+                BandRule.of("GTE", 30.0, null, 50),
+                BandRule.of("ELSE", null, null, 28))));
+        subs.add(SubNode.band("amount_gather", "成交额聚集度", 0.20, "amount_gather_pct", ladder(
+                BandRule.of("GTE", 40.0, null, 95),
+                BandRule.of("GTE", 25.0, null, 80),
+                BandRule.of("GTE", 15.0, null, 60),
+                BandRule.of("ELSE", null, null, 35))));
+        subs.add(SubNode.band("catalyst", "催化剂硬度", 0.15, "catalyst_hardness", ladder(
+                BandRule.of("GTE", 5.0, null, 100),
+                BandRule.of("GTE", 4.0, null, 80),
+                BandRule.of("GTE", 3.0, null, 60),
+                BandRule.of("GTE", 2.0, null, 40),
+                BandRule.of("GTE", 1.0, null, 20),
+                BandRule.of("ELSE", null, null, 0))));
         subs.add(SubNode.band("persistence", "持续性", 0.15, "persistence_days", ladder(
+                BandRule.of("GTE", 5.0, null, 95),
                 BandRule.of("GTE", 3.0, null, 85),
-                BandRule.of("GTE", 2.0, null, 68),
-                BandRule.of("EQ", 1.0, null, 50))));
-        return new DimNode("theme_main", "主线明确度", 0.20, 2, "score_theme_main", subs);
+                BandRule.of("GTE", 2.0, null, 70),
+                BandRule.of("GTE", 1.0, null, 50),
+                BandRule.of("ELSE", null, null, 25))));
+        return new DimNode("theme_main", "日内核心", 0.20, 2, "score_theme_main", subs);
     }
 
     private static DimNode boardDim() {
@@ -681,8 +698,14 @@ public final class BoardScoreCalculator {
     }
 
     private static DimNode anchorDim() {
+        // PRD 2.0 龙头分工：总龙头50/中军20/跟风15/卡位10/反包5。
+        // 五个键都是 PrdMetricsService 算好的 0-100 策略分，MANUAL 直读夹 0-100（缺=未评，按已评权重归一）。
         List<SubNode> subs = new ArrayList<>();
-        subs.add(SubNode.strategy("core", "空间板/核心龙", 1.00, "board_anchor"));
+        subs.add(SubNode.manual("dragon_zong_long", "总龙头", 0.50, "dragon_zong_long"));
+        subs.add(SubNode.manual("dragon_zhong_jun", "中军", 0.20, "dragon_zhong_jun"));
+        subs.add(SubNode.manual("dragon_gen_feng", "跟风", 0.15, "dragon_gen_feng"));
+        subs.add(SubNode.manual("dragon_ka_wei", "卡位", 0.10, "dragon_ka_wei"));
+        subs.add(SubNode.manual("dragon_fan_bao", "反包", 0.05, "dragon_fan_bao"));
         return new DimNode("anchor", "阵眼", 0.15, 5, "score_anchor", subs);
     }
 

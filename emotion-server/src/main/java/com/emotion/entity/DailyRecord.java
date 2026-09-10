@@ -174,6 +174,9 @@ public class DailyRecord {
     /** 阵眼监管折扣乘数(0-1)：null=不打折。刻意不走 overlayDecimal 那句 % 文案。 */
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal manualAnchorSupervisionDiscount;
+    /** v2 五维手填：主线成交额聚集度(%)，PRD D2·要素3 自动取数未覆盖时的人工兜底。 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private BigDecimal manualAmountGatherPct;
 
     // 阶段定位
     private String stage;

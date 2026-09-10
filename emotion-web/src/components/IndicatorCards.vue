@@ -51,7 +51,7 @@
           </div>
         </template>
 
-        <div class="card-inner hoverable">
+        <div class="card-inner hoverable" role="button" :aria-label="`查看${c.label}详情`" @click="goDim(c.key)">
           <div class="card-head">
             <span class="card-label">{{ c.dimNo }} · {{ c.label }}</span>
             <span class="card-weight">×{{ fmt(c.weight) }}</span>
@@ -72,6 +72,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { fiveDimBandOf, fiveDimBandClassOf } from '../utils/scores'
 import { useScoringStore } from '../stores/scoring'
 
@@ -79,6 +80,27 @@ const props = defineProps({
   /** 当日 t_daily_record（含 score_market/score_theme_main/…、forced_ebb、signal_flags） */
   record: { type: Object, default: null }
 })
+
+/**
+ * 五维卡 → 同名导航页（菜单名与维度名保持一致）：
+ * 大盘生态→/market，主线生态→/mainline，连板生态→/tianti，首板生态→/shouban，阵眼→/themes（周期阵眼面板）。
+ * 带上当天日期，目标页直接停在同一天，不用再回落一次。
+ */
+const router = useRouter()
+const DIM_ROUTES = {
+  market: '/market',
+  theme_main: '/mainline',
+  board: '/tianti',
+  first: '/shouban',
+  anchor: '/themes'
+}
+
+function goDim(key) {
+  const path = DIM_ROUTES[key]
+  if (!path) return
+  const d = props.record?.tradeDate
+  router.push(d ? { path, query: { date: d } } : { path })
+}
 
 /**
  * 五维卡：卡主体只印"这一维 0-100 分 + 落哪条带"，子层树全在 tooltip。
@@ -189,7 +211,13 @@ const cards = computed(() => {
   position: relative;
 }
 .card-inner.hoverable {
-  cursor: default;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.card-inner.hoverable:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  outline: 1px solid rgba(59, 130, 246, 0.5);
 }
 .card-head {
   display: flex;

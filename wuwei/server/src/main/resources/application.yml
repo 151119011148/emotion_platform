@@ -1,0 +1,37 @@
+server:
+  port: 8081
+
+spring:
+  # 真实口令在同模块根的 application-local.yml（模仿 emotion-server 的 profile 约定）
+  config:
+    additional-location: "file:./,file:./server/"
+  profiles:
+    active: local
+  datasource:
+    # createDatabaseIfNotExist=true：首启自动建库 wuwei，无需手工 CREATE DATABASE
+    url: jdbc:mysql://localhost:3306/wuwei?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  sql:
+    init:
+      # 每次启动跑一遍 schema.sql（全部 CREATE TABLE IF NOT EXISTS，幂等）
+      mode: always
+      schema-locations: classpath:db/schema.sql
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+jwt:
+  # 签名密钥真值只在未入库的 application-local.yml 里
+  secret: ${JWT_SECRET:}
+  expiration: 86400000
+
+wuwei:
+  # 首启种子：库为空时灌入 13 个交易日的演示数据并跑满三大引擎
+  seed: true
