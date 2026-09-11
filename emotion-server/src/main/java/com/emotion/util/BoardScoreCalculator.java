@@ -62,6 +62,8 @@ public final class BoardScoreCalculator {
     public static final BigDecimal INDEX_ENV_FULL_UP = new BigDecimal("100");
     public static final BigDecimal INDEX_ENV_TWO_DOWN = new BigDecimal("40");
     public static final BigDecimal INDEX_ENV_ALL_DOWN = new BigDecimal("20");
+    /** 三指全绿但都没跌破 -1%（弱跌日）：比"两跌一红 40"更差、又没到"全跌破位 20"，补的中间档。 */
+    public static final BigDecimal INDEX_ENV_ALL_SOFT_DOWN = new BigDecimal("35");
     public static final BigDecimal INDEX_ENV_MID = new BigDecimal("60");
     public static final BigDecimal LIMIT_COMBO_STRONG = new BigDecimal("95");
     public static final BigDecimal LIMIT_COMBO_MIXED = new BigDecimal("45");
@@ -363,10 +365,13 @@ public final class BoardScoreCalculator {
                 up++;
             }
         }
+        if (down == 3) {
+            return INDEX_ENV_ALL_SOFT_DOWN; // 三指全绿但均未破 -1%（弱跌日，到不了全跌破位的 20）
+        }
         if (down == 2 && up == 1) {
             return INDEX_ENV_TWO_DOWN;  // 两跌一红
         }
-        return INDEX_ENV_MID;           // 其余混合/微动
+        return INDEX_ENV_MID;           // 其余混合/微动（含平盘）
     }
 
     /** 涨跌停：涨停/跌停两操作数组合阶梯。缺任一=未评。 */

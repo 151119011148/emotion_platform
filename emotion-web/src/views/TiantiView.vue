@@ -79,11 +79,15 @@
             <div class="pyr-head">
               <span class="pyr-title">{{ lvl.board }} 板</span>
               <el-tag size="small" effect="plain" class="layer-tag">{{ lvl.layerLabel }}</el-tag>
-              <span class="pyr-count">{{ lvl.count }} 只</span>
+              <span class="pyr-count">{{ lvl.rows.length }} 只在板</span>
               <span class="pyr-promo" :class="promoClass(lvl.promoRate)">
-                晋级 {{ lvl.promotedCount }}/{{ lvl.prevCount }}
-                <template v-if="lvl.promoRate != null">（{{ lvl.promoRate.toFixed(1) }}%）</template>
-                <template v-else>（昨日无 {{ lvl.board - 1 }} 板）</template>
+                <template v-if="lvl.promoRate != null">
+                  昨{{ lvl.board - 1 }}板 {{ nz(lvl.prevCount) }}只 → 今{{ lvl.board }}板 {{ lvl.promotedCount }}只
+                  <span class="promo-ok">成功{{ lvl.promotedCount }}</span>
+                  <span class="promo-fail">失败{{ (lvl.failed || []).length }}</span>
+                  <span class="promo-rate">（{{ lvl.promoRate.toFixed(1) }}%）</span>
+                </template>
+                <template v-else>昨日无 {{ lvl.board - 1 }} 板（无晋级基数）</template>
               </span>
             </div>
             <div v-if="lvl.rows.length" class="chips">
@@ -93,16 +97,57 @@
                 <el-tag v-if="r.pattern" size="small" :type="PATTERN_TYPE[r.pattern] || 'info'" effect="plain">
                   {{ PATTERN_LABEL[r.pattern] }}
                 </el-tag>
+                <span v-if="r.breakCount != null && r.breakCount > 0" class="chip-reseal"
+                  :title="`日内开板 ${r.breakCount} 次后封住（炸后回封）`">
+                  开板{{ r.breakCount }}次↩回封
+                </span>
                 <span v-if="r.promoted === true" class="chip-promoted ok">晋级</span>
                 <span v-if="r.promoted === false" class="chip-promoted bad">持稳</span>
                 <span v-if="r.sealAmount != null" class="chip-seal">封单 {{ moneyText(r.sealAmount) }}</span>
                 <span :class="pctClass(r.changePct)" class="chip-pct">{{ signed(r.changePct) }}%</span>
               </div>
             </div>
-            <div v-else class="gap-hint">断档（无 {{ lvl.board }} 板）</div>
+            <div v-else class="gap-warn">⚠️ {{ lvl.board }} 板无个股（断层）</div>
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- 结构信号：只认引擎 signalFlags / forcedEbb，前端不自创阈值 -->
+    <section class="block signal-block">
+      <div class="block-head">
+        <h3>连板结构信号</h3>
+        <span class="sub">与五维打分引擎同一份判定（score-detail 现算）</span>
+      </div>
+
+      <div v-if="whistle" class="whistle-banner">
+        <span class="whistle-dot"></span>
+        🔴 中位吹哨：中位晋级过弱或中位负溢价叠加大面，<b>连板生态本维 ×0.8</b>
+      </div>
+
+      <div v-if="forcedEbb" class="ebb-banner">
+        ⛔ 强制退潮已触发：{{ forcedEbbReason || '见打分明细' }}（无视总分，按退潮应对）
+      </div>
+
+      <!-- 客观三读数透明条：只陈列引擎读数与吹哨线，不做颜色结论（结论只看上面的灯） -->
+      <div class="mid-readouts">
+        <div class="readout">
+          <span class="readout-label">中位晋级率 JR_中</span>
+          <span class="readout-value">{{ pctText(midMetrics.jr_mid) }}</span>
+          <span class="readout-rule">吹哨线 &lt; 15%</span>
+        </div>
+        <div class="readout">
+          <span class="readout-label">中位溢价 Prem_中</span>
+          <span class="readout-value" :class="numClass(midMetrics.prem_mid)">{{ signedNum(midMetrics.prem_mid) }}%</span>
+          <span class="readout-rule">吹哨需 &lt; 0</span>
+        </div>
+        <div class="readout">
+          <span class="readout-label">中位大面 Big_中</span>
+          <span class="readout-value">{{ midMetrics.big_mid == null ? '未评' : midMetrics.big_mid + ' 家' }}</span>
+          <span class="readout-rule">吹哨需 ≥ 3</span>
+        </div>
+      </div>
+      <p v-if="!detailReady" class="signal-empty">结构信号计算中（需当日及前一交易日涨停池）……</p>
     </section>
 
     <!-- 每层晋级明细（默认折叠） -->
@@ -121,6 +166,7 @@
               <el-tag size="small" type="success" effect="plain">成功 {{ lvl.success?.length || 0 }}</el-tag>
               <el-tag size="small" type="danger" effect="plain">失败 {{ lvl.failed?.length || 0 }}</el-tag>
               <span v-if="lvl.promoRate != null" class="detail-rate">晋级率 {{ lvl.promoRate.toFixed(1) }}%</span>
+              <span class="detail-base">基数：昨日{{ lvl.board - 1 }}板 {{ nz(lvl.prevCount) }}只 → 今日{{ lvl.board }}板 {{ lvl.promotedCount }}只</span>
             </span>
           </template>
           <div class="detail-grid">
@@ -169,13 +215,15 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { prdApi, recordApi } from '../api/modules'
 import { signed } from '../utils/scores'
+import { useScoringStore } from '../stores/scoring'
 import DimScoreBlock from '../components/DimScoreBlock.vue'
 
 const route = useRoute()
+const scoring = useScoringStore()
 
 const ACTION_LABEL = { PROMOTE: '晋级', HOLD: '在位', BREAK: '断板', ABSENT: '缺席' }
 const ACTION_TYPE = { PROMOTE: 'success', HOLD: 'primary', BREAK: 'danger', ABSENT: 'info' }
@@ -189,6 +237,28 @@ const todayStr = new Date().toLocaleDateString('en-CA')
 const date = ref(route.query.date || todayStr)
 const loading = ref(false)
 const vo = ref(null)
+
+/* ---- 结构信号：只镜像引擎 score-detail，不在前端重算判定 ---- */
+// detail 是否真的到位（metrics 有键才算），用于"计算中"占位；取不到不瞎亮灯。
+const detailReady = computed(() => {
+  const mm = scoring.detail?.metrics
+  return !!mm && Object.keys(mm).length > 0
+})
+const whistle = computed(() => (scoring.detail?.signalFlags || []).includes('中位吹哨'))
+const forcedEbb = computed(() => scoring.detail?.forcedEbb === true)
+const forcedEbbReason = computed(() => scoring.detail?.forcedEbbReason || '')
+// 中位三读数直接取引擎 metrics（jr_mid=中位晋级率 / prem_mid=中位溢价 / big_mid=中位大面）
+const midMetrics = computed(() => scoring.detail?.metrics || {})
+
+/** 带符号的数值文本（null → —），用于溢价这种有正负的读数。 */
+function signedNum(v) {
+  if (v == null || Number.isNaN(Number(v))) return '—'
+  return signed(Number(v))
+}
+function numClass(v) {
+  if (v == null || Number.isNaN(Number(v))) return ''
+  return Number(v) > 0 ? 'up' : Number(v) < 0 ? 'down' : ''
+}
 
 function nz(v) {
   return v == null ? '—' : v
@@ -228,8 +298,12 @@ function promoClass(rate) {
 async function load() {
   loading.value = true
   try {
-    const res = await prdApi.tianti(date.value).catch(() => null)
-    vo.value = res?.data || null
+    // 天梯数据与引擎信号同源同日；score-detail 由 store 去重（页内 DimScoreBlock 也在拉，不会重复发）。
+    const [tiantiRes] = await Promise.all([
+      prdApi.tianti(date.value).catch(() => null),
+      scoring.loadDetail(date.value, true).catch(() => null)
+    ])
+    vo.value = tiantiRes?.data || null
   } finally {
     loading.value = false
   }
@@ -281,7 +355,7 @@ watch(date, load)
   padding: 10px 14px;
   transition: width .3s ease;
 }
-.pyr-band.empty { background: transparent; border-style: dashed; border-color: #2d3748; }
+.pyr-band.empty { background: rgba(251,191,36,.06); border-style: dashed; border-color: #fbbf24; }
 .pyr-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
 .pyr-title { font-size: 15px; font-weight: 700; color: #fbbf24; }
 .layer-tag { flex: none; }
@@ -290,6 +364,9 @@ watch(date, load)
 .pyr-promo.ok { color: #6ee7b7; }
 .pyr-promo.mid { color: #fbbf24; }
 .pyr-promo.bad { color: #fca5a5; }
+.promo-ok { color: #6ee7b7; margin-left: 8px; }
+.promo-fail { color: #ef4444; font-weight: 700; margin-left: 6px; }
+.promo-rate { color: #8899a6; margin-left: 4px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
   display: inline-flex; align-items: center; gap: 6px;
@@ -303,10 +380,46 @@ watch(date, load)
 .chip-promoted.bad { color: #94a3b8; }
 .chip-seal { color: #a8b7c4; font-size: 11px; }
 .chip-pct { font-weight: 600; font-size: 11px; }
-.gap-hint { color: #4a5568; font-size: 12px; padding: 2px 0; }
+.chip-reseal { color: #7dd3fc; font-size: 11px; background: rgba(56,189,248,.12); border-radius: 6px; padding: 1px 6px; }
+.gap-warn { color: #fbbf24; font-size: 13px; font-weight: 600; padding: 4px 2px; }
 .none-hint { color: #6b7c8c; font-size: 13px; }
-.detail-title { display: inline-flex; align-items: center; gap: 8px; }
+.detail-title { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .detail-rate { color: #fbbf24; font-size: 12px; }
+.detail-base { color: #6b7c8c; font-size: 12px; }
+
+/* 结构信号区 */
+.signal-block .block-head .sub { color: #6b7c8c; font-size: 12px; }
+.whistle-banner {
+  display: flex; align-items: center; gap: 8px;
+  margin: 10px 0; padding: 10px 14px; border-radius: 8px;
+  background: rgba(239,68,68,.14); border: 1px solid #ef4444;
+  color: #fca5a5; font-size: 14px; font-weight: 600;
+}
+.whistle-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #ef4444; flex: none;
+  animation: whistle-blink 1s steps(2, start) infinite;
+}
+@keyframes whistle-blink { to { opacity: .15; } }
+.ebb-banner {
+  margin: 10px 0; padding: 10px 14px; border-radius: 8px;
+  background: rgba(239,68,68,.18); border: 1px solid #b91c1c;
+  color: #fecaca; font-size: 14px; font-weight: 700;
+}
+.mid-readouts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px; margin-top: 10px;
+}
+.readout {
+  background: #0f1419; border: 1px solid #2d3748; border-radius: 8px;
+  padding: 10px 14px; display: flex; flex-direction: column; gap: 4px;
+}
+.readout-label { color: #8899a6; font-size: 12px; }
+.readout-value { color: #e1e8ed; font-size: 20px; font-weight: 700; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.readout-value.up { color: #ef4444; }
+.readout-value.down { color: #3b82f6; }
+.readout-rule { color: #6b7c8c; font-size: 11px; }
+.signal-empty { color: #6b7c8c; font-size: 12px; margin: 8px 0 0; }
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .detail-grid h4 { margin: 0 0 8px; font-size: 13px; }
 .ok-text { color: #6ee7b7; }

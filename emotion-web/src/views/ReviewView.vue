@@ -25,19 +25,17 @@
           </p>
 
           <!-- D1 大盘生态：五大指数 + 成交额/量比/涨跌家数/涨跌停（与大盘页同一套原始读数） -->
-          <DimRawBlock v-if="form.tradeDate" :date="form.tradeDate" dim-key="market" title="D1 · 大盘生态" />
+          <div v-if="ebbActive" class="ebb-chip">
+            <span class="ebb-chip-ico">⛔</span>
+            <span class="ebb-chip-text">
+              <b>强制退潮</b>：无视总分按「退潮(强制)」应对 — {{ ebbReason || '已命中强制退潮条件' }}
+            </span>
+          </div>
+          <DimRawBlock v-if="form.tradeDate" :date="form.tradeDate" dim-key="market" title="D1 · 大盘生态"
+            :up-count="form.upCount" :down-count="form.downCount" />
 
-          <!-- D2 主线明确度：日内核心五要素（聚集度/催化剂/持续性原始读数） -->
-          <DimRawBlock v-if="form.tradeDate" :date="form.tradeDate" dim-key="theme_main" title="D2 · 主线明确度" />
-          <section v-if="D2_MANUALS.length" class="block manual-block">
-            <h4 class="manual-title">D2 人工读数（盘面取不到，需人判）</h4>
-            <div class="stat-grid">
-              <EditableStatCard v-for="m in D2_MANUALS" :key="m.metric"
-                v-model="form[m.field]" :label="m.label" :unit="m.unit"
-                :min="m.min" :max="m.max" :precision="m.precision" :step="m.step"
-                :ph="m.ph" :hint="m.hint" />
-            </div>
-          </section>
+          <!-- 日内核心：聚集度/催化剂/持续性原始读数 -->
+          <DimRawBlock v-if="form.tradeDate" :date="form.tradeDate" dim-key="theme_main" title="日内核心" />
 
           <!-- D3 连板生态：最高连板/日内核心/涨停炸板/涨停聚集（与天梯页同一套原始读数） -->
           <DimRawBlock v-if="form.tradeDate" :date="form.tradeDate" dim-key="board" title="D3 · 连板生态" />
@@ -56,15 +54,6 @@
 
           <!-- D5 阵眼：总龙/中军/跟风/卡位/反包原始读数（与主线页同一套龙头分工） -->
           <DimRawBlock v-if="form.tradeDate" :date="form.tradeDate" dim-key="anchor" title="D5 · 阵眼" />
-          <section v-if="D5_MANUALS.length" class="block manual-block">
-            <h4 class="manual-title">D5 人工读数（监管折扣）</h4>
-            <div class="stat-grid">
-              <EditableStatCard v-for="m in D5_MANUALS" :key="m.metric"
-                v-model="form[m.field]" :label="m.label" :unit="m.unit"
-                :min="m.min" :max="m.max" :precision="m.precision" :step="m.step"
-                :ph="m.ph" :hint="m.hint" />
-            </div>
-          </section>
 
           <el-divider content-position="left">强制退潮条件</el-divider>
           <section class="block">
@@ -253,6 +242,12 @@ const formRef = ref(null)
 const saving = ref(false)
 const recordId = ref(null)
 const savedRecord = ref(null)
+// D1 强制退潮红片：优先用引擎现算的 score-detail，页面刚载入还没拉明细时回落到已存记录的 forcedEbb。
+// 两者都是引擎真值（跌停≥10/阵眼核按钮/中位吹哨+大面/极高位爆量断板），前端不自行判定。
+const ebbActive = computed(() =>
+  scoring.detail?.forcedEbb === true || savedRecord.value?.forcedEbb === 1)
+const ebbReason = computed(() =>
+  scoring.detail?.forcedEbbReason || savedRecord.value?.forcedEbbReason || '')
 /**
  * 这天的行读回来了，才敢发「表单独占的那 11 格」（九格五维 manual_* + 涨跌家数）。
  * 后端把"带了这个键"当成"这格就该是这个值"，留空即清空——没读回来就带键等于把已存的数洗掉。
@@ -318,7 +313,14 @@ const savingPos = ref(false)
 const fetching = ref(false)
 const snapshot = ref(null)
 const missingList = computed(() => (snapshot.value && snapshot.value.missing) || [])
-const filledCount = computed(() => Object.keys((snapshot.value && snapshot.value.filled) || {}).length)
+// 面板上的 "/7" 只数七项打分口径行情；涨跌家数是客观附加项（同交易时段才有），
+// 它的回显看 D1 卡片，不挤进这 7 项的完成度。
+const MARKET_AUTO_KEYS = ['maxConsecutiveLimit', 'limitUpCount', 'limitDownCount',
+  'yesterdayLimitPremium', 'brokenBoardRate', 'bigLossCount', 'totalVolume']
+const filledCount = computed(() => {
+  const f = (snapshot.value && snapshot.value.filled) || {}
+  return MARKET_AUTO_KEYS.filter(k => f[k] != null).length
+})
 
 function labelList(keys) {
   const list = keys || []
@@ -451,16 +453,13 @@ async function handleFetchMarket(refresh) {
   const date = form.tradeDate
   fetching.value = true
   try {
-    // snapshot 7 字段 + breadth 涨跌家数 并行拉
-    const [snapRes, breadthRes] = await Promise.all([
-      marketApi.snapshot(date, refresh),
-      marketApi.breadth().catch(() => null)   // breadth 没 date 参数，只取实时；失败静默
-    ])
+    // 一次 snapshot 由后端统一取数并返回 filled：七项行情 + 同交易时段的上涨/下跌家数。
+    // 后端还会把客观的涨跌家数窄更新进这天已存在的复盘记录（拉取即持久化，只写 up/down 两列）。
+    // 历史日后端取不到当天涨跌家数（只有实时口径），filled 里就没这两键，卡片如实留空。
+    const snapRes = await marketApi.snapshot(date, refresh)
     if (form.tradeDate !== date) return
     snapshot.value = snapRes.data || {}
     const filled = { ...(snapshot.value.filled || {}) }
-    if (breadthRes?.data?.upCount != null) filled.upCount = breadthRes.data.upCount
-    if (breadthRes?.data?.downCount != null) filled.downCount = breadthRes.data.downCount
     fillForm(filled)
     // snapshot 已把今昨涨停/炸板池写进 t_market_stock：四层晋级/溢价/大面、封板率、回封率、连板数
     // 这些分层原始读数此刻就能按最新池子重算，强制刷一次五维明细（不等保存）。
@@ -708,6 +707,21 @@ onMounted(() => {
 .panel-warn {
   color: #d97706;
 }
+
+.ebb-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 12px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, .16);
+  border: 1px solid #ef4444;
+}
+.ebb-chip-ico { flex: none; animation: ebb-chip-blink 1.1s steps(2, start) infinite; }
+.ebb-chip-text { color: #fecaca; font-size: 12.5px; line-height: 1.5; }
+.ebb-chip-text b { color: #fca5a5; }
+@keyframes ebb-chip-blink { to { opacity: .25; } }
 
 .score-section {
   display: flex;

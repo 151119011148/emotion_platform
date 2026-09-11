@@ -44,11 +44,12 @@
         <div class="stat">
           <span class="stat-label">涨停 / 跌停</span>
           <span class="stat-value">
-            <span class="up">{{ metrics.limit_up_count ?? '—' }}</span>
+            <span class="up link-up" :title="metrics.limit_up_count != null ? '点击查看连板生态' : ''"
+              @click="metrics.limit_up_count != null && goTianti()">{{ metrics.limit_up_count ?? '—' }}</span>
             <span class="sep">/</span>
             <span class="down">{{ metrics.limit_down_count ?? '—' }}</span>
           </span>
-          <span class="stat-sub">家</span>
+          <span class="stat-sub">家 · 涨停数可点开连板生态</span>
         </div>
       </div>
     </template>
@@ -219,6 +220,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { marketApi, recordApi, prdApi } from '../api/modules'
 import { useScoringStore } from '../stores/scoring'
 import { signed } from '../utils/scores'
@@ -226,8 +228,16 @@ import { signed } from '../utils/scores'
 const props = defineProps({
   date: { type: String, required: true },
   dimKey: { type: String, required: true },
-  title: { type: String, required: true }
+  title: { type: String, required: true },
+  /** 涨跌家数由父页面（复盘表单）透传：拉取行情/读回记录后立即回显，不依赖本组件自取时序 */
+  upCount: { type: Number, default: null },
+  downCount: { type: Number, default: null }
 })
+
+const router = useRouter()
+function goTianti() {
+  router.push({ path: '/tianti', query: { date: props.date } })
+}
 
 const scoring = useScoringStore()
 const loading = ref(false)
@@ -274,6 +284,12 @@ const turnoverBand = computed(() => {
 
 const isLatestDay = computed(() => props.date === todayStr)
 const breadthText = computed(() => {
+  // 父页面表单值优先：拉取行情（breadth 实时）或读回已存记录后，form.upCount/downCount 立刻透传到这里回显
+  if (props.upCount != null && props.downCount != null) {
+    const denom = props.upCount + props.downCount
+    const ratio = denom ? ((props.upCount / denom) * 100).toFixed(1) + '%' : '—'
+    return { up: props.upCount, down: props.downCount, sub: '红盘率 ' + ratio }
+  }
   const r = record.value
   if (r?.upCount != null && r?.downCount != null) {
     const denom = r.upCount + r.downCount
@@ -422,6 +438,8 @@ onMounted(load)
 .sep { color: #5b6c7d; margin: 0 6px; }
 .up { color: #ef4444; }
 .down { color: #3b82f6; }
+.link-up { cursor: pointer; transition: opacity .15s; }
+.link-up:hover { text-decoration: underline; opacity: .82; }
 .missing { font-size: 13px; color: #6b7c8c; }
 
 /* D2 五要素 */

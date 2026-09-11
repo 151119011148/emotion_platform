@@ -305,6 +305,38 @@ public class DailyRecordService {
                         .eq(DailyRecord::getTradeDate, date));
     }
 
+    /**
+     * /snapshot 拉到客观的全市场涨跌家数后，顺带落进该用户这一天的复盘记录（后端持久化）。
+     *
+     * <p>刻意只做「已存在行的两列窄更新」：
+     * <ul>
+     *   <li>不建空行——这天还没存过复盘时，由用户随后在表单点保存走 create，拉取不替他造半行；</li>
+     *   <li>patch 只 set 主键 + upCount/downCount 三个非空字段，updateById 的 NOT_NULL 策略只会
+     *       UPDATE 这两列，人工列（mainTheme / 各 manual_*）与打分层（score* / stage）一概不碰；</li>
+     *   <li>不触发 scoreAndPlace——拉取后前端本就会再刷一次 /score-detail，那时按新入分母重算。</li>
+     * </ul>
+     *
+     * @return 是否真的落了库（这天没有记录或参数缺失时为 false）
+     */
+    public boolean applyAutoBreadth(Long userId, LocalDate date, Integer upCount, Integer downCount) {
+        if (userId == null || date == null || upCount == null || downCount == null) {
+            return false;
+        }
+        DailyRecord existing = getByDate(userId, date);
+        if (existing == null) {
+            return false;
+        }
+        if (java.util.Objects.equals(existing.getUpCount(), upCount)
+                && java.util.Objects.equals(existing.getDownCount(), downCount)) {
+            return true; // 与库内一致，不必再写
+        }
+        DailyRecord patch = new DailyRecord();
+        patch.setId(existing.getId());
+        patch.setUpCount(upCount);
+        patch.setDownCount(downCount);
+        return dailyRecordMapper.updateById(patch) > 0;
+    }
+
     public List<DailyRecord> getRange(Long userId, LocalDate start, LocalDate end) {
         return dailyRecordMapper.selectList(
                 new LambdaQueryWrapper<DailyRecord>()

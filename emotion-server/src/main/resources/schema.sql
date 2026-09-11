@@ -673,7 +673,8 @@ INSERT IGNORE INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator
     (@fid,'market','index_env',1,'COMPOUND',1.00,NULL,100,'三指均涨 >1%','STRATEGY:算法在Java,此行供展示/Parity'),
     (@fid,'market','index_env',2,'COMPOUND',NULL,NULL,40,'两跌一红',''),
     (@fid,'market','index_env',3,'COMPOUND',-1.00,NULL,20,'三指跌 >1%(均<-1%)',''),
-    (@fid,'market','index_env',4,'ELSE',NULL,NULL,60,'其余混合/微动','中间档占位待定标'),
+    (@fid,'market','index_env',4,'COMPOUND',NULL,NULL,35,'三指全绿但均未破-1%(弱跌日)','STRATEGY:三指均<0且均≥-1%,Java算'),
+    (@fid,'market','index_env',5,'ELSE',NULL,NULL,60,'其余混合/微动(含平盘)','中间档占位待定标'),
     (@fid,'market','limit_combo',1,'COMPOUND',80,0,95,'涨停>=80 且 跌停=0','STRATEGY:两操作数,Java算'),
     (@fid,'market','limit_combo',2,'COMPOUND',40,8,45,'涨停40~60 且 跌停5~8',''),
     (@fid,'market','limit_combo',3,'COMPOUND',NULL,20,5,'跌停>20',''),
@@ -864,7 +865,8 @@ INSERT IGNORE INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator
     (@fid2,'market','index_env',1,'COMPOUND',1.00,NULL,100,'三指均涨 >1%','STRATEGY:算法在Java,此行供展示/Parity'),
     (@fid2,'market','index_env',2,'COMPOUND',NULL,NULL,40,'两跌一红',''),
     (@fid2,'market','index_env',3,'COMPOUND',-1.00,NULL,20,'三指跌 >1%(均<-1%)',''),
-    (@fid2,'market','index_env',4,'ELSE',NULL,NULL,60,'其余混合/微动','中间档占位待定标'),
+    (@fid2,'market','index_env',4,'COMPOUND',NULL,NULL,35,'三指全绿但均未破-1%(弱跌日)','STRATEGY:三指均<0且均≥-1%,Java算'),
+    (@fid2,'market','index_env',5,'ELSE',NULL,NULL,60,'其余混合/微动(含平盘)','中间档占位待定标'),
     (@fid2,'market','limit_combo',1,'COMPOUND',80,0,95,'涨停>=80 且 跌停=0','STRATEGY:两操作数,Java算'),
     (@fid2,'market','limit_combo',2,'COMPOUND',40,8,45,'涨停40~60 且 跌停5~8',''),
     (@fid2,'market','limit_combo',3,'COMPOUND',NULL,20,5,'跌停>20',''),
@@ -1003,3 +1005,19 @@ EXECUTE stock_shape_stmt;
 DEALLOCATE PREPARE stock_shape_stmt;
 
 -- 重放完成后如需把历史按 v2 口径重算：POST /api/records/recalc-all。
+
+-- ============ 存量库迁移(2026-09-11 D1 指数环境补「三指全绿弱跌」档) ============
+-- 背景：原 index_env 只有 100/40/20/ELSE60，三指全绿但均未破-1% 落进兜底 60（虚高）。
+-- 新增 rule_no=4 = 35（弱跌日），原 ELSE60 顺延 rule_no=5。INSERT IGNORE 改不了存量 rule_no=4，
+-- 这里幂等收敛一次（新库这两条与种子同值，重放无害）。
+UPDATE t_scoring_rule
+   SET operator='COMPOUND', threshold_low=NULL, threshold_high=NULL, score=35,
+       formula='三指全绿但均未破-1%(弱跌日)', note='STRATEGY:三指均<0且均≥-1%,Java算'
+ WHERE model_id IN (@fid, @fid2) AND dim_key='market' AND sub_key='index_env' AND rule_no=4;
+
+INSERT IGNORE INTO t_scoring_rule
+  (model_id, dim_key, sub_key, rule_no, operator, threshold_low, threshold_high, score, formula, note)
+VALUES
+  (@fid, 'market','index_env',5,'ELSE',NULL,NULL,60,'其余混合/微动(含平盘)','中间档占位待定标'),
+  (@fid2,'market','index_env',5,'ELSE',NULL,NULL,60,'其余混合/微动(含平盘)','中间档占位待定标');
+

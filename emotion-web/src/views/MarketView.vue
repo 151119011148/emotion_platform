@@ -12,6 +12,15 @@
       </div>
     </el-alert>
 
+    <!-- 强制退潮：命中即无视总分按退潮应对（引擎 forcedEbb 真值，非前端阈值） -->
+    <div v-if="forcedEbb" class="ebb-banner">
+      <span class="ebb-ico">⛔</span>
+      <div class="ebb-text">
+        <b>强制退潮已触发</b>（无视大盘维 / 总分，周期阶段按「退潮(强制)」应对）
+        <span class="ebb-reason">{{ forcedEbbReason || '详见五维结构信号' }}</span>
+      </div>
+    </div>
+
     <!-- 五大指数 -->
     <section class="block" v-loading="loading">
       <div class="block-head">
@@ -112,6 +121,9 @@ const record = ref(null)
 
 const metrics = computed(() => scoring.detail?.metrics || {})
 const marketDim = computed(() => (scoring.detail?.dims || []).find((d) => d.key === 'market') || null)
+// 强制退潮是全模型级信号（跌停≥10 / 阵眼核按钮 / 中位吹哨+大面 / 极高位爆量断板），直接镜像引擎，不在前端重算。
+const forcedEbb = computed(() => scoring.detail?.forcedEbb === true)
+const forcedEbbReason = computed(() => scoring.detail?.forcedEbbReason || '')
 
 // 实时涨跌家数（东财 f104/105/106，仅当前时刻）；历史日期用 md 导入的 upCount/downCount
 const liveBreadth = ref(null)
@@ -225,6 +237,21 @@ watch(date, load)
   line-height: 1.6;
   color: #8899a6;
 }
+.ebb-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, .16);
+  border: 1px solid #ef4444;
+}
+.ebb-ico { font-size: 18px; flex: none; animation: ebb-blink 1.1s steps(2, start) infinite; }
+.ebb-text { color: #fecaca; font-size: 13px; line-height: 1.6; }
+.ebb-text b { color: #fca5a5; font-size: 14px; }
+.ebb-reason { display: block; color: #f87171; font-weight: 700; }
+@keyframes ebb-blink { to { opacity: .25; } }
 .block {
   background: #1a2332;
   border-radius: 12px;

@@ -119,6 +119,12 @@ class BoardScoreCalculatorTest {
                 .compareTo(BoardScoreCalculator.INDEX_ENV_FULL_UP));
         assertEquals(0, BoardScoreCalculator.strategyIndexEnv(m("index1_pct", -2.0, "index2_pct", -1.5, "index3_pct", -1.2))
                 .compareTo(BoardScoreCalculator.INDEX_ENV_ALL_DOWN));
+        // 三指全绿但都没跌破 -1%（如 2026-09-10 -0.34/-0.61/-0.22）→ 弱跌日 35，不再落兜底 60
+        assertEquals(0, BoardScoreCalculator.strategyIndexEnv(m("index1_pct", -0.34, "index2_pct", -0.61, "index3_pct", -0.22))
+                .compareTo(BoardScoreCalculator.INDEX_ENV_ALL_SOFT_DOWN));
+        // -1% 边界也算弱跌（严格 < -1% 才进全跌破位档）
+        assertEquals(0, BoardScoreCalculator.strategyIndexEnv(m("index1_pct", -1.0, "index2_pct", -0.5, "index3_pct", -0.2))
+                .compareTo(BoardScoreCalculator.INDEX_ENV_ALL_SOFT_DOWN));
         assertEquals(0, BoardScoreCalculator.strategyIndexEnv(m("index1_pct", -1.0, "index2_pct", -0.5, "index3_pct", 0.8))
                 .compareTo(BoardScoreCalculator.INDEX_ENV_TWO_DOWN));
         assertEquals(0, BoardScoreCalculator.strategyIndexEnv(m("index1_pct", 0.2, "index2_pct", -0.1, "index3_pct", 0.3))

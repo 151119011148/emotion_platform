@@ -21,6 +21,7 @@ import com.emotion.entity.IndexClose;
 import com.emotion.market.MarketDataException;
 import com.emotion.market.TencentClient;
 import com.emotion.service.IndexCloseStore;
+import com.emotion.service.DailyRecordService;
 import com.emotion.service.MarketDataService;
 import com.emotion.service.ScoreContextService;
 import com.emotion.service.SurveillanceService;
@@ -35,10 +36,13 @@ import com.emotion.vo.ScoreContextVO;
 import com.emotion.vo.SurveillanceVO;
 
 /**
- * 行情拉取不写打分字段：六个数字仍然要靠 /api/records 落库，
+ * 行情拉取不写打分字段：打分仍靠 /api/records 落库，
  * 这样人工确认（主线题材、龙头、明确度）才有地方插进去，也不会绕开阶段判定逻辑。
- * 唯一的例外是公开明细表：/snapshot 顺带落 t_market_stock（逐只池子）、
+ * 例外一：公开明细表——/snapshot 顺带落 t_market_stock（逐只池子）、
  * t_premium_tier（档位溢价）与 t_index_close（五大指数收盘），三张都不绑用户、都不带人工判断。
+ * 例外二：全市场上涨/下跌家数——纯客观公开读数，/snapshot 在"拉的就是最新交易时段"时
+ * 把它窄更新进该用户当天<b>已存在</b>的复盘记录（只写 up_count/down_count 两列，
+ * 不建空行、不碰人工列、不重算分）；历史日取不到真值，整格留空。
  *
  * t_surveillance 不跟着 /snapshot 走：一次刷新要打二三十次公告接口，会把
  * {@code market.budget-ms} 顶穿，所以它是显式的 /surveillance/refresh。
@@ -56,15 +60,18 @@ public class MarketController {
     private final SurveillanceService surveillanceService;
     private final ScoreContextService scoreContextService;
     private final IndexCloseStore indexCloseStore;
+    private final DailyRecordService dailyRecordService;
 
     public MarketController(MarketDataService marketDataService,
                             SurveillanceService surveillanceService,
                             ScoreContextService scoreContextService,
-                            IndexCloseStore indexCloseStore) {
+                            IndexCloseStore indexCloseStore,
+                            DailyRecordService dailyRecordService) {
         this.marketDataService = marketDataService;
         this.surveillanceService = surveillanceService;
         this.scoreContextService = scoreContextService;
         this.indexCloseStore = indexCloseStore;
+        this.dailyRecordService = dailyRecordService;
     }
 
     /**
@@ -97,10 +104,23 @@ public class MarketController {
     }
 
     @GetMapping("/snapshot")
-    public ApiResponse<MarketSnapshotVO> snapshot(@RequestParam(required = false) String date,
+    public ApiResponse<MarketSnapshotVO> snapshot(Authentication auth,
+                                                  @RequestParam(required = false) String date,
                                                   @RequestParam(defaultValue = "false") boolean refresh) {
         LocalDate tradeDate = parse(date);
-        return ApiResponse.ok(marketDataService.snapshot(tradeDate, refresh));
+        MarketSnapshotVO vo = marketDataService.snapshot(tradeDate, refresh);
+
+        // 涨跌家数是客观公开读数，走后端持久化：仅当拉的就是行情源最新交易时段（snapshotDate=请求日），
+        // 服务端确实取到了当天真值，才窄更新进该用户这天已存在的复盘记录（只写 up/down 两列）。
+        // 历史日的实时数不代表那天，绝不写；那天还没有记录也不替用户建空行（留给表单保存时 create）。
+        if (vo.getSnapshotDate() != null && vo.getSnapshotDate().equals(vo.getTradeDate())
+                && vo.getFilled() != null
+                && vo.getFilled().getUpCount() != null
+                && vo.getFilled().getDownCount() != null) {
+            dailyRecordService.applyAutoBreadth(userId(auth), vo.getTradeDate(),
+                    vo.getFilled().getUpCount(), vo.getFilled().getDownCount());
+        }
+        return ApiResponse.ok(vo);
     }
 
     /** 一日盘面个股明细：连板梯队、断档、大面名单、跌停名单，供卡片 hover 用。 */

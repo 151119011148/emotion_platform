@@ -463,6 +463,9 @@ public class MarketDataService {
         if (needIndexCloses) {
             tasks.add(() -> tencent.indexDayBars(date));
         }
+        // 全市场涨跌家数：东财只有实时口径，放并行批里一起取（一次请求），是否采用等快照日确定后再判。
+        int breadthIdx = tasks.size();
+        tasks.add(() -> eastmoney.marketBreadth());
         List<Future<Object>> futures = run(tasks, deadline);
 
         PoolResult limitUp = at(futures, 0);
@@ -471,6 +474,7 @@ public class MarketDataService {
         Map<String, StockQuote> indexes = at(futures, 3);
         PrevPool prevPool = at(futures, 4);
         Map<String, DayBar> indexBars = needIndexCloses ? at(futures, 5) : null;
+        int[] marketBreadth = at(futures, breadthIdx);
 
         snap.snapshotDate = indexes == null ? null
                 : TencentClient.snapshotDate(indexes, tencent.shIndexCode());
@@ -498,6 +502,17 @@ public class MarketDataService {
         MarketMetrics.BigLoss bigLoss = fillBigLoss(snap, fields, broken);
         fillAmount(snap, fields, indexes);
         fillPremium(snap, fields, deadline, prevPool);
+
+        // 涨跌家数只有实时口径。仅当"拉的这一天就是行情源当前所在的交易时段"才采用：
+        // 盘中/收盘后拉今天、周末拉最近交易日，快照日都等于请求日，取的是真值；
+        // 拉更早的历史日时快照日晚于请求日，实时数不是那天的，整格留空，绝不张冠李戴。
+        boolean sameSession = snap.snapshotDate != null && snap.snapshotDate.equals(date);
+        if (sameSession && marketBreadth != null && marketBreadth.length >= 2) {
+            fields.setUpCount(marketBreadth[0]);
+            fields.setDownCount(marketBreadth[1]);
+            snap.notes.add("上涨/下跌家数已取（东财实时 " + marketBreadth[0] + "/" + marketBreadth[1]
+                    + "）并随本次拉取写入复盘记录");
+        }
 
         if (missingCount(fields) == ALL_MARKET_FIELDS.size()) {
             throw new MarketDataException("行情源未返回任何可用数据，请稍后重试或手工填写");
