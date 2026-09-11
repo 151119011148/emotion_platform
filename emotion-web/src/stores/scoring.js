@@ -54,6 +54,9 @@ export const useScoringStore = defineStore('scoring', () => {
   const detail = ref(null)
   const detailDate = ref(null)
   const detailLoading = ref(false)
+  /** 当日在飞的 score-detail 请求：复盘页同屏有五个 DimScoreBlock，靠它把并发收敛成一次。 */
+  let inflight = null
+  let inflightDate = null
 
   async function load(force = false) {
     if (loading.value) return
@@ -73,6 +76,7 @@ export const useScoringStore = defineStore('scoring', () => {
   /**
    * 拉/复用某一天的 score-detail eval 树。
    * - 同一天已加载 → 直接返回（除非 force）
+   * - 同一天已有在飞请求 → 复用同一个 Promise（五维同屏不重复发）
    * - 换日期 → <b>先清 detail</b>，避免旧日期读数落在新日期卡片上
    * - 失败 → detail=null，卡片走 record.score_* 兜底显示，不弹红条
    */
@@ -80,22 +84,39 @@ export const useScoringStore = defineStore('scoring', () => {
     if (!date) {
       detail.value = null
       detailDate.value = null
+      inflight = null
+      inflightDate = null
       return
     }
+    if (inflight && inflightDate === date) return inflight
     if (!force && detailDate.value === date && detail.value) return
-    detail.value = null
-    detailDate.value = date
-    detailLoading.value = true
-    try {
-      const res = await recordApi.scoreDetail(date)
-      // 60s 里用户可能已经切了日期：晚到的响应不许落在新日期上
-      if (detailDate.value !== date) return
-      detail.value = res?.data || null
-    } catch (e) {
-      if (detailDate.value !== date) return
+
+    const p = (async () => {
       detail.value = null
+      detailDate.value = date
+      detailLoading.value = true
+      try {
+        const res = await recordApi.scoreDetail(date)
+        // 60s 里用户可能已经切了日期：晚到的响应不许落在新日期上
+        if (detailDate.value !== date) return
+        detail.value = res?.data || null
+      } catch (e) {
+        if (detailDate.value !== date) return
+        detail.value = null
+      } finally {
+        detailLoading.value = false
+      }
+    })()
+
+    inflight = p
+    inflightDate = date
+    try {
+      await p
     } finally {
-      detailLoading.value = false
+      if (inflight === p) {
+        inflight = null
+        inflightDate = null
+      }
     }
   }
 

@@ -27,6 +27,9 @@
         title="题材行与日内核心行业没有对上：催化剂硬度取的是默认值，可信度打折（去主线龙头页登记该行业题材可修正）"
         style="margin: 16px 0" />
 
+      <DimScoreBlock :date="date" dim-key="theme_main" title="D2 · 主线明确度" />
+      <DimScoreBlock :date="date" dim-key="anchor" title="D5 · 阵眼" />
+
       <!-- 生命周期轨道 -->
       <section class="block" v-loading="loading">
         <div class="block-head">
@@ -178,6 +181,7 @@ import { ref, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { prdApi, recordApi } from '../api/modules'
 import { signed } from '../utils/scores'
+import DimScoreBlock from '../components/DimScoreBlock.vue'
 
 const route = useRoute()
 

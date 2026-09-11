@@ -17,114 +17,73 @@
               placeholder="选择日期" style="width: 100%" />
           </el-form-item>
 
-          <el-divider content-position="left">行情读数（喂给五维打分）</el-divider>
-
-          <p class="sub-status">{{ detailStatus }}</p>
+          <el-divider content-position="left">五维原始行情读数（与各维度页面同源）</el-divider>
           <p v-if="!formReady" class="panel-warn">
-            这天的记录没读回来：下面 11 格人工读数（九格 manual_* + 涨跌家数）<b>不会</b>发出
+            这天的记录没读回来：下面的人工读数（manual_* + 涨跌家数）<b>不会</b>发出
             （发了就等于把你已存的值连同你没显示的格子一起洗成空）。已有这一行时点「更新记录」会被直接拦下。
             切到别的日期再切回来、或刷新页面才能存。
           </p>
 
-          <div class="market-grid">
-            <el-form-item v-for="c in MARKET_CELLS" :key="c.key" :label="c.label" :prop="c.prop"
-              label-width="0" class="market-cell">
-              <el-input-number v-model="form[c.key]" :min="c.min" :max="c.max" :precision="c.precision"
-                :step="c.step" controls-position="right" size="small" placeholder="未取到" />
-              <p v-if="c.note" class="cell-note">{{ c.note }}</p>
-            </el-form-item>
-          </div>
+          <!-- D1 大盘生态：五大指数 + 成交额/量比/涨跌家数/涨跌停（与大盘页同一套原始读数） -->
+          <DimRawBlock v-if="form.tradeDate" :date="form.tradeDate" dim-key="market" title="D1 · 大盘生态" />
 
-          <el-divider content-position="left">五维打分（0-100 直加权和）</el-divider>
-
-          <div class="dim-grid">
-            <div v-for="sec in fiveDimSections" :key="sec.dimKey" class="dim-group">
-              <div class="dim-title">
-                <span class="dim-no">{{ sec.dimNo }}</span>
-                <span class="dim-name">{{ sec.label }}</span>
-                <span class="fd-weight">×{{ sec.weight }}</span>
-                <span class="dim-score" :class="sec.score == null ? 'unscored' : sec.bandClass">
-                  {{ sec.score == null ? '未评（剔出分母）' : `${sec.score} 分 · ${sec.band}` }}
-                </span>
-              </div>
-              <div class="fd-bar">
-                <div class="fd-bar-fill" :class="sec.bandClass" :style="{ width: sec.barWidth }"></div>
-              </div>
-
-              <div v-for="row in sec.rows" :key="row.key" class="fd-sub-row"
-                :class="{ covered: row.filled }">
-                <span class="cell-label">{{ row.label }}</span>
-                <span v-if="row.weight != null" class="fd-weight">×{{ fmtNum(row.weight) }}</span>
-
-                <template v-if="row.manual">
-                  <el-form-item label-width="0" class="cell-item fd-input">
-                    <el-select v-if="row.manual.kind === 'select'" v-model="form[row.manual.field]" size="small"
-                      clearable :placeholder="row.manual.ph">
-                      <el-option v-for="o in row.manual.options" :key="o.value" :label="o.label" :value="o.value" />
-                    </el-select>
-                    <el-input-number v-else v-model="form[row.manual.field]" :min="row.manual.min"
-                      :max="row.manual.max" :precision="row.manual.precision" :step="row.manual.step"
-                      controls-position="right" size="small" :placeholder="row.manual.ph" />
-                  </el-form-item>
-                  <span v-if="row.manual.unit" class="cell-unit">{{ row.manual.unit }}</span>
-                </template>
-                <span v-else class="cell-auto">{{ row.rawText || '—' }}</span>
-
-                <span class="fd-sub-score" :class="{ unscored: row.score == null }">
-                  {{ row.score == null ? '未评' : row.score }}
-                </span>
-                <span v-if="row.bandHit" class="fd-hit">{{ row.bandHit }}</span>
-
-                <p v-if="row.layers.length" class="fd-layer-row">
-                  <span v-for="l in row.layers" :key="l.key" class="fd-layer">{{ l.label }}
-                    <b :class="{ unscored: l.score == null }">{{ l.score == null ? '未评' : l.score }}</b>
-                  </span>
-                </p>
-                <p v-if="row.note" class="cell-note">{{ row.note }}</p>
-              </div>
-
-              <div v-if="sec.list && sec.list.length" class="cell-list">
-                <span v-for="s in sec.list" :key="s.code" class="list-item"
-                  :title="`${s.name} ${s.code} · 自涨停回撤 ${s.pullback}% · 收盘 ${s.pct}%${s.industry ? ' · ' + s.industry : ''}`">
-                  {{ s.name }}<i>-{{ s.pullback }}%</i>
-                </span>
-                <span v-if="sec.listHidden" class="list-more">另有 {{ sec.listHidden }} 家</span>
-              </div>
-
-              <p v-if="sec.note" class="dim-note">{{ sec.note }}</p>
+          <!-- D2 主线明确度：日内核心五要素（聚集度/催化剂/持续性原始读数） -->
+          <DimRawBlock v-if="form.tradeDate" :date="form.tradeDate" dim-key="theme_main" title="D2 · 主线明确度" />
+          <section v-if="D2_MANUALS.length" class="block manual-block">
+            <h4 class="manual-title">D2 人工读数（盘面取不到，需人判）</h4>
+            <div class="stat-grid">
+              <EditableStatCard v-for="m in D2_MANUALS" :key="m.metric"
+                v-model="form[m.field]" :label="m.label" :unit="m.unit"
+                :min="m.min" :max="m.max" :precision="m.precision" :step="m.step"
+                :ph="m.ph" :hint="m.hint" />
             </div>
-          </div>
+          </section>
 
-          <el-divider content-position="left">结构信号 / 强制退潮</el-divider>
-          <div class="signal-block">
-            <div class="fd-signals" v-if="structuralSignals.length">
-              <span class="fd-signal-label">命中信号</span>
-              <span v-for="s in structuralSignals" :key="s" class="fd-chip">{{ s }}</span>
+          <!-- D3 连板生态：最高连板/日内核心/涨停炸板/涨停聚集（与天梯页同一套原始读数） -->
+          <DimRawBlock v-if="form.tradeDate" :date="form.tradeDate" dim-key="board" title="D3 · 连板生态" />
+
+          <!-- D4 首板生态：首板封住/炸板/封板率/1进2/昨首板溢价（与首板页同一套原始读数） -->
+          <DimRawBlock v-if="form.tradeDate" :date="form.tradeDate" dim-key="first" title="D4 · 首板生态" />
+          <section v-if="D4_MANUALS.length" class="block manual-block">
+            <h4 class="manual-title">D4 人工读数（封板率 / 溢价人工兜底）</h4>
+            <div class="stat-grid">
+              <EditableStatCard v-for="m in D4_MANUALS" :key="m.metric"
+                v-model="form[m.field]" :label="m.label" :unit="m.unit"
+                :min="m.min" :max="m.max" :precision="m.precision" :step="m.step"
+                :ph="m.ph" :hint="m.hint" />
             </div>
-            <p v-else class="cell-note">
-              {{ scoring.detail ? '这天没命中结构信号。' : '信号读数未取到，暂不判断。' }}
-            </p>
-            <p v-if="forcedEbbOn" class="fd-forced-reason">
-              强制退潮：{{ forcedEbbReason || '命中硬条件，这一天直接空仓，与总分无关' }}
-            </p>
+          </section>
 
-            <div v-for="m in FORCED_EBB_METRICS" :key="m.metric" class="fd-sub-row">
-              <span class="cell-label">{{ m.label }}</span>
-              <el-form-item label-width="0" class="cell-item fd-input">
+          <!-- D5 阵眼：总龙/中军/跟风/卡位/反包原始读数（与主线页同一套龙头分工） -->
+          <DimRawBlock v-if="form.tradeDate" :date="form.tradeDate" dim-key="anchor" title="D5 · 阵眼" />
+          <section v-if="D5_MANUALS.length" class="block manual-block">
+            <h4 class="manual-title">D5 人工读数（监管折扣）</h4>
+            <div class="stat-grid">
+              <EditableStatCard v-for="m in D5_MANUALS" :key="m.metric"
+                v-model="form[m.field]" :label="m.label" :unit="m.unit"
+                :min="m.min" :max="m.max" :precision="m.precision" :step="m.step"
+                :ph="m.ph" :hint="m.hint" />
+            </div>
+          </section>
+
+          <el-divider content-position="left">强制退潮条件</el-divider>
+          <section class="block">
+            <div class="stat-grid">
+              <div v-for="m in FORCED_EBB_METRICS" :key="m.metric" class="stat-card">
+                <span class="stat-label">{{ m.label }}<span v-if="m.unit" class="stat-unit"> ({{ m.unit }})</span></span>
                 <el-select v-if="m.kind === 'select'" v-model="form[m.field]" size="small" clearable
-                  :placeholder="m.ph">
+                  :placeholder="m.ph" class="stat-input">
                   <el-option v-for="o in m.options" :key="o.value" :label="o.label" :value="o.value" />
                 </el-select>
                 <el-input-number v-else v-model="form[m.field]" :min="m.min" :max="m.max"
                   :precision="m.precision" :step="m.step" controls-position="right" size="small"
-                  :placeholder="m.ph" />
-              </el-form-item>
-              <span v-if="m.unit" class="cell-unit">{{ m.unit }}</span>
-              <p v-if="m.hint" class="cell-note">{{ m.hint }}</p>
+                  :placeholder="m.ph" class="stat-input" />
+                <span v-if="m.hint" class="stat-hint">{{ m.hint }}</span>
+              </div>
             </div>
-          </div>
+          </section>
 
-          <el-form-item>
+          <el-form-item class="action-row">
             <el-button type="primary" :loading="saving" @click="handleSave" size="large">
               {{ recordId ? '更新记录' : '提交记录' }}
             </el-button>
@@ -133,63 +92,19 @@
       </div>
 
       <div class="score-section">
-        <div class="score-card" v-if="savedRecord || scoring.detail">
+        <div class="score-card" v-if="savedRecord">
           <h3>打分结果</h3>
-
-          <div class="five-dim-strip" v-if="fiveDimItems.length">
-            <div class="fd-head">
-              <span class="fd-title">五维（当前口径 0-100）</span>
-              <span class="fd-source">{{ scoring.detail ? '现算，与仪表盘同源' : '落库值（现算未取到）' }}</span>
-              <el-tag v-if="forcedEbbOn" type="danger" size="small" effect="dark">强制退潮</el-tag>
-            </div>
-            <div class="fd-items">
-              <div v-for="it in fiveDimItems" :key="it.key" class="fd-item" :title="it.tooltip">
-                <span class="fd-label">{{ it.label }}</span>
-                <span class="fd-score" :class="{ unscored: it.score == null }">
-                  {{ it.score == null ? '未评' : it.score }}
-                </span>
-                <span class="fd-band" :class="it.bandClass">{{ it.band || '—' }}</span>
-                <span class="fd-weight">×{{ it.weight }}</span>
-              </div>
-            </div>
-            <p v-if="forcedEbbOn && forcedEbbReason" class="fd-forced-reason">
-              {{ forcedEbbReason }}
-            </p>
-            <div class="fd-signals" v-if="structuralSignals.length">
-              <span class="fd-signal-label">结构信号</span>
-              <span v-for="s in structuralSignals" :key="s" class="fd-chip">{{ s }}</span>
-            </div>
-          </div>
-
-          <p v-if="!savedRecord" class="fd-norecord">
-            这天还没保存复盘：上面是按当天行情<b>现算</b>的分，与仪表盘同源；周期阶段要保存后才落库。
+          <p class="fd-norecord">
+            各维度的具体打分规则和子指标分，请前往各单维页面查看（大盘生态 / 连板生态 / 首板生态 / 主线龙头）。
           </p>
-
-          <template v-if="savedRecord">
-            <div class="legacy-note">下面这排 3 点是旧 9 维引擎的落库值，五维模型已不读写它们，只当历史留档。</div>
-            <div class="score-grid legacy">
-              <div class="score-item" v-for="item in scoreItems" :key="item.key">
-                <span class="label">{{ item.label }}</span>
-                <span v-if="item.score == null" class="unscored">未评</span>
-                <span v-else-if="item.score < 0" class="minus">{{ item.score }}</span>
-                <span v-else class="dots">
-                  <span v-for="i in 3" :key="i" :class="{ active: i <= item.score }"></span>
-                </span>
-              </div>
-            </div>
-          </template>
           <div class="total-row">
-            <span>总分：{{ totalText }}</span>
-            <span class="temp">温度：{{ tempText }}</span>
+            <span>总分：{{ savedRecord.totalScore ?? '—' }} / 100</span>
+            <span class="temp">温度：{{ savedRecord.temperature ?? '—' }}</span>
           </div>
-          <div class="stage-row" v-if="savedRecord">
-            <template v-if="savedRecord.stage">
-              <el-tag :type="stageTagType" size="large">{{ savedRecord.stage }}</el-tag>
-              <span class="direction">{{ savedRecord.stageDirection }}</span>
-            </template>
-            <span v-else class="insufficient">
-              五维一条也没出分：没有分子就不出阶段。只要有一维出分，就按它剩下的权重归一化出带。
-            </span>
+          <div class="stage-row">
+            <el-tag v-if="savedRecord.forcedEbb === 1" type="danger" size="small" effect="dark">强制退潮</el-tag>
+            <el-tag v-if="savedRecord.stage" :type="stageTagType" size="large">{{ savedRecord.stage }}</el-tag>
+            <span v-if="savedRecord.stageDirection" class="direction">{{ savedRecord.stageDirection }}</span>
           </div>
         </div>
 
@@ -306,10 +221,10 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { recordApi, marketApi, importApi } from '../api/modules'
-import { survivalBandOf, fiveDimBandOf, fiveDimBandClassOf } from '../utils/scores'
-import { topSignals } from '../utils/cycleReading'
-import { useScoringStore } from '../stores/scoring'
 import { ElMessage } from 'element-plus'
+import EditableStatCard from '../components/EditableStatCard.vue'
+import DimRawBlock from '../components/DimRawBlock.vue'
+import { useScoringStore } from '../stores/scoring'
 
 const scoring = useScoringStore()
 
@@ -390,33 +305,8 @@ const rules = {
 }
 
 const stageTagType = computed(() => {
-  /* 4 带 + 强制退潮;后端 BoardScoreCalculator.stageOf 是唯一真源。 */
   const map = { '退潮': 'info', '混沌': '', '发酵': 'warning', '高潮': 'danger', '退潮(强制)': 'danger' }
   return map[savedRecord.value?.stage] || 'info'
-})
-
-/**
- * 五维双层:total_score 已是 0-100 直加权,满分固定 100;
- * scored_dims 仍显示(<5 说明有整维未评、分子被剔除),但不再乘系数造假分母。
- */
-const totalText = computed(() => {
-  const det = scoring.detail
-  if (det) {
-    if (det.total == null) return '—（五维全未评）'
-    const n = (det.dims || []).filter((d) => d.score != null).length
-    return `${Number(det.total).toFixed(1)} / 100（${n}/5 维参与）`
-  }
-  const r = savedRecord.value
-  if (!r || r.totalScore == null) return '—'
-  const dims = r.scoredDims || 0
-  return `${r.totalScore} / 100（${dims}/5 维参与，落库值）`
-})
-
-const tempText = computed(() => {
-  /* temperature 列继续承载五维总分(0-100),保留历史字段名;显示不再带 °。 */
-  const det = scoring.detail
-  const t = det && det.total != null ? det.total : savedRecord.value?.temperature
-  return t == null ? '—' : Number(t).toFixed(1)
 })
 
 /** 与服务端 ReviewImportParser.DISCIPLINE 同一套取值。 */
@@ -430,51 +320,12 @@ const snapshot = ref(null)
 const missingList = computed(() => (snapshot.value && snapshot.value.missing) || [])
 const filledCount = computed(() => Object.keys((snapshot.value && snapshot.value.filled) || {}).length)
 
-/**
- * 后端 manualFields 那份名单是"结构上取不到、只能人判"的字段，不只指本页能填的那几格：
- * 主线/总龙头/龙头状态照旧是人判的，只是作者换成了复盘 md。所以这里原样显示，不删名字。
- */
 function labelList(keys) {
   const list = keys || []
   return list.length ? list.map(k => MARKET_LABELS[k] || k).join('、') : '—'
 }
 
-// ---------- 五维录入台：树驱动的行 + 人工读数 ----------
-
-/** 大面名单那排 chips：{@code /market/stocks} 纯本地读 t_market_stock，一次请求都不发上游。 */
-const stocks = ref(null)
-const LIST_LIMIT = 20
-
-/**
- * ① 行情读数九格：七个数喂自动子指标，涨跌家数喂 D1·广度。
- * prop 只给必填的那三格（和 {@link rules} 同一套键）。
- */
-const MARKET_CELLS = [
-  {
-    key: 'maxConsecutiveLimit', label: '最高连板（板）', prop: 'maxConsecutiveLimit',
-    min: 1, max: 30, precision: 0, step: 1, note: 'H：连板四层怎么切以它为顶'
-  },
-  { key: 'limitUpCount', label: '涨停（家）', prop: 'limitUpCount', min: 0, max: 500, precision: 0, step: 1 },
-  {
-    key: 'limitDownCount', label: '跌停（家）', prop: 'limitDownCount', min: 0, max: 500, precision: 0, step: 1,
-    note: '≥10 家即触发强制退潮'
-  },
-  {
-    key: 'upCount', label: '上涨（家）', min: 0, max: 6000, precision: 0, step: 1,
-    note: '与下面那格算 D1·广度的红盘率'
-  },
-  { key: 'downCount', label: '下跌（家）', min: 0, max: 6000, precision: 0, step: 1 },
-  {
-    key: 'totalVolume', label: '两市成交额(亿)', min: 0, max: 60000, precision: 2, step: 100,
-    note: '÷20 日均额 = D1·量能'
-  },
-  { key: 'brokenBoardRate', label: '炸板率(次数)(%)', min: 0, max: 100, precision: 1, step: 1 },
-  { key: 'bigLossCount', label: '大面（家）', min: 0, max: 200, precision: 0, step: 1 },
-  {
-    key: 'yesterdayLimitPremium', label: '昨日涨停今溢价(%)', min: -30, max: 30, precision: 2, step: 0.5,
-    note: '含首板的整体口径，只展示；打分用的是 D3 四层溢价'
-  }
-]
+/** D2/D4/D5 的人工读数已由 MANUAL_METRICS 静态表定义，见下方。 */
 
 /**
  * 九条人工读数。<b>键是 metric key（也就是子指标的 source_key）</b>，不是维键也不是子键。
@@ -534,225 +385,17 @@ const MANUAL_METRICS = [
 const MANUAL_BY_METRIC = MANUAL_METRICS.reduce((m, x) => { m[x.metric] = x; return m }, {})
 const FORCED_EBB_METRICS = MANUAL_METRICS.filter((m) => m.dimKey === null)
 
-/** 每维段脚注：一句话说清这一维哪些是自动的、哪些只能人判。 */
-const DIM_NOTES = {
-  market: 'D1 四条全自动：指数环境取日 K、量能是成交额/20 日均、广度用上面那两格涨跌家数、涨跌停是家数组合。',
-  theme_main: 'D2 整维只能人判：这四格一格不填，这一维就是未评（剔出分母，不是 0 分）。',
-  board: 'D3 四层由当天三池现算，不用填；命中「中位吹哨」时整维 ×0.8，会写在段头那条 note 上。',
-  first: 'D4 三条自动、两条人判：首板封板率与首板次日均溢价没有回补口径。',
-  anchor: 'D5 阵眼在位/断板自动出状态分；监管折扣是人给的 0-1 乘数。'
-}
-
-/** 数字一律去掉浮点尾巴：读数 0.62 不是 0.6200000000000001。 */
-function fmtNum(v) {
-  const n = Number(v)
-  if (Number.isNaN(n)) return '—'
-  return String(Math.round(n * 100) / 100)
-}
-
-/** 层标签压一个字头：四层并排一行才不会把段撑爆。 */
-const LAYER_SHORT = { 中高位: '中高', 极高位: '极高', 低位: '低', 中位: '中' }
-function shortLayer(label) {
-  if (!label) return ''
-  for (const k of ['中高位', '极高位', '低位', '中位']) {
-    if (label.startsWith(k)) return LAYER_SHORT[k]
-  }
-  return label
-}
-
 /**
- * 一条复合子下面的层。行清单以生效模型为准（顺序、层名都在库里），
- * 分数按 subKey 从 eval 树里对上；生效模型没读到时退用 eval 树自己的 children。
+ * MANUAL_METRICS 已按 dimKey 归属：
+ *   D2 theme_main —— 4 格主线人判（板块涨停数/梯队/溢价/持续性）
+ *   D4 first        —— 2 格首板人判（封板率/溢价）
+ *   D5 anchor       —— 1 格监管折扣
+ *   null 强制退潮   —— 2 格（极高位换手/断板）
  */
-function layersFor(dimKey, subKey, kid) {
-  const evalKids = kid && Array.isArray(kid.children) ? kid.children : []
-  const fromDb = scoring.childrenOf(dimKey, subKey)
-  const list = fromDb.length
-    ? fromDb.map((c) => ({ key: c.subKey, label: c.label || c.subKey, ev: evalKids.find((k) => k.key === c.subKey) || null }))
-    : evalKids.map((k) => ({ key: k.key, label: k.label || k.key, ev: k }))
-  return list.map((x) => ({ key: x.key, label: shortLayer(x.label), score: numOrNull(x.ev && x.ev.score) }))
-}
+const D2_MANUALS = MANUAL_METRICS.filter(m => m.dimKey === 'theme_main')
+const D4_MANUALS = MANUAL_METRICS.filter(m => m.dimKey === 'first')
+const D5_MANUALS = MANUAL_METRICS.filter(m => m.dimKey === 'anchor')
 
-/** 一行的形状只在这里拼一次，模板只管摆。 */
-function buildRow(dimKey, node, kid) {
-  const man = MANUAL_BY_METRIC[node.sourceKey]
-  const manual = man && man.dimKey === dimKey ? man : null
-  return {
-    key: node.key,
-    label: node.label || node.key,
-    weight: numOrNull(node.weight),
-    manual,
-    score: numOrNull(kid && kid.score),
-    rawText: kid && kid.raw != null ? fmtNum(kid.raw) : '',
-    bandHit: (kid && kid.bandHit) || '',
-    layers: layersFor(dimKey, node.key, kid),
-    note: manual ? manual.hint : ((kid && kid.note) || ''),
-    metric: manual ? manual.metric : ''
-  }
-}
-
-/** 人工读数在树里找不到对应子行时（子指标清单没读到），照原样补一行——输入框绝不依赖只读端点。 */
-function manualOnlyRow(man) {
-  return {
-    key: 'x:' + man.metric, label: man.label, weight: null, manual: man,
-    score: null, rawText: '', bandHit: '', layers: [], note: man.hint, metric: man.metric
-  }
-}
-
-const FIVE_RECORD_FIELD = {
-  market: 'scoreMarket', theme_main: 'scoreThemeMain', board: 'scoreBoard',
-  first: 'scoreFirst', anchor: 'scoreAnchor'
-}
-
-/**
- * 一维的当前口径：<b>优先</b> {@code scoring.detail}（/records/score-detail 现算，与仪表盘同源），
- * 现算没到位才退回落库的 score_*（上一次 recalc 的值，改配置不重算就一直陈旧）。
- * 段头、右栏横条、tooltip 三处都从这里取，不留第二套真值。未评就是 null，绝不兜 0。
- */
-function fiveDimMeta(dimKey) {
-  const ev = scoring.dimEval(dimKey)
-  const meta = scoring.fiveDimDims.find((d) => d.dimKey === dimKey) || {}
-  const stored = savedRecord.value ? savedRecord.value[FIVE_RECORD_FIELD[dimKey]] : null
-  const score = ev && ev.score != null ? Number(ev.score) : numOrNull(stored)
-  return {
-    dimKey, ev,
-    dimNo: (ev && ev.dimNo) || meta.dimNo || meta.dim,
-    label: (ev && ev.label) || meta.label || dimKey,
-    weight: ev && ev.weight != null ? Number(ev.weight) : (meta.weight ?? 0),
-    score,
-    band: fiveDimBandOf(score),
-    bandClass: fiveDimBandClassOf(score),
-    barWidth: score == null ? '0%' : `${Math.max(0, Math.min(100, score))}%`,
-    fromLive: !!(ev && ev.score != null)
-  }
-}
-
-const fiveDimSections = computed(() => {
-  const losses = stocks.value ? (stocks.value.bigLoss || []) : []
-  const taken = new Set()
-  return scoring.fiveDimCardOrder.map((dimKey) => {
-    const m = fiveDimMeta(dimKey)
-    const subs = (scoring.subsByDim[dimKey] || []).map((s) => ({
-      key: s.subKey, label: s.label, weight: s.weight, sourceKey: s.sourceKey
-    }))
-    const kids = m.ev && Array.isArray(m.ev.children) ? m.ev.children : []
-    const rowNodes = subs.length ? subs : kids.map((k) => ({
-      key: k.key, label: k.label, weight: k.weight, sourceKey: k.sourceKey
-    }))
-    const rows = rowNodes.map((node) => {
-      const row = buildRow(dimKey, node, kids.find((k) => k.key === node.key) || null)
-      if (row.manual) taken.add(row.metric)
-      return row
-    })
-    MANUAL_METRICS.forEach((man) => {
-      if (man.dimKey === dimKey && !taken.has(man.metric)) rows.push(manualOnlyRow(man))
-    })
-    rows.forEach((r) => { r.filled = !!r.manual && form[r.manual.field] != null })
-
-    let note = DIM_NOTES[dimKey] || ''
-    if (!subs.length && !kids.length) {
-      note = (note ? note + ' ' : '') + '（子指标清单未取到：下面只列人工读数，维分等 score-detail 回来才有）'
-    } else if (m.ev && m.ev.note) {
-      note = (note ? note + ' ' : '') + m.ev.note
-    }
-    const isBoard = dimKey === 'board'
-    return {
-      dimKey, dimNo: m.dimNo, label: m.label, weight: fmtNum(m.weight),
-      score: m.score == null ? null : fmtNum(m.score), band: m.band || '—',
-      bandClass: m.bandClass, barWidth: m.barWidth,
-      rows, note,
-      list: isBoard ? losses.slice(0, LIST_LIMIT) : [],
-      listHidden: isBoard ? Math.max(0, losses.length - LIST_LIMIT) : 0
-    }
-  })
-})
-
-/** 面板标题那一行：说清"现算读数到没到位、等了多久、没到位时什么东西照常能用"。 */
-const detailStatus = computed(() => {
-  if (scoring.detailLoading) {
-    return '五维现算读数正在取（三池聚合 + 20 日均量，最长 60 秒）……填数不用等它，填完保存就会重算。'
-  }
-  if (!scoring.detail) {
-    return '五维现算读数这次没取回来：每维的分数与命中档是空的，下面这些输入框照常能填、照常能存。'
-  }
-  const n = (scoring.detail.dims || []).filter((d) => d.score != null).length
-  return `五维现算已取回：${n}/5 维出分，与仪表盘同一份数。填了数的那格按你填的进分，清空即退回未评。`
-})
-
-const fiveDimItems = computed(() => {
-  if (!savedRecord.value && !scoring.detail) return []
-  return scoring.fiveDimCardOrder.map((key) => {
-    const m = fiveDimMeta(key)
-    const parts = [scoring.fiveDimScoreLine(key, m.score)]
-    if (m.band) parts.push(m.band)
-    if (m.ev && m.ev.note) parts.push(m.ev.note)
-    parts.push(m.fromLive ? '现算：跟着打分配置变' : '落库值：改配置后要 recalc 才动')
-    return {
-      key, label: m.label, weight: m.weight, score: m.score,
-      band: m.band, bandClass: m.bandClass, tooltip: parts.filter(Boolean).join(' · ')
-    }
-  })
-})
-
-/**
- * 右栏那排 3 点是旧 9 维的落库展示列（五维引擎不读写它们，只当历史留档）。
- * 维名与维序从生效模型的 legacy 那五行拿，分数列名和 DIMS 的 key 不是一套（第 8 维那列叫 anchorScore），
- * 所以在这里对一次。第 9 维没有分数列，由 surv_premium 现算，走 utils/scores 那份接力五档。
- */
-const LEGACY_SCORE_FIELDS = {
-  height: 'scoreHeight', premium: 'scorePremium', breadth: 'scoreBreadth', broken: 'scoreBroken',
-  loss: 'scoreLoss', volume: 'scoreVolume', theme: 'scoreTheme', anchor: 'anchorScore'
-}
-const scoreItems = computed(() => {
-  const r = savedRecord.value
-  if (!r) return []
-  return scoring.dims.slice().sort((a, b) => a.dimNo - b.dimNo).map((d) => ({
-    key: d.dimKey,
-    label: d.label,
-    score: d.dimKey === 'surv'
-      ? (r.survCount > 0 ? survivalBandOf(r.survPremium) : null)
-      : (r[LEGACY_SCORE_FIELDS[d.dimKey]] ?? null)
-  }))
-})
-
-/** 强制退潮与结构信号同样现算优先：detail 到位时它才是当前口径的答案。 */
-const forcedEbbOn = computed(() => {
-  if (scoring.detail) return scoring.detail.forcedEbb === true
-  return savedRecord.value?.forcedEbb === 1
-})
-const forcedEbbReason = computed(() => {
-  if (scoring.detail) return scoring.detail.forcedEbbReason || ''
-  return savedRecord.value?.forcedEbbReason || ''
-})
-const structuralSignals = computed(() => {
-  const flags = scoring.detail && scoring.detail.signalFlags
-  if (Array.isArray(flags)) return flags
-  return topSignals(savedRecord.value)
-})
-
-function clearReadings() {
-  stocks.value = null
-}
-
-/**
- * 只取 D3 段末那排大面名单：{@code /market/stocks} 读本地 t_market_stock，不发上游、秒回。
- *
- * <p>旧那两路（score-context 最坏 60 秒、premium-tiers）随九维一起下线了：五维的整棵 eval 树
- * 走 {@code scoring.loadDetail}，与仪表盘共用同一份现算结果，切一天日期从四条请求减到两条。
- * 取砸了就静默——名单只是补充，家数那一格照常能填。
- */
-async function loadStockList(date) {
-  if (!date) return
-  try {
-    const res = await marketApi.stocks(date)
-    // 请求发出去之后用户可能已经切了日期：上一日的名单落在当日段末是脏数据
-    if (form.tradeDate !== date) return
-    const data = res && res.data
-    stocks.value = data && data.available ? data : null
-  } catch (e) {
-    if (form.tradeDate === date) stocks.value = null
-  }
-}
 
 const FORM_DEFAULTS = JSON.parse(JSON.stringify(form))
 
@@ -793,12 +436,8 @@ function clearLedger() {
  */
 function handleDateChange(date) {
   snapshot.value = null
-  clearReadings()
   loadRecord(date)
   loadDetail(date)
-  loadStockList(date)
-  // 左栏每维的分数与右栏横条、仪表盘卡片共用这一份现算 eval 树：不 await，store 自己管守卫。
-  scoring.loadDetail(date, true)
 }
 
 // 不用 @change：实测 el-date-picker 改了模型却不触发 change，日期换了记录却不重载
@@ -812,16 +451,21 @@ async function handleFetchMarket(refresh) {
   const date = form.tradeDate
   fetching.value = true
   try {
-    const res = await marketApi.snapshot(date, refresh)
-    // 拉一次最长 12s，期间用户可能已经切了日期。这时把上一日的数据写进当日表单是脏数据
+    // snapshot 7 字段 + breadth 涨跌家数 并行拉
+    const [snapRes, breadthRes] = await Promise.all([
+      marketApi.snapshot(date, refresh),
+      marketApi.breadth().catch(() => null)   // breadth 没 date 参数，只取实时；失败静默
+    ])
     if (form.tradeDate !== date) return
-    snapshot.value = res.data || {}
-    fillForm(snapshot.value.filled || {})
-    // 不 await：现算那一棵五维树最坏 60s，而拉行情按钮该在七个数到手时就交还操作。
-    // 这一次刷新是因为 compute() 刚把那天的三池与逐档溢价写进库——在那之前自动子指标一律没读数。
-    loadStockList(date)
+    snapshot.value = snapRes.data || {}
+    const filled = { ...(snapshot.value.filled || {}) }
+    if (breadthRes?.data?.upCount != null) filled.upCount = breadthRes.data.upCount
+    if (breadthRes?.data?.downCount != null) filled.downCount = breadthRes.data.downCount
+    fillForm(filled)
+    // snapshot 已把今昨涨停/炸板池写进 t_market_stock：四层晋级/溢价/大面、封板率、回封率、连板数
+    // 这些分层原始读数此刻就能按最新池子重算，强制刷一次五维明细（不等保存）。
     scoring.loadDetail(date, true)
-    ElMessage.success(`已填充 ${filledCount.value} 项，请核对后保存；五维读数随后自己刷新`)
+    ElMessage.success(`已填充 ${filledCount.value} 项，请核对后保存`)
   } catch (e) {
     // 失败提示由 axios 拦截器统一弹（后端保证 message 是中文）。
     // 这里只清面板：拉取不写库，表单里不会留下半截数据。
@@ -864,7 +508,7 @@ async function handleSave() {
       ElMessage.success('提交成功')
     }
     snapshot.value = null
-    // 保存会触发服务端重算：让横条和仪表盘卡面一起跟上，不等用户切日期
+    // 记录已落库：涨跌停/最高板/量比/红盘率等读 t_daily_record 的原始读数随之定型，强制刷新五维明细。
     scoring.loadDetail(form.tradeDate, true)
   } catch (e) {
     ElMessage.error(e.response?.data?.message || '保存失败')
@@ -1295,46 +939,67 @@ onMounted(() => {
   margin-left: 6px;
 }
 
-/* 五维录入台：读数与算式常驻可见，不藏进 hover——这几套刻度里有几条是这边按实测自造的，要能当场否 */
-.sub-status {
-  font-size: 12px;
-  color: #8899a6;
-  line-height: 1.6;
-  margin: 0 0 10px;
+/* =========== ReviewView 表单区块（复刻 MarketView 卡片风格） =========== */
+.block {
+  background: #1a2332;
+  border-radius: 12px;
+  padding: 16px 18px 18px;
+  margin-bottom: 16px;
 }
-/* ① 行情读数：七个数 + 涨跌家数，容器宽就三列铺开，窄了自动塌 */
-.market-grid {
+.stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
-  gap: 0 12px;
-  margin-bottom: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: 10px;
 }
-.market-cell {
-  margin-bottom: 8px;
-}
-.market-cell :deep(.el-input-number) {
-  width: 100%;
-}
-
-.dim-grid {
+.stat-card {
+  background: #1a2332;
+  border-radius: 10px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 6px;
+  min-height: 86px;
+  transition: background .15s;
 }
-.dim-group {
-  border: 1px solid #2d3748;
-  border-radius: 10px;
-  padding: 8px 12px 9px;
+.stat-card:hover { background: #243040; }
+.stat-label {
+  font-size: 12px;
+  color: #8899a6;
 }
-.dim-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 5px;
+.stat-unit {
+  color: #6b7c8c;
+  font-size: 11px;
 }
-.dim-no {
-  width: 18px;
+.stat-input {
+  width: 100%;
+}
+.stat-input :deep(.el-input-number) {
+  width: 100%;
+}
+.stat-input :deep(.el-input__wrapper) {
+  background: #0f1419;
+  box-shadow: none;
+  border-radius: 6px;
+}
+.stat-hint {
+  font-size: 11px;
+  color: #6b7c8c;
+  line-height: 1.4;
+}
+
+/* === 人工读数小块：挂在对应维度 DimScoreBlock 下方，与该维打成一组 === */
+.manual-block {
+  margin-top: -8px;
+}
+.manual-title {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #c8d3dd;
+}
+
+/* 五维录入台（旧样式已废，保留以防历史引用） */
+.sub-status {
   height: 18px;
   line-height: 18px;
   text-align: center;
