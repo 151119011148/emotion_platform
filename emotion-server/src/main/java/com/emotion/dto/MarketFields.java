@@ -31,7 +31,7 @@ public class MarketFields {
     /**
      * 全市场上涨家数（东财 f104）。和下面下跌家数一起，只在"所拉日期＝行情源最新交易时段"
      * 时才取值——该接口只有实时口径，历史日取不到当天真值，宁可整格缺失也不把今天的数安到历史日。
-     * 取到后由 /snapshot 顺带窄更新进该用户的 t_daily_record（客观读数，不碰人工列/打分层）。
+     * 取到后由 /snapshot 写入全局客观日表 t_market_daily（与用户无关，全账号共享）。
      */
     private Integer upCount;
     /** 全市场下跌家数（东财 f105）。口径同 {@link #upCount}。 */

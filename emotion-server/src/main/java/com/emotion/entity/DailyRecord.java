@@ -14,23 +14,34 @@ public class DailyRecord {
     private Long userId;
     private LocalDate tradeDate;
 
-    // 六维原始指标
+    // ==================== 客观行情九数（2026-09-11 起已隔离到 t_market_daily，全局共享、不绑用户）====================
+    // 这里保留同名字段只作<b>瞬态承载</b>（exist=false，不参与 t_daily_record 的增删改查）：
+    //   · 写：/snapshot、表单保存、md 导入一律先进 MarketDailyStore；
+    //   · 读：Service 出参前把 t_market_daily 当天行合并进来，前端 JSON 契约逐字不变；
+    //   · 打分：scoreAndPlace 前从客观日表回填，TemperatureCalculator / LadderMetricsService 照旧从 carrier 读数。
+    // 绝不能在别处给它们加回表字段：那会重新把"每日公开事实"复制成按账号的 N 份。
+    @TableField(exist = false)
     private Integer maxConsecutiveLimit;
+    @TableField(exist = false)
     private Integer limitUpCount;
+    @TableField(exist = false)
     private Integer limitDownCount;
+    @TableField(exist = false)
     private BigDecimal yesterdayLimitPremium;
+    @TableField(exist = false)
     private BigDecimal brokenBoardRate;
+    @TableField(exist = false)
     private Integer bigLossCount;
+    @TableField(exist = false)
     private BigDecimal totalVolume;
 
     /**
-     * 全市场涨跌家数，复盘 md 导入。<b>不进分母</b>：03 篇把涨跌家数比列在「辅助指标（选看）」，
-     * 第 3 维用的是涨停 vs 跌停家数。这两个数只用来并排看广度，改判得先动 03 篇。
-     * ALWAYS 是为了导入器能表达"键写了空值 = 置回未填"，默认的 NOT_NULL 会跳过 null。
+     * 全市场涨跌家数（瞬态，权威表是 t_market_daily）。五维 D1·广度(red_ratio)用它，
+     * 旧九维第 3 维用的是涨停 vs 跌停家数，这两个数在旧口径里只并排看广度。
      */
-    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    @TableField(exist = false)
     private Integer upCount;
-    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    @TableField(exist = false)
     private Integer downCount;
 
     // 打分维 1-7：null = 该维未评（原始字段缺失或无历史），已整维剔出分母。

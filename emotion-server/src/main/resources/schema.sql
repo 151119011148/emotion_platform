@@ -21,7 +21,11 @@ CREATE TABLE IF NOT EXISTS t_daily_record (
     -- 九维原始指标
     -- 这些列一律 DEFAULT NULL 而不是 0：MyBatis-Plus 的 insert 默认跳过 null 字段，
     -- 默认值 0 会把"没录"变成"录了个 0"，而 0 家跌停/0 分主线都是能改变阶段判断的读数。
-    max_consecutive_limit INT DEFAULT NULL COMMENT '连板高度',
+    -- 【2026-09-13 客观/主观隔离】下面九个客观列（max_consecutive_limit / limit_up_count /
+    -- limit_down_count / up_count / down_count / yesterday_limit_premium / broken_board_rate /
+    -- big_loss_count / total_volume）已迁移到全局表 t_market_daily，Java 实体标 exist=false 不再读写；
+    -- 旧列仅为历史留痕保留，新库建了也是空壳。
+    max_consecutive_limit INT DEFAULT NULL COMMENT '[已停用,迁t_market_daily]连板高度',
     limit_up_count INT DEFAULT NULL COMMENT '涨停家数',
     limit_down_count INT DEFAULT NULL COMMENT '跌停家数',
     -- 这两个数**不进分母**：03 篇把"涨跌家数比"列在「辅助指标（选看）」，
@@ -361,6 +365,31 @@ CREATE TABLE IF NOT EXISTS t_index_close (
     UNIQUE KEY uk_date_index (trade_date, index_code),
     INDEX idx_index_date (index_code, trade_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='五大指数收盘(公开数据,不绑用户)';
+
+-- ============ 全局客观行情日数据（2026-09-13 客观/主观隔离）============
+-- 一天一行、全账号共享：这九个数是"每日公开事实"（由 /api/market/snapshot 自动拉取或表单/md 录入），
+-- 与谁复盘无关。隔离前寄生在 t_daily_record（绑用户），同一份盘面按账号复制、没复盘的日子就缺客观读数。
+-- t_daily_record 从此只装主观内容：人工读数、打分、文本、仓位、阵眼。
+-- 读接口在服务层把本表合并进 DailyRecord 响应（null 才填、不覆盖），前端 JSON 契约逐字不变。
+CREATE TABLE IF NOT EXISTS t_market_daily (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    trade_date DATE NOT NULL,
+
+    max_consecutive_limit INT DEFAULT NULL COMMENT '连板高度（最高板）',
+    limit_up_count INT DEFAULT NULL COMMENT '涨停家数',
+    limit_down_count INT DEFAULT NULL COMMENT '跌停家数',
+    up_count INT DEFAULT NULL COMMENT '全市场上涨家数（东财实时口径，只展示与红盘率，不进九维分母）',
+    down_count INT DEFAULT NULL COMMENT '全市场下跌家数（同上）',
+    yesterday_limit_premium DECIMAL(5,2) DEFAULT NULL COMMENT '昨日涨停今日溢价(%)，含首板',
+    broken_board_rate DECIMAL(5,2) DEFAULT NULL COMMENT '炸板率(%)，次数口径：打开次数 ÷ 触板总次数',
+    big_loss_count INT DEFAULT NULL COMMENT '大面数',
+    total_volume DECIMAL(10,2) DEFAULT NULL COMMENT '两市成交额(亿)',
+
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uk_trade_date (trade_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='全局客观行情日数据(公开,不绑用户,全账号共享)';
 
 -- ============ 打分模型 / 维度 / 计算规则（平台全局配置，不绑 user_id）============
 -- 三张表把"有哪些维度、各多权重、温度分母多大"从代码里的常量搬到数据里：
@@ -1020,4 +1049,34 @@ INSERT IGNORE INTO t_scoring_rule
 VALUES
   (@fid, 'market','index_env',5,'ELSE',NULL,NULL,60,'其余混合/微动(含平盘)','中间档占位待定标'),
   (@fid2,'market','index_env',5,'ELSE',NULL,NULL,60,'其余混合/微动(含平盘)','中间档占位待定标');
+
+-- ============ 存量库迁移(2026-09-13 客观/主观隔离)：t_daily_record 客观九数 → t_market_daily ============
+-- 可重复执行：uk_trade_date 上 INSERT IGNORE，已搬过的日子重放不动；旧列冻结留痕、不 DELETE。
+-- 同日多用户行取各列 MAX：MAX 自动跳过 NULL，等于"谁有非空值就用谁的"（客观事实本应一致）。
+-- HAVING 过滤九列全 NULL 的日子，不给客观表造空壳。
+INSERT IGNORE INTO t_market_daily
+  (trade_date, max_consecutive_limit, limit_up_count, limit_down_count, up_count, down_count,
+   yesterday_limit_premium, broken_board_rate, big_loss_count, total_volume, created_at, updated_at)
+SELECT trade_date,
+       MAX(max_consecutive_limit),
+       MAX(limit_up_count),
+       MAX(limit_down_count),
+       MAX(up_count),
+       MAX(down_count),
+       MAX(yesterday_limit_premium),
+       MAX(broken_board_rate),
+       MAX(big_loss_count),
+       MAX(total_volume),
+       NOW(), NOW()
+  FROM t_daily_record
+ GROUP BY trade_date
+HAVING MAX(max_consecutive_limit) IS NOT NULL
+    OR MAX(limit_up_count)       IS NOT NULL
+    OR MAX(limit_down_count)     IS NOT NULL
+    OR MAX(up_count)             IS NOT NULL
+    OR MAX(down_count)           IS NOT NULL
+    OR MAX(yesterday_limit_premium) IS NOT NULL
+    OR MAX(broken_board_rate)    IS NOT NULL
+    OR MAX(big_loss_count)       IS NOT NULL
+    OR MAX(total_volume)         IS NOT NULL;
 

@@ -3,6 +3,7 @@ package com.emotion.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.emotion.dto.DailyRecordRequest;
 import com.emotion.entity.DailyRecord;
+import com.emotion.entity.MarketDaily;
 import com.emotion.mapper.DailyRecordMapper;
 import com.emotion.util.BoardScoreCalculator;
 import com.emotion.util.CycleStageMachine;
@@ -20,6 +21,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -37,16 +39,23 @@ public class DailyRecordService {
 
     private final DailyRecordMapper dailyRecordMapper;
     private final ScoreContextService scoreContext;
+    private final MarketDailyStore marketDailyStore;
 
-    public DailyRecordService(DailyRecordMapper dailyRecordMapper, ScoreContextService scoreContext) {
+    public DailyRecordService(DailyRecordMapper dailyRecordMapper, ScoreContextService scoreContext,
+                              MarketDailyStore marketDailyStore) {
         this.dailyRecordMapper = dailyRecordMapper;
         this.scoreContext = scoreContext;
+        this.marketDailyStore = marketDailyStore;
     }
 
     public DailyRecord createOrUpdate(Long userId, DailyRecordRequest req, Set<String> present) {
         LocalDate date = req.getTradeDate() != null ? req.getTradeDate() : today();
 
-        DailyRecord existing = getByDate(userId, date);
+        // 客观九数与用户无关：先落全局 t_market_daily（七数空值守卫、涨跌家数看键在场），
+        // 再落主观行。下面 scoreAndPlace 的 fillMarketDefaults 会把同一天刚落的客观值合并进 carrier。
+        marketDailyStore.upsertForm(date, req, present);
+
+        DailyRecord existing = rawByDate(userId, date);
         DailyRecord record = existing != null ? existing : blank(userId, date);
 
         copyFields(record, req, present);
@@ -66,7 +75,7 @@ public class DailyRecordService {
      * 拿一个只带 id 的半行去 update 会把九个分一并洗成 NULL。
      */
     public DailyRecord importManual(Long userId, LocalDate date, Consumer<DailyRecord> mutator) {
-        DailyRecord existing = getByDate(userId, date);
+        DailyRecord existing = rawByDate(userId, date);
         DailyRecord record = existing != null ? existing : blank(userId, date);
 
         // 改判过的日子先记住人工结论：导入不接收「阶段」这个键，所以它没资格把改判盖掉。
@@ -124,7 +133,7 @@ public class DailyRecordService {
      * <p>那天没有记录就返回 null：重算不是录入，凭空造一行会把"这天没复盘"显示成"这天什么都没发生"。
      */
     public DailyRecord recalc(Long userId, LocalDate date) {
-        DailyRecord record = getByDate(userId, date);
+        DailyRecord record = rawByDate(userId, date);
         if (record == null) {
             return null;
         }
@@ -185,6 +194,10 @@ public class DailyRecordService {
     }
 
     private void scoreAndPlace(Long userId, LocalDate date, DailyRecord record) {
+        // 客观九数已与用户隔离：打分前从全局 t_market_daily 回填 carrier 上还空着的客观字段。
+        // carrier 上非空的（本次表单/md 刚提交的）保持不动——upsert 已先落库，两者本就是同一份值。
+        fillMarketDefaults(record, date);
+
         // LIMIT 20 covers both the old 5-record window and the new 20-day turnover baseline.
         // LadderMetricsService reuses this list from ScoreContextService internally; keeping 20 here is harmless
         // for the legacy path (only reads the most recent).
@@ -262,8 +275,10 @@ public class DailyRecordService {
      * 不写库；改一 sub 权重或一 ladder 阈值后刷新即可反映（真数据驱动）。
      */
     public ScoreDetailVO scoreDetail(Long userId, LocalDate date) {
-        DailyRecord record = getByDate(userId, date);
+        DailyRecord record = rawByDate(userId, date);
         DailyRecord base = record != null ? record : blank(userId, date);
+        // 即使这天没有主观行，五维明细也要能看到全局客观读数（涨停/量能/红盘率来自 t_market_daily）。
+        fillMarketDefaults(base, date);
         ScoreInputs in = scoreContext.forDate(userId, date, base);
         ScoringTree tree = in.getScoringTree();
         boolean fromDb = tree != null;
@@ -292,13 +307,21 @@ public class DailyRecordService {
 
 
     public DailyRecord getToday(Long userId) {
+        return mergeMarket(rawToday(userId));
+    }
+
+    private DailyRecord rawToday(Long userId) {
         return dailyRecordMapper.selectOne(
                 new LambdaQueryWrapper<DailyRecord>()
                         .eq(DailyRecord::getUserId, userId)
                         .eq(DailyRecord::getTradeDate, today()));
     }
 
-    public DailyRecord getByDate(Long userId, LocalDate date) {
+    /**
+     * 该用户某天的主观行（不含客观日表数据）。内部写链路用它判断"这天存没存过复盘"，
+     * 不要用 {@link #viewByDate}：那个接口在没有主观行时会返回一个 id=null 的客观合成行。
+     */
+    public DailyRecord rawByDate(Long userId, LocalDate date) {
         return dailyRecordMapper.selectOne(
                 new LambdaQueryWrapper<DailyRecord>()
                         .eq(DailyRecord::getUserId, userId)
@@ -306,52 +329,103 @@ public class DailyRecordService {
     }
 
     /**
-     * /snapshot 拉到客观的全市场涨跌家数后，顺带落进该用户这一天的复盘记录（后端持久化）。
-     *
-     * <p>刻意只做「已存在行的两列窄更新」：
-     * <ul>
-     *   <li>不建空行——这天还没存过复盘时，由用户随后在表单点保存走 create，拉取不替他造半行；</li>
-     *   <li>patch 只 set 主键 + upCount/downCount 三个非空字段，updateById 的 NOT_NULL 策略只会
-     *       UPDATE 这两列，人工列（mainTheme / 各 manual_*）与打分层（score* / stage）一概不碰；</li>
-     *   <li>不触发 scoreAndPlace——拉取后前端本就会再刷一次 /score-detail，那时按新入分母重算。</li>
-     * </ul>
-     *
-     * @return 是否真的落了库（这天没有记录或参数缺失时为 false）
+     * 读接口主力：用户主观行 + 全局客观九数合并。没有主观行时返回 null——
+     * "这天没复盘"在历史/曲线/导出里仍按缺一天处理；只想看客观盘面用 {@link #viewByDate}。
      */
-    public boolean applyAutoBreadth(Long userId, LocalDate date, Integer upCount, Integer downCount) {
-        if (userId == null || date == null || upCount == null || downCount == null) {
-            return false;
+    public DailyRecord getByDate(Long userId, LocalDate date) {
+        return mergeMarket(rawByDate(userId, date));
+    }
+
+    /**
+     * 复盘页/五维明细用的视图：没有主观行但 t_market_daily 有这天的客观数据时，
+     * 返回 id=null 的合成 carrier（前端据此走 create 路径保存主观内容）；两边都没有才是 null。
+     */
+    public DailyRecord viewByDate(Long userId, LocalDate date) {
+        DailyRecord row = rawByDate(userId, date);
+        MarketDaily market = marketDailyStore.getByDate(date);
+        if (row == null && market == null) {
+            return null;
         }
-        DailyRecord existing = getByDate(userId, date);
-        if (existing == null) {
-            return false;
+        DailyRecord view = row != null ? row : blank(userId, date);
+        mergeMarket(view, market);
+        return view;
+    }
+
+    /**
+     * 把 t_market_daily 当天的客观九数合并进出参 carrier（已在 carrier 上的非空值不覆盖）。
+     * 读接口与打分前回填共用这一份映射，保证"客观只有一份真值"。
+     */
+    private DailyRecord mergeMarket(DailyRecord record) {
+        if (record == null) {
+            return null;
         }
-        if (java.util.Objects.equals(existing.getUpCount(), upCount)
-                && java.util.Objects.equals(existing.getDownCount(), downCount)) {
-            return true; // 与库内一致，不必再写
+        mergeMarket(record, marketDailyStore.getByDate(record.getTradeDate()));
+        return record;
+    }
+
+    /** 打分前回填：只填 carrier 上还空着的客观格，本次请求刚提交的值（含显式清空）原样保留。 */
+    private void fillMarketDefaults(DailyRecord record, LocalDate date) {
+        if (record == null) {
+            return;
         }
-        DailyRecord patch = new DailyRecord();
-        patch.setId(existing.getId());
-        patch.setUpCount(upCount);
-        patch.setDownCount(downCount);
-        return dailyRecordMapper.updateById(patch) > 0;
+        mergeMarket(record, marketDailyStore.getByDate(date));
+    }
+
+    /**
+     * 逐格 null 填充：永远不拿客观值覆盖 carrier 上已有的值。
+     * 保存路径上 carrier 的客观格就是刚写进 t_market_daily 的那份；读路径上它们来自上一次合并。
+     */
+    private static void mergeMarket(DailyRecord r, MarketDaily m) {
+        if (r == null || m == null) {
+            return;
+        }
+        if (r.getMaxConsecutiveLimit() == null) r.setMaxConsecutiveLimit(m.getMaxConsecutiveLimit());
+        if (r.getLimitUpCount() == null) r.setLimitUpCount(m.getLimitUpCount());
+        if (r.getLimitDownCount() == null) r.setLimitDownCount(m.getLimitDownCount());
+        if (r.getUpCount() == null) r.setUpCount(m.getUpCount());
+        if (r.getDownCount() == null) r.setDownCount(m.getDownCount());
+        if (r.getYesterdayLimitPremium() == null) r.setYesterdayLimitPremium(m.getYesterdayLimitPremium());
+        if (r.getBrokenBoardRate() == null) r.setBrokenBoardRate(m.getBrokenBoardRate());
+        if (r.getBigLossCount() == null) r.setBigLossCount(m.getBigLossCount());
+        if (r.getTotalVolume() == null) r.setTotalVolume(m.getTotalVolume());
+    }
+
+    /** 批量合并，避免逐行查一次客观表。 */
+    private List<DailyRecord> mergeMarketAll(List<DailyRecord> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return rows;
+        }
+        List<LocalDate> dates = new java.util.ArrayList<>();
+        for (DailyRecord r : rows) {
+            if (r.getTradeDate() != null) {
+                dates.add(r.getTradeDate());
+            }
+        }
+        if (dates.isEmpty()) {
+            return rows;
+        }
+        Map<LocalDate, MarketDaily> byDate = marketDailyStore.mapByDates(dates);
+        for (DailyRecord r : rows) {
+            mergeMarket(r, byDate.get(r.getTradeDate()));
+        }
+        return rows;
     }
 
     public List<DailyRecord> getRange(Long userId, LocalDate start, LocalDate end) {
-        return dailyRecordMapper.selectList(
+        return mergeMarketAll(dailyRecordMapper.selectList(
                 new LambdaQueryWrapper<DailyRecord>()
                         .eq(DailyRecord::getUserId, userId)
                         .ge(DailyRecord::getTradeDate, start)
                         .le(DailyRecord::getTradeDate, end)
-                        .orderByAsc(DailyRecord::getTradeDate));
+                        .orderByAsc(DailyRecord::getTradeDate)));
     }
 
     public List<DailyRecord> getLatest(Long userId, int days) {
-        return dailyRecordMapper.selectList(
+        return mergeMarketAll(dailyRecordMapper.selectList(
                 new LambdaQueryWrapper<DailyRecord>()
                         .eq(DailyRecord::getUserId, userId)
                         .orderByDesc(DailyRecord::getTradeDate)
-                        .last("LIMIT " + days));
+                        .last("LIMIT " + days)));
     }
 
     /**

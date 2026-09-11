@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.emotion.entity.DailyRecord;
 import com.emotion.entity.IndexClose;
+import com.emotion.entity.MarketDaily;
 import com.emotion.entity.MarketStock;
 import com.emotion.mapper.MarketStockMapper;
 import com.emotion.market.MarketMetrics;
@@ -24,7 +25,7 @@ import com.emotion.market.PoolCounts;
 
 /**
  * 五维模型的「自动取数聚合器」：把 {@code t_market_stock}(日频个股连板)、{@code t_premium_tier}(逐档溢价)、
- * {@code t_index_close}(指数) 与 {@code t_daily_record} 聚合出一张 {@code metrics}（键=各子指标 source_key），
+ * {@code t_index_close}(指数) 与 {@code t_market_daily}(全局客观日数据) 聚合出一张 {@code metrics}（键=各子指标 source_key），
  * 交给 {@link com.emotion.util.BoardScoreCalculator} 打分。
  *
  * <p>与引擎同一哲学：<b>取不到的键直接不出现在 map 里（=未评），绝不写 0</b>——0 是真实读数会被当成"今天确实没大面"。
@@ -56,8 +57,8 @@ public class LadderMetricsService {
         this.indexCloseStore = indexCloseStore;
     }
 
-    /** 从库里读当天+前一交易日明细，产出 metrics；record/recent 由调用方（ScoreContextService/recalc）传入。 */
-    public Map<String, BigDecimal> build(LocalDate date, DailyRecord record, List<DailyRecord> recent) {
+    /** 从库里读当天+前一交易日明细，产出 metrics；record 为合并了客观日表的 carrier，recent 为全局客观日历史窗。 */
+    public Map<String, BigDecimal> build(LocalDate date, DailyRecord record, List<MarketDaily> recent) {
         List<MarketStock> todayZT = listPool(date, MarketStock.POOL_LIMIT_UP);
         List<MarketStock> todayLoss = listBigLoss(date);
         List<MarketStock> prevZT = Collections.emptyList();
@@ -84,13 +85,13 @@ public class LadderMetricsService {
      * @param pools     当日三池家数（封板率/回封率用）
      * @param tiers     当日逐档溢价（board=昨连板数）
      * @param idx       当日指数收盘
-     * @param record    当日记录（涨跌家数、量能、涨跌停、最高板兜底）
-     * @param recent    该日之前若干交易日记录（升序），量能 20 日均用
+     * @param record    当日客观读数 carrier（由 t_market_daily 合并：涨跌家数、量能、涨跌停、最高板兜底）
+     * @param recent    该日之前若干交易日的<b>全局客观日行</b>（倒序），量能 20 日均用
      */
     static Map<String, BigDecimal> aggregate(List<MarketStock> todayZT, List<MarketStock> todayLoss,
                                              List<MarketStock> prevZT, PoolCounts pools,
                                              List<MarketMetrics.TierPremium> tiers, List<IndexClose> idx,
-                                             DailyRecord record, List<DailyRecord> recent) {
+                                             DailyRecord record, List<MarketDaily> recent) {
         Map<String, BigDecimal> out = new TreeMap<>();
 
         Map<Integer, Integer> todayByBoard = countByBoard(todayZT);
@@ -315,7 +316,7 @@ public class LadderMetricsService {
                 .divide(BigDecimal.valueOf(up + down), 4, RoundingMode.HALF_UP));
     }
 
-    private static void putTurnoverRatio(Map<String, BigDecimal> out, DailyRecord record, List<DailyRecord> recent) {
+    private static void putTurnoverRatio(Map<String, BigDecimal> out, DailyRecord record, List<MarketDaily> recent) {
         BigDecimal today = record.getTotalVolume();
         if (today == null || recent == null || recent.isEmpty()) {
             return;

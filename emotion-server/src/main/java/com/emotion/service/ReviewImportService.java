@@ -2,6 +2,7 @@ package com.emotion.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.emotion.entity.DailyRecord;
+import com.emotion.entity.MarketDaily;
 import com.emotion.entity.Position;
 import com.emotion.entity.Prediction;
 import com.emotion.entity.Stock;
@@ -64,6 +65,7 @@ public class ReviewImportService {
     private final PositionStore positionStore;
     private final PredictionStore predictionStore;
     private final IndexCloseStore indexCloseStore;
+    private final MarketDailyStore marketDailyStore;
     private final StockMapper stockMapper;
     private final ThemeMapper themeMapper;
 
@@ -72,6 +74,7 @@ public class ReviewImportService {
                                PositionStore positionStore,
                                PredictionStore predictionStore,
                                IndexCloseStore indexCloseStore,
+                               MarketDailyStore marketDailyStore,
                                StockMapper stockMapper,
                                ThemeMapper themeMapper) {
         this.dailyRecordService = dailyRecordService;
@@ -79,6 +82,7 @@ public class ReviewImportService {
         this.positionStore = positionStore;
         this.predictionStore = predictionStore;
         this.indexCloseStore = indexCloseStore;
+        this.marketDailyStore = marketDailyStore;
         this.stockMapper = stockMapper;
         this.themeMapper = themeMapper;
     }
@@ -122,7 +126,8 @@ public class ReviewImportService {
     public ReviewDetailVO detail(Long userId, LocalDate date) {
         ReviewDetailVO vo = new ReviewDetailVO();
         vo.setDate(date);
-        DailyRecord record = dailyRecordService.getByDate(userId, date);
+        // viewByDate：没有主观复盘行时也能回出客观日表（涨跌家数）的合成视图。
+        DailyRecord record = dailyRecordService.viewByDate(userId, date);
         if (record != null) {
             vo.setUpCount(record.getUpCount());
             vo.setDownCount(record.getDownCount());
@@ -204,6 +209,12 @@ public class ReviewImportService {
         LocalDate date = doc.getDate();
         DailyRecord current = dailyRecordService.getByDate(userId, date);
         DailyRecord base = current != null ? current : blankRecord(userId, date);
+        // 还没有主观行时，涨跌家数的"当前值"仍在全局客观日表里——before 列要照实显示。
+        MarketDaily market = marketDailyStore.getByDate(date);
+        if (current == null && market != null) {
+            base.setUpCount(market.getUpCount());
+            base.setDownCount(market.getDownCount());
+        }
         DailyRecord draft = new DailyRecord();
         BeanUtils.copyProperties(base, draft);
         ReviewImportWriter.applySingles(draft, doc, names);
@@ -212,11 +223,11 @@ public class ReviewImportService {
         addScalarChanges(vo, doc, base, draft);
         addRowCounts(vo, userId, date, doc);
         addThemeChanges(vo, userId, doc);
-        addMarketCompare(vo, current);
+        addMarketCompare(vo, market);
         addScoreImpact(vo, userId, date, current, draft);
         if (current == null) {
-            vo.getWarnings().add(date + " 这天还没有复盘记录，确认后会新建一条。"
-                    + "表单页的「重算」不会替你建（它拒绝凭空造行），所以行情七数得另外拉一次快照。");
+            vo.getWarnings().add(date + " 这天还没有复盘记录，确认后会新建一条主观复盘行。"
+                    + "客观行情七数由「拉快照」写入全局客观日表 t_market_daily，与这条行互不依赖。");
         }
         return new Prepared(vo, names);
     }
@@ -324,8 +335,8 @@ public class ReviewImportService {
         }
     }
 
-    /** 系统七数原样摆出来给你核，导入既不改它们也不接收它们。 */
-    private void addMarketCompare(ImportPreviewVO vo, DailyRecord current) {
+    /** 系统七数原样摆出来给你核，导入既不改它们也不接收它们；读数来自全局客观日表。 */
+    private void addMarketCompare(ImportPreviewVO vo, MarketDaily current) {
         vo.getMarketCompare().add(new ImportPreviewVO.MarketRow("连板高度",
                 current == null ? null : plain(current.getMaxConsecutiveLimit()), "东财涨停池"));
         vo.getMarketCompare().add(new ImportPreviewVO.MarketRow("涨停家数",

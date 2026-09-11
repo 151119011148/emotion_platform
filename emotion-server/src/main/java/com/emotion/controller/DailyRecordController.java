@@ -86,12 +86,16 @@ public class DailyRecordController {
         return ApiResponse.ok(record);
     }
 
+    /**
+     * 取某日记录：主观复盘行为空、但全局客观日表有值时，回一份 id=null 的合成 carrier
+     * （客观九数照填）。前端据此渲染行情读数，保存时走 create。
+     */
     @GetMapping("/date/{date}")
     public ApiResponse<DailyRecord> getByDate(Authentication auth,
                                               @PathVariable String date) {
         Long userId = (Long) auth.getPrincipal();
         LocalDate d = LocalDate.parse(date);
-        return ApiResponse.ok(dailyRecordService.getByDate(userId, d));
+        return ApiResponse.ok(dailyRecordService.viewByDate(userId, d));
     }
 
     @GetMapping("/range")

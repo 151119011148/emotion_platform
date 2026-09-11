@@ -15,10 +15,10 @@ import java.util.TreeMap;
 import org.springframework.stereotype.Service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.emotion.entity.DailyRecord;
+import com.emotion.entity.MarketDaily;
 import com.emotion.entity.MarketStock;
 import com.emotion.entity.NodeEvent;
-import com.emotion.mapper.DailyRecordMapper;
+import com.emotion.mapper.MarketDailyMapper;
 import com.emotion.mapper.MarketStockMapper;
 import com.emotion.mapper.NodeEventMapper;
 import com.emotion.vo.NodeSuggestVO;
@@ -29,9 +29,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * 节点状态复算：把《节点理论交易Skill v2.0（双轨版）》那套判据按盘面明细跑一遍，给出建议，
  * 由他点头才落库。
  *
- * <p>取数<b>全部本地</b>——{@code t_market_stock}（三池逐只明细）+ {@code t_daily_record}（涨跌停家数、
- * 连板高度）。一次复算打的是几条 SQL，不碰上游：他已经拉过那天的行情，判据就该立刻出来，
- * 回看 14 天历史时这里一次都不该花钱。
+ * <p>取数<b>全部本地</b>——{@code t_market_stock}（三池逐只明细）+ {@code t_market_daily}（涨跌停家数、
+ * 连板高度，全局客观、与用户无关）。一次复算打的是几条 SQL，不碰上游：他已经拉过那天的行情，
+ * 判据就该立刻出来，回看 14 天历史时这里一次都不该花钱。
  *
  * <p>三件事是这套判据的底线，改动前先读：
  * <ol>
@@ -96,16 +96,16 @@ public class NodeSuggestService {
 
     private final NodeEventMapper nodeEventMapper;
     private final MarketStockMapper marketStockMapper;
-    private final DailyRecordMapper dailyRecordMapper;
+    private final MarketDailyMapper marketDailyMapper;
     private final ObjectMapper json;
 
     public NodeSuggestService(NodeEventMapper nodeEventMapper,
                              MarketStockMapper marketStockMapper,
-                             DailyRecordMapper dailyRecordMapper,
+                             MarketDailyMapper marketDailyMapper,
                              ObjectMapper json) {
         this.nodeEventMapper = nodeEventMapper;
         this.marketStockMapper = marketStockMapper;
-        this.dailyRecordMapper = dailyRecordMapper;
+        this.marketDailyMapper = marketDailyMapper;
         this.json = json;
     }
 
@@ -181,29 +181,30 @@ public class NodeSuggestService {
             r.missing.add("D0 日期未填：没有断板日，整套判据一条都判不起来");
             return r;
         }
-        readFilterRecord(r, userId, r.d0);
+        readFilterRecord(r, r.d0);
         readAnchor(r, node);
         readT1(r, node);
         readCandidates(r, node);
         return r;
     }
 
-    /** 前置过滤器四项里的两个家数，加连板高度序列，全在 {@code t_daily_record}。 */
-    private void readFilterRecord(Readings r, Long userId, LocalDate d0) {
-        DailyRecord record = dailyRecordMapper.selectOne(new LambdaQueryWrapper<DailyRecord>()
-                .eq(DailyRecord::getUserId, userId)
-                .eq(DailyRecord::getTradeDate, d0)
+    /**
+     * 前置过滤器四项里的两个家数，加连板高度序列，全在 {@code t_market_daily}——全局客观读数，
+     * 不按账号区分（隔离前寄生在 t_daily_record，按用户查会漏掉没复盘的日子）。
+     */
+    private void readFilterRecord(Readings r, LocalDate d0) {
+        MarketDaily day = marketDailyMapper.selectOne(new LambdaQueryWrapper<MarketDaily>()
+                .eq(MarketDaily::getTradeDate, d0)
                 .last("LIMIT 1"));
-        if (record != null) {
-            r.limitDownCount = record.getLimitDownCount();
-            r.limitUpCount = record.getLimitUpCount();
+        if (day != null) {
+            r.limitDownCount = day.getLimitDownCount();
+            r.limitUpCount = day.getLimitUpCount();
         }
-        List<DailyRecord> back = dailyRecordMapper.selectList(new LambdaQueryWrapper<DailyRecord>()
-                .eq(DailyRecord::getUserId, userId)
-                .le(DailyRecord::getTradeDate, d0)
-                .orderByDesc(DailyRecord::getTradeDate)
+        List<MarketDaily> back = marketDailyMapper.selectList(new LambdaQueryWrapper<MarketDaily>()
+                .le(MarketDaily::getTradeDate, d0)
+                .orderByDesc(MarketDaily::getTradeDate)
                 .last("LIMIT " + (HEIGHT_COMPRESS_DAYS + 1)));
-        for (DailyRecord each : back) {
+        for (MarketDaily each : back) {
             r.heights.add(each.getMaxConsecutiveLimit());
         }
     }

@@ -511,7 +511,7 @@ public class MarketDataService {
             fields.setUpCount(marketBreadth[0]);
             fields.setDownCount(marketBreadth[1]);
             snap.notes.add("上涨/下跌家数已取（东财实时 " + marketBreadth[0] + "/" + marketBreadth[1]
-                    + "）并随本次拉取写入复盘记录");
+                    + "）并随本次拉取写入全局客观日表 t_market_daily");
         }
 
         if (missingCount(fields) == ALL_MARKET_FIELDS.size()) {

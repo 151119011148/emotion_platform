@@ -35,17 +35,20 @@ public class ReviewImportWriter {
     private final PredictionStore predictionStore;
     private final IndexCloseStore indexCloseStore;
     private final ThemeDayWriter themeDayWriter;
+    private final MarketDailyStore marketDailyStore;
 
     public ReviewImportWriter(DailyRecordService dailyRecordService,
                               PositionStore positionStore,
                               PredictionStore predictionStore,
                               IndexCloseStore indexCloseStore,
-                              ThemeDayWriter themeDayWriter) {
+                              ThemeDayWriter themeDayWriter,
+                              MarketDailyStore marketDailyStore) {
         this.dailyRecordService = dailyRecordService;
         this.positionStore = positionStore;
         this.predictionStore = predictionStore;
         this.indexCloseStore = indexCloseStore;
         this.themeDayWriter = themeDayWriter;
+        this.marketDailyStore = marketDailyStore;
     }
 
     /**
@@ -58,6 +61,19 @@ public class ReviewImportWriter {
     @Transactional(rollbackFor = Exception.class)
     public DailyRecord write(Long userId, LocalDate date, String content, ReviewDoc doc,
                              Map<String, String> names) {
+        // 涨跌家数是客观读数（已隔离进 t_market_daily）。必须在 importManual <b>之前</b>落库：
+        // 打分（五维 D1·red_ratio）发生在 importManual 里，它从客观日表回填，晚写就还是旧值。
+        ReviewDoc.Value breadth = doc.single("涨跌家数");
+        if (breadth != null) {
+            Integer up = null;
+            Integer down = null;
+            if (!breadth.isBlank()) {
+                String[] parts = breadth.getRaw().split("/");
+                up = parts.length > 0 && !parts[0].trim().isEmpty() ? Integer.valueOf(parts[0].trim()) : null;
+                down = parts.length > 1 && !parts[1].trim().isEmpty() ? Integer.valueOf(parts[1].trim()) : null;
+            }
+            marketDailyStore.upsertBreadth(date, up, down);
+        }
         DailyRecord record = dailyRecordService.importManual(userId, date, target -> {
             applySingles(target, doc, names);
             // 整篇原文，连 ```meta 围栏块一起。md 是唯一真相，这份要能原样导回编辑器改完再导入。
@@ -100,6 +116,8 @@ public class ReviewImportWriter {
             target.setMyPositionPct(v.isBlank() ? null : new BigDecimal(v.getRaw()));
         }
         if ((v = doc.single("涨跌家数")) != null) {
+            // 列已迁到 t_market_daily：落库走 write() 里的 upsertBreadth（在打分之前）。
+            // 这里仍写瞬态字段，是为了 ReviewImportService 的预览差异（draft 不落库）照常用同一套映射。
             String[] parts = v.isBlank() ? new String[0] : v.getRaw().split("/");
             target.setUpCount(parts.length > 0 ? Integer.valueOf(parts[0].trim()) : null);
             target.setDownCount(parts.length > 1 ? Integer.valueOf(parts[1].trim()) : null);

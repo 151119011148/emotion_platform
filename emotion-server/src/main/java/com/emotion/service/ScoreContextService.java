@@ -14,7 +14,7 @@ import org.springframework.stereotype.Service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.emotion.entity.DailyRecord;
-import com.emotion.mapper.DailyRecordMapper;
+import com.emotion.entity.MarketDaily;
 import com.emotion.mapper.MarketStockMapper;
 import com.emotion.market.PoolCounts;
 import com.emotion.util.ManualOverride;
@@ -61,7 +61,7 @@ public class ScoreContextService {
     private final ScoringModelStore scoringModelStore;
     private final LadderMetricsService ladderMetrics;
     private final PrdMetricsService prdMetrics;
-    private final DailyRecordMapper dailyRecordMapper;
+    private final MarketDailyStore marketDailyStore;
 
     public ScoreContextService(PremiumTierStore premiumTierStore,
                               MarketStockMapper marketStockMapper,
@@ -70,7 +70,7 @@ public class ScoreContextService {
                               ScoringModelStore scoringModelStore,
                               LadderMetricsService ladderMetrics,
                               PrdMetricsService prdMetrics,
-                              DailyRecordMapper dailyRecordMapper) {
+                              MarketDailyStore marketDailyStore) {
         this.premiumTierStore = premiumTierStore;
         this.marketStockMapper = marketStockMapper;
         this.anchors = anchors;
@@ -78,7 +78,7 @@ public class ScoreContextService {
         this.scoringModelStore = scoringModelStore;
         this.ladderMetrics = ladderMetrics;
         this.prdMetrics = prdMetrics;
-        this.dailyRecordMapper = dailyRecordMapper;
+        this.marketDailyStore = marketDailyStore;
     }
 
     public ScoreInputs forDate(Long userId, LocalDate date, DailyRecord record) {
@@ -96,7 +96,8 @@ public class ScoreContextService {
         in.setScoringTree(scoringModelStore.activeTreeOrNull());
         Map<String, BigDecimal> metrics = in.getMetrics();
         try {
-            List<DailyRecord> recent = loadRecentForTurnover(userId, date);
+            // 量能 20 日基准是全局客观口径：两市成交额与谁复盘无关，查 t_market_daily 而不是用户记录。
+            List<MarketDaily> recent = marketDailyStore.listBefore(date, LadderMetricsService.TURNOVER_WINDOW);
             Map<String, BigDecimal> auto = ladderMetrics.build(date, record, recent);
             for (Map.Entry<String, BigDecimal> e : auto.entrySet()) {
                 metrics.put(e.getKey(), e.getValue());
@@ -116,23 +117,6 @@ public class ScoreContextService {
         }
         applyManualMetrics(in, record);
         return in;
-    }
-
-    /** 量能基准窗口用：日之前最多 20 条同账号记录（含周末/停牌占位）。异常一律吞成空表，量能子未评。 */
-    private List<DailyRecord> loadRecentForTurnover(Long userId, LocalDate date) {
-        if (userId == null || date == null) {
-            return Collections.emptyList();
-        }
-        try {
-            return dailyRecordMapper.selectList(new LambdaQueryWrapper<DailyRecord>()
-                    .eq(DailyRecord::getUserId, userId)
-                    .lt(DailyRecord::getTradeDate, date)
-                    .orderByDesc(DailyRecord::getTradeDate)
-                    .last("LIMIT 20"));
-        } catch (RuntimeException e) {
-            log.warn("取近 20 日记录失败 user={} date={} 原因={}（量能子未评）", userId, date, e.toString());
-            return Collections.emptyList();
-        }
     }
 
     /**

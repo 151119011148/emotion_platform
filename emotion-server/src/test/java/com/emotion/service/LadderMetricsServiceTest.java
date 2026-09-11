@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 
 import com.emotion.entity.DailyRecord;
 import com.emotion.entity.IndexClose;
+import com.emotion.entity.MarketDaily;
 import com.emotion.entity.MarketStock;
 import com.emotion.market.MarketMetrics;
 import com.emotion.market.PoolCounts;
@@ -77,10 +78,17 @@ class LadderMetricsServiceTest {
         return r;
     }
 
+    /** 量能 20 日窗口的原料现在是全局客观日行 t_market_daily。 */
+    private static MarketDaily mday(String totalVolume) {
+        MarketDaily m = new MarketDaily();
+        m.setTotalVolume(totalVolume == null ? null : new BigDecimal(totalVolume));
+        return m;
+    }
+
     private static Map<String, BigDecimal> agg(List<MarketStock> todayZT, List<MarketStock> todayLoss,
                                                List<MarketStock> prevZT, PoolCounts pools,
                                                List<MarketMetrics.TierPremium> tiers, List<IndexClose> idx,
-                                               DailyRecord record, List<DailyRecord> recent) {
+                                               DailyRecord record, List<MarketDaily> recent) {
         return LadderMetricsService.aggregate(todayZT, todayLoss, prevZT, pools, tiers, idx, record, recent);
     }
 
@@ -255,9 +263,9 @@ class LadderMetricsServiceTest {
     @Test
     void marketScalars_fromDailyRecord() {
         DailyRecord r = record(null, 90, 12, 600, 400, "1200");
-        List<DailyRecord> recent = new ArrayList<>();
+        List<MarketDaily> recent = new ArrayList<>();
         for (int i = 0; i < 20; i++) {
-            recent.add(record(null, null, null, null, null, "1000"));
+            recent.add(mday("1000"));
         }
         Map<String, BigDecimal> m = agg(Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
                 null, Collections.emptyList(), Collections.emptyList(), r, recent);
@@ -270,14 +278,14 @@ class LadderMetricsServiceTest {
     @Test
     void turnover_windowTruncatesToTwentyAndIgnoresNulls() {
         DailyRecord r = record(null, null, null, null, null, "500");
-        List<DailyRecord> recent = new ArrayList<>();
+        List<MarketDaily> recent = new ArrayList<>();
         // 45 条：最旧的 25 条不该进窗口。放 500 在前 25、100 在后 20，且穿插 null。
         for (int i = 0; i < 25; i++) {
-            recent.add(record(null, null, null, null, null, "500"));
+            recent.add(mday("500"));
         }
-        recent.add(record(null, null, null, null, null, null));
+        recent.add(mday(null));
         for (int i = 0; i < 20; i++) {
-            recent.add(record(null, null, null, null, null, "100"));
+            recent.add(mday("100"));
         }
         Map<String, BigDecimal> m = agg(Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
                 null, Collections.emptyList(), Collections.emptyList(), r, recent);

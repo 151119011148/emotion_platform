@@ -115,7 +115,8 @@ public class ReviewExportService {
      * 每节固定留一行 {@code ✍️ 判断} 占位，他写完的那份就是当天的 md。
      */
     public ReviewExportVO reviewDoc(Long userId, LocalDate date) {
-        DailyRecord today = dailyRecordService.getByDate(userId, date);
+        // viewByDate：没有主观复盘行时，客观行情节（七数/盘面）仍由 t_market_daily 合成回填，全账号同一份。
+        DailyRecord today = dailyRecordService.viewByDate(userId, date);
         DailyRecord prev = previousRecord(userId, date);
 
         ReviewDocFormatter.Model m = new ReviewDocFormatter.Model();
@@ -135,8 +136,8 @@ public class ReviewExportService {
         ReviewExportVO vo = new ReviewExportVO();
         vo.setDate(date);
         vo.setGenerated(true);
-        if (today == null) {
-            vo.getWarnings().add(date + " 库里还没有复盘记录，各节行情数都显示 —。");
+        if (today == null || today.getId() == null) {
+            vo.getWarnings().add(date + " 还没有主观复盘记录：行情数读全局客观日表，主线/龙头等手填节显示 —。");
         }
         if (m.themes.isEmpty()) {
             vo.getWarnings().add("题材没有日粒度：这天没导入过带 `题材:` 的原文，【二】只给了主线与总龙头。");
@@ -161,8 +162,9 @@ public class ReviewExportService {
     }
 
     private ReviewExportVO build(Long userId, LocalDate date, boolean fromExport) {
-        DailyRecord record = dailyRecordService.getByDate(userId, date);
-        ReviewDoc stored = record != null && notBlank(record.getReviewMd())
+        // viewByDate：涨跌家数等客观键即使没有主观行也能重建进 meta（值来自 t_market_daily）。
+        DailyRecord record = dailyRecordService.viewByDate(userId, date);
+        ReviewDoc stored = record != null && record.getId() != null && notBlank(record.getReviewMd())
                 ? ReviewImportParser.parse(record.getReviewMd(), date) : null;
 
         ReviewExportVO vo = new ReviewExportVO();
