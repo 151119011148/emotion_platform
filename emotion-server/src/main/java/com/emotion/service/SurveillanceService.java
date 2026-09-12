@@ -380,10 +380,18 @@ public class SurveillanceService {
     /** 卡片要的那份结果：名单 + 均值 + 人话算式。第 9 维的分数在打分时算，这里不复制一份档位表。 */
     public SurveillanceVO vo(LocalDate requestedDate) {
         LocalDate date = requestedDate != null ? requestedDate : LocalDate.now(CN);
-        List<SurvivalMember> members = listOn(date, null);
+        return voOf(date, listOn(date, null));
+    }
+
+    /**
+     * 与 {@link #vo} 同一份卡片装配，但名单由调用方传入——D5 融合后同一次在列名单要同时喂
+     * 旧第 9 维与高位生态的压制/反馈子项，再拉一次 listOn 就是平白多打十几到三十几次上游。
+     */
+    public SurveillanceVO voOf(LocalDate date, List<SurvivalMember> members) {
+        List<SurvivalMember> list = members == null ? new ArrayList<SurvivalMember>() : members;
         // 均值只算 SEVERE/EXCH：ZD 是 2 连板以上的例行公告，把它算进来这一维就成了涨停池均值本身
         List<SurvivalMember> scored = new ArrayList<>();
-        for (SurvivalMember member : members) {
+        for (SurvivalMember member : list) {
             if (member.scored()) {
                 scored.add(member);
             }
@@ -393,18 +401,18 @@ public class SurveillanceService {
         SurveillanceVO vo = new SurveillanceVO();
         vo.setTradeDate(date);
         vo.setCount(survival.getCount());
-        vo.setAllCount(members.size());
+        vo.setAllCount(list.size());
         vo.setMatched(survival.getMatched());
         vo.setAvgPct(survival.getAvgPct());
         vo.setDropped(survival.getDropped());
-        for (SurvivalMember member : members) {
+        for (SurvivalMember member : list) {
             vo.getItems().add(toItem(member));
         }
         // 进分的排前面，其次还剩最久的：面板一眼要看到的是"哪几只把钱压在监管期里、还有几天"
         vo.getItems().sort(Comparator
                 .comparing((SurveillanceVO.Item item) -> !item.isScored())
                 .thenComparing(item -> -(item.getDays() - item.getDayIndex())));
-        vo.setNote(survivalNote(survival, members.size() - scored.size()));
+        vo.setNote(survivalNote(survival, list.size() - scored.size()));
         return vo;
     }
 

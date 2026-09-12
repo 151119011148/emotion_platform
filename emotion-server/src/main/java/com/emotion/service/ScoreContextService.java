@@ -17,10 +17,12 @@ import com.emotion.entity.DailyRecord;
 import com.emotion.entity.MarketDaily;
 import com.emotion.mapper.MarketStockMapper;
 import com.emotion.market.PoolCounts;
+import com.emotion.market.SurvivalMember;
 import com.emotion.util.ManualOverride;
 import com.emotion.util.ScoreInputs;
 import com.emotion.util.TemperatureCalculator;
 import com.emotion.vo.AnchorVO;
+import com.emotion.vo.HighEcoVO;
 import com.emotion.vo.ScoreContextVO;
 import com.emotion.vo.SurveillanceVO;
 
@@ -62,6 +64,7 @@ public class ScoreContextService {
     private final LadderMetricsService ladderMetrics;
     private final PrdMetricsService prdMetrics;
     private final MarketDailyStore marketDailyStore;
+    private final HighEcoMetricsService highEcoMetrics;
 
     public ScoreContextService(PremiumTierStore premiumTierStore,
                               MarketStockMapper marketStockMapper,
@@ -70,7 +73,8 @@ public class ScoreContextService {
                               ScoringModelStore scoringModelStore,
                               LadderMetricsService ladderMetrics,
                               PrdMetricsService prdMetrics,
-                              MarketDailyStore marketDailyStore) {
+                              MarketDailyStore marketDailyStore,
+                              HighEcoMetricsService highEcoMetrics) {
         this.premiumTierStore = premiumTierStore;
         this.marketStockMapper = marketStockMapper;
         this.anchors = anchors;
@@ -79,6 +83,7 @@ public class ScoreContextService {
         this.ladderMetrics = ladderMetrics;
         this.prdMetrics = prdMetrics;
         this.marketDailyStore = marketDailyStore;
+        this.highEcoMetrics = highEcoMetrics;
     }
 
     public ScoreInputs forDate(Long userId, LocalDate date, DailyRecord record) {
@@ -88,7 +93,9 @@ public class ScoreContextService {
         in.setPremiumTiers(premiumTierStore.read(date));
         fillPoolCounts(in, date);
         fillAnchor(in, userId, date);
-        fillSurvival(in, date);
+        // 监管名单全程只拉一次 listOn：旧第 9 维与 D5 压制/反馈共享同一份成员，不重复打上游。
+        SurvDay survDay = loadSurvDay(date);
+        fillSurvival(in, date, survDay);
         applyManual(in, record);
 
         // 五维双层模型：配置树 + 自动取数读数 + 人工列叠加。
@@ -105,18 +112,36 @@ public class ScoreContextService {
         } catch (RuntimeException e) {
             log.warn("五维自动取数失败 date={} 原因={}（对应子指标未评，不兜 0）", date, e.toString());
         }
-        // PRD 2.0（five_dim_v2）：主线 5 要素（zt/height/amount 聚集度、催化剂硬度、持续性）与
-        // 阵眼龙头分工 5 分。失败同样不兜 0——主线当天没涨停池，"聚集度 0 分"和"未评"是两个世界。
+        // PRD 2.0（five_dim_v2）：主线 5 要素（zt/height/amount 聚集度、催化剂硬度、持续性）。
+        // Snapshot 同时是 D5 阵眼/抱团取数的输入（日内核心行业、H、实际最高板），只算这一次。
+        PrdMetricsService.Snapshot ps = null;
         try {
-            PrdMetricsService.Snapshot ps = prdMetrics.snapshot(userId, date);
+            ps = prdMetrics.snapshot(userId, date);
             for (Map.Entry<String, BigDecimal> e : ps.metrics.entrySet()) {
                 metrics.put(e.getKey(), e.getValue());
             }
         } catch (RuntimeException e) {
-            log.warn("PRD 主线要素/龙头分工取数失败 date={} 原因={}（对应子指标未评，不兜 0）", date, e.toString());
+            log.warn("PRD 主线要素取数失败 date={} 原因={}（对应子指标未评，不兜 0）", date, e.toString());
+        }
+        // D5 高位生态（阵眼个体+抱团资金+监管压制+监管反馈）：失败同样不兜 0。
+        try {
+            HighEcoMetricsService.Build d5 = highEcoMetrics.build(userId, date, ps,
+                    in.getPremiumTiers(), survDay.members, survDay.available);
+            for (Map.Entry<String, BigDecimal> e : d5.getMetrics().entrySet()) {
+                metrics.put(e.getKey(), e.getValue());
+            }
+            in.setHighEcoVo(d5.getVo());
+        } catch (RuntimeException e) {
+            log.warn("D5 高位生态取数失败 date={} 原因={}（对应子指标未评，不兜 0）", date, e.toString());
         }
         applyManualMetrics(in, record);
         return in;
+    }
+
+    /** /api/d5/high：复用 forDate 的同一次装配（同一名单、同一 Snapshot），只取结构化 VO。 */
+    public HighEcoVO highEco(Long userId, LocalDate requestedDate) {
+        LocalDate date = requestedDate != null ? requestedDate : LocalDate.now(CN);
+        return forDate(userId, date, null).getHighEcoVo();
     }
 
     /**
@@ -228,15 +253,17 @@ public class ScoreContextService {
             metrics.put("persistence_days", BigDecimal.valueOf(pd));
             in.getMetricNotes().put("persistence_days", "人工覆盖：主线连续活跃 " + pd + " 日");
         }
-        // PRD 2.0 要素3：成交额聚集度只有人工口径（自动取数未覆盖），PrdMetricsService 不产这个键。
-        overlayDecimal(metrics, in.getMetricNotes(), "amount_gather_pct", record.getManualAmountGatherPct(),
-                "人工覆盖：主线成交额聚集度 ", "%");
+        // 注：成交额聚集度（amount_gather_pct）固定走 PrdMetricsService 的涨停股口径
+        // （主线涨停股 amount / 全部涨停股 amount），不接受人工覆盖——
+        // manual_amount_gather_pct 是旧"两市口径"残留，语义不同，混入只会让同一指标两套口径。
         overlayDecimal(metrics, in.getMetricNotes(), "top_high_turnover_pct", record.getManualTopHighTurnoverPct(),
                 "人工覆盖：极高位龙头当日换手 ", "%");
-        overlayDecimal(metrics, in.getMetricNotes(), "first_premium_pct", record.getManualFirstPremiumPct(),
-                "人工覆盖：首板次日均溢价 ", "%");
+        // 首板次日均溢价在时间截面重构后=D3 连板低位溢价（prem_low，昨首板今均溢价，自动走 tier board=1）；
+        // 人工列保留为该键的兜底（档位未落档时仍可手填）。
+        overlayDecimal(metrics, in.getMetricNotes(), "prem_low", record.getManualFirstPremiumPct(),
+                "人工覆盖：低位溢价(昨首板今均溢价) ", "%");
         overlayDecimal(metrics, in.getMetricNotes(), "first_sealed_rate", record.getManualFirstSealedRate(),
-                "人工覆盖：首板封住/(封住+炸) ", "%");
+                "人工覆盖：首板封住/(封住+首板炸板) ", "%");
         Integer brk = record.getManualTopHighBreak();
         if (brk != null) {
             metrics.put("top_high_break", BigDecimal.valueOf(brk));
@@ -340,33 +367,55 @@ public class ScoreContextService {
         return worst == null ? detail : worst + " 分｜" + detail;
     }
 
-    private void fillSurvival(ScoreInputs in, LocalDate date) {
-        // 先问库里有没有事件再决定要不要打网络：窗口内一条事件都没有，名单必然空，
-        // 但那到底是"当天没票被监管"还是"这天的公告从没回补过"，只有事件表本身能回答。
+    /**
+     * 一天的监管在列名单装配结果：{@code available}=事件窗内是否有公告行（false=从没回补过，
+     * 压制/反馈整支未评）；{@code members} 为 listOn 推出的当日在列（含 ZD，旧第 9 维与 D5 各自再筛）。
+     */
+    static final class SurvDay {
+        boolean available;
+        List<SurvivalMember> members = Collections.emptyList();
+    }
+
+    /** 监管名单唯一取数点：先问事件表，再拉一次 listOn（日历日 K + 在列个股涨跌），异常降级为不可用。 */
+    private SurvDay loadSurvDay(LocalDate date) {
+        SurvDay day = new SurvDay();
         int events;
         try {
             events = surveillance.eventsInWindow(date);
         } catch (RuntimeException e) {
-            in.setSurvCount(null);
-            in.setSurvNote(cut("监管事件表读取异常：" + reason(e) + "（第 9 维未评）", SURV_NOTE_MAX));
-            return;
+            log.warn("监管事件表读取异常 date={} 原因={}（第 9 维/D5 监管子项未评）", date, e.toString());
+            return day;
         }
         if (events == 0) {
+            return day;
+        }
+        day.available = true;
+        try {
+            day.members = surveillance.listOn(date, null);
+        } catch (RuntimeException e) {
+            day.available = false;
+            log.warn("监管名单 listOn 失败 date={} 原因={}（第 9 维/D5 监管子项未评）", date, e.toString());
+        }
+        return day;
+    }
+
+    private void fillSurvival(ScoreInputs in, LocalDate date, SurvDay day) {
+        if (!day.available) {
             in.setSurvCount(null);
-            in.setSurvNote(cut(date + " 往前 45 天内监管事件表为空：未拉取，第 9 维不计入分母"
+            in.setSurvNote(cut("监管事件窗为空（未拉取或读取异常）：第 9 维/D5 监管压制反馈不计入分母"
                     + "（不是「当天没有进分的监管股」）", SURV_NOTE_MAX));
             return;
         }
         try {
-            SurveillanceVO vo = surveillance.vo(date);
+            SurveillanceVO vo = surveillance.voOf(date, day.members);
             in.setSurvCount(vo.getCount());
             in.setSurvPremium(vo.getAvgPct());
             in.setSurvNote(cut(survNote(vo), SURV_NOTE_MAX));
         } catch (RuntimeException e) {
             in.setSurvCount(null);
             in.setSurvPremium(null);
-            in.setSurvNote(cut("监管名单取数异常：" + reason(e) + "（第 9 维未评，不是 0 分）", SURV_NOTE_MAX));
-            log.warn("第 9 维取数失败 date={} 原因={}", date, e.toString());
+            in.setSurvNote(cut("监管名单装配异常：" + reason(e) + "（第 9 维未评，不是 0 分）", SURV_NOTE_MAX));
+            log.warn("第 9 维装配失败 date={} 原因={}", date, e.toString());
         }
     }
 

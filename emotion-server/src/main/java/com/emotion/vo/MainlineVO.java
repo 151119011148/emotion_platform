@@ -30,7 +30,10 @@ public class MainlineVO {
     // ---- 五要素 ----
     private Double ztGatherPct;
     private Double heightGatherPct;
-    /** 成交额聚集度 %，只有人工口径（t_daily_record.manual_amount_gather_pct），未填=null。 */
+    /**
+     * 成交额聚集度 %（涨停股口径，唯一口径）：主线涨停股 amount / 全部涨停股 amount；
+     * 自动计算、不接受人工覆盖；amount 整列缺失（更早历史）=null。
+     */
     private Double amountGatherPct;
     /** 催化剂硬度 1-5（进分的有效值：题材行未设时为默认 3）；无匹配题材行=null。 */
     private Integer catalystHardness;
@@ -47,6 +50,13 @@ public class MainlineVO {
 
     // ---- 龙头分工 ----
     private Dragon dragon;
+    /**
+     * 日内核心板块内的最高板龙头（板块视角），与全市场空间板 {@link #dragon}（市场视角）区分：
+     * 两者不同行时就是"龙头与主线错位"（如市场 H=4 在家居用品、元件板块内最高仅 2 板）。
+     */
+    private Member sectorLeader;
+    /** 总龙头是否属于日内核心板块（false=错位无合力，D2 已据此 ×0.9）。 */
+    private Boolean dragonAligned;
     private List<Member> zhongJun;
     private Integer genFengCount;
     /** 卡位（他题材高标）；sealed=false 表示昨日高标今日炸板。 */
@@ -63,6 +73,8 @@ public class MainlineVO {
         private String name;
         private String industry;
         private Integer board;
+        /** 该总龙头是否属于日内核心板块；false 时前端必须打"非本板块·龙头错位"标。 */
+        private Boolean inMainSector;
         private String action;
         private Boolean promoted;
         /** 判定依据（选取规则 + 今日状态证据）。 */

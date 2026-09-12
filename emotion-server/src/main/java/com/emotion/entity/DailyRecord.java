@@ -141,8 +141,12 @@ public class DailyRecord {
     private BigDecimal scoreBoard;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal scoreFirst;
+    /** 旧 D5（龙头分工，v2）维分：2026-09-12 D5 融合后冻结留痕，不再写新值；现行第 5 维是 {@link #scoreHigh}。 */
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal scoreAnchor;
+    /** 五维·高位生态（阵眼个体35+抱团资金30+监管压制20+监管反馈15，five_dim_v2 v3 融合版）。 */
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private BigDecimal scoreHigh;
 
     /** 结构信号 CSV："中位吹哨,高位抱团,抱团瓦解前兆,高低切,全面退潮" 子集，可多选。null=无信号或未算。 */
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
@@ -185,7 +189,11 @@ public class DailyRecord {
     /** 阵眼监管折扣乘数(0-1)：null=不打折。刻意不走 overlayDecimal 那句 % 文案。 */
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal manualAnchorSupervisionDiscount;
-    /** v2 五维手填：主线成交额聚集度(%)，PRD D2·要素3 自动取数未覆盖时的人工兜底。 */
+    /**
+     * @deprecated 旧两市口径（主线板块成交额/两市成交额），已停用：D2 成交额聚集度固定按涨停股口径
+     * 自动计算（主线涨停股 amount/全部涨停股 amount），列保留仅为兼容历史写入，不再进分。
+     */
+    @Deprecated
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal manualAmountGatherPct;
 

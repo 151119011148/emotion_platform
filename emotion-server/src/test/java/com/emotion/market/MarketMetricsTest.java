@@ -1,6 +1,7 @@
 package com.emotion.market;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -75,6 +76,18 @@ class MarketMetricsTest {
         assertEquals(0, new BigDecimal("11.60")
                 .compareTo(broken("x", 100000, 88400, -2.7, 1).pullbackFromLimitPct()));
         assertNull(broken("x", 0, 88400, -2.7, 1).pullbackFromLimitPct());
+    }
+
+    /** 1 进 2 大面：炸板 big_loss 与收盘跌 >7% 两条路并集，−7% 整按严格不等不判，无价不能按 0 判。 */
+    @Test
+    void firstToTwoBigLossUnionsBrokenFlagAndDeepClose() {
+        assertTrue(MarketMetrics.firstToTwoBigLoss(true, new BigDecimal("-1.9")));   // 冲板被砸
+        assertTrue(MarketMetrics.firstToTwoBigLoss(false, new BigDecimal("-7.01"))); // 未触板深水
+        assertTrue(MarketMetrics.firstToTwoBigLoss(false, new BigDecimal("-10")));   // 跌停
+        assertFalse(MarketMetrics.firstToTwoBigLoss(false, new BigDecimal("-7.00")));// 恰好 7%
+        assertFalse(MarketMetrics.firstToTwoBigLoss(false, new BigDecimal("-5.95")));
+        assertFalse(MarketMetrics.firstToTwoBigLoss(false, null));                   // 无报价≠没亏
+        assertFalse(MarketMetrics.firstToTwoBigLoss(false, new BigDecimal("3.19")));
     }
 
     @Test

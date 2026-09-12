@@ -38,7 +38,7 @@ class DailyRecordServiceFiveDimTest {
         assertNotNull(record.getScoreThemeMain(), "score_theme_main 应有分(部分依赖人工,人工未评时该子剔出分母)");
         assertNotNull(record.getScoreBoard(), "score_board 应有分");
         assertNotNull(record.getScoreFirst(), "score_first 应有分");
-        assertNotNull(record.getScoreAnchor(), "score_anchor 应有分");
+        assertNotNull(record.getScoreHigh(), "score_high 应有分");
         assertNotNull(record.getTemperature(), "temperature = total 直连,不再映射");
         assertNotNull(record.getTotalScore(), "total_score 是 temperature 的整数版本");
         assertTrue(record.getStage().equals("高潮") || record.getStage().equals("发酵")
@@ -72,7 +72,7 @@ class DailyRecordServiceFiveDimTest {
         assertNull(record.getScoreThemeMain());
         assertNull(record.getScoreBoard());
         assertNull(record.getScoreFirst());
-        assertNull(record.getScoreAnchor());
+        assertNull(record.getScoreHigh());
     }
 
     /** 强制退潮:跌停 >=10 触发,无视 total 落 "退潮(强制)" + forced_ebb=1 + 原因. */
@@ -223,19 +223,31 @@ class DailyRecordServiceFiveDimTest {
         m.put("reseal_rate", new BigDecimal("65"));
         m.put("board_total_count", new BigDecimal("12"));
 
-        // 首板
+        // 首板（纯 T 日五子；1进2/首板溢价已迁入 D3 低位层）
         m.put("first_count", new BigDecimal("30"));
         m.put("first_sealed_rate", new BigDecimal("60"));
-        m.put("first_premium_pct", new BigDecimal("2"));
-        m.put("first_promo_1to2_rate", new BigDecimal("18"));
-        m.put("first_1to2_big_count", new BigDecimal("2"));
+        m.put("first_bomb_rate", new BigDecimal("20"));
+        m.put("first_avg_seal_amount", new BigDecimal("0.80")); // 0.8 亿
+        m.put("first_yizi_ratio", new BigDecimal("15"));
+        m.put("first_theme_gather_pct", new BigDecimal("25"));
 
-        // 阵眼（v2 龙头分工）：五分齐出（PrdMetricsService 自动算好的 0-100 策略分）
-        m.put("dragon_zong_long", new BigDecimal("70"));
-        m.put("dragon_zhong_jun", new BigDecimal("60"));
-        m.put("dragon_gen_feng", new BigDecimal("40"));
-        m.put("dragon_ka_wei", new BigDecimal("80"));
-        m.put("dragon_fan_bao", new BigDecimal("20"));
+        // D5 高位生态（2026-09-12 融合版）：阵眼个体四子项 + 抱团结构/强度 + 监管压制 + 反馈。
+        // 无人工阵眼时阵眼子整支未评，这里直接喂齐全部叶子让 5 维都出分。
+        m.put("d5a_action", new BigDecimal("70"));
+        m.put("d5a_height", new BigDecimal("70"));
+        m.put("d5a_seal", new BigDecimal("80"));
+        m.put("d5a_consist", new BigDecimal("100"));
+        m.put("d5c_ratio", new BigDecimal("30"));
+        m.put("d5c_seal", new BigDecimal("50"));
+        m.put("d5c_top", new BigDecimal("2"));
+        m.put("d5c_tier", new BigDecimal("100"));
+        m.put("d5c_prem", new BigDecimal("1.5"));
+        m.put("d5c_jr", new BigDecimal("40"));
+        m.put("d5p_count", new BigDecimal("1"));
+        m.put("d5p_high_ratio", new BigDecimal("0"));
+        m.put("d5p_spread", new BigDecimal("1"));
+        m.put("d5f_nuke", new BigDecimal("0"));
+        m.put("d5f_avg", new BigDecimal("1"));
         return m;
     }
 

@@ -25,7 +25,17 @@ public class AnchorService {
     /** 阵眼和总龙进分的方式一样，只是叫法不同——但只有这两种值能写进表。 */
     public static final String ROLE_CYCLE = "CYCLE";
     public static final String ROLE_LEADER = "LEADER";
-    private static final Collection<String> ROLES = Arrays.asList(ROLE_CYCLE, ROLE_LEADER);
+    // ---- D5 高位生态（2026-09-12）：人工阵眼四角色，权重见 {@link #roleWeight} ----
+    /** 总龙头（D5 多阵眼加权 0.5）。 */
+    public static final String ROLE_ZONG = "ZONG";
+    /** 分支龙（0.2）。 */
+    public static final String ROLE_FENZHI = "FENZHI";
+    /** 补涨龙（0.2）。 */
+    public static final String ROLE_BUZHANG = "BUZHANG";
+    /** 反包龙（0.1）。 */
+    public static final String ROLE_FANBAO = "FANBAO";
+    private static final Collection<String> ROLES = Arrays.asList(
+            ROLE_ZONG, ROLE_FENZHI, ROLE_BUZHANG, ROLE_FANBAO, ROLE_CYCLE, ROLE_LEADER);
 
     private final AnchorMapper anchorMapper;
     private final StockMapper stockMapper;
@@ -114,7 +124,7 @@ public class AnchorService {
         anchor.setStockCode(code);
         anchor.setStockName(stock.getName());
         if (anchor.getRole() == null || anchor.getRole().trim().isEmpty()) {
-            anchor.setRole(ROLE_CYCLE);
+            anchor.setRole(ROLE_ZONG);
         }
         if (!ROLES.contains(anchor.getRole())) {
             throw new IllegalArgumentException("未知的阵眼角色：" + anchor.getRole());
@@ -141,6 +151,51 @@ public class AnchorService {
                 .ne(anchor.getId() != null, Anchor::getId, anchor.getId()));
         if (dup != null && dup > 0) {
             throw new IllegalArgumentException(code + " 在 " + start + " 已经登记过一次了");
+        }
+    }
+
+    /**
+     * D5 阵眼个体的多阵眼角色权重：总龙头 0.5 / 分支 0.2 / 补涨 0.2 / 反包 0.1。
+     * 旧值 CYCLE/LEADER 与总龙头同义，按 0.5 参与，保证存量登记在 D5 下不丢身份。
+     */
+    public static double roleWeight(String role) {
+        if (role == null) {
+            return 0.5;
+        }
+        switch (role) {
+            case ROLE_FENZHI:
+                return 0.2;
+            case ROLE_BUZHANG:
+                return 0.2;
+            case ROLE_FANBAO:
+                return 0.1;
+            case ROLE_ZONG:
+            case ROLE_CYCLE:
+            case ROLE_LEADER:
+            default:
+                return 0.5;
+        }
+    }
+
+    /** 角色中文标签（卡片/接口用）。 */
+    public static String roleLabel(String role) {
+        if (role == null) {
+            return "总龙头";
+        }
+        switch (role) {
+            case ROLE_FENZHI:
+                return "分支龙";
+            case ROLE_BUZHANG:
+                return "补涨龙";
+            case ROLE_FANBAO:
+                return "反包龙";
+            case ROLE_LEADER:
+                return "周期总龙";
+            case ROLE_CYCLE:
+                return "周期阵眼";
+            case ROLE_ZONG:
+            default:
+                return "总龙头";
         }
     }
 

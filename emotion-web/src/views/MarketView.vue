@@ -152,12 +152,12 @@ function ratioText(v) {
 
 function bandText(key) {
   const sub = marketDim.value?.children?.find((c) => c.key === key)
-  return sub?.bandHit || '量能档未评'
+  return sub?.bandHit || sub?.note || '量能档未评'
 }
 
 function strategyText(row) {
-  // STRATEGY 节点没有 bandHit，raw 也为 null：把得分对应的档位含义写在备注里没数据可引，给空
-  if (row.scoringKind === 'STRATEGY') return '策略算法（三指协同 / 涨跌停组合）'
+  // STRATEGY 节点没有 bandHit，由引擎在 note 里写好「读数 → 档位/系数 → 结果」的人话串（v2.1 起指数/量能/涨跌停都有）
+  if (row.scoringKind === 'STRATEGY') return row.note || '策略算法（指数连续函数 / 量能价量配合 / 涨跌停组合）'
   return ''
 }
 
@@ -356,4 +356,5 @@ watch(date, load)
 .b-chaos { color: #60a5fa; }
 .b-ferment { color: #fbbf24; }
 .b-climax { color: #f87171; }
+/* el-table 深色样式已在 App.vue 全局统一覆盖（全站表格共用），此处不再写局部补丁 */
 </style>

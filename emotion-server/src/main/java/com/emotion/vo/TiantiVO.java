@@ -7,8 +7,8 @@ import java.util.List;
 import lombok.Data;
 
 /**
- * 连板生态（PRD P2）：当日涨停池 ≥2 板按<b>板高逐层</b>组成金字塔，逐只挂龙头分工标签与形态
- * （一字/T字/换手），每层给出晋级成功/失败名单与晋级率。标签、形态、晋级均与打分引擎同源。
+ * 连板生态（PRD P2）：当日涨停池 ≥2 板按<b>板高逐层</b>组成天梯，逐只挂龙头分工标签与形态
+ * （一字/T字/换手）；3 板及以上层级把晋级失败名单并入同层（前端灰色标注）。标签、形态、晋级均与打分引擎同源。
  */
 @Data
 public class TiantiVO {
@@ -23,30 +23,18 @@ public class TiantiVO {
     private Double ztGatherPct;
     private Double heightGatherPct;
     private Integer persistenceDays;
+    /** 当日涨停家数。 */
     private Integer ztTotal;
+    /** 当日炸板家数。 */
     private Integer zbTotal;
-
-    /** 总龙头状态卡：即使只有首板（梯子空）也照常给出。 */
-    private Dragon dragon;
+    /** 当日连板家数（涨停池中连板数 ≥2）。 */
+    private Integer lbTotal;
 
     /**
-     * 金字塔层，从最高板到 2 板逐层一个；空层保留（断档本身就是信息）。
+     * 天梯层，从最高板到 2 板逐层一个；空层保留（断档本身就是信息）。
      * 旧的四层（极高/中高/中/低）动态归属用 {@link Level#layerLabel} 表达，分层口径与打分一致。
      */
     private List<Level> levels;
-
-    @Data
-    public static class Dragon {
-        private String code;
-        private String name;
-        private String industry;
-        private Integer board;
-        private String action;      // PROMOTE / HOLD / BREAK / ABSENT
-        private Boolean promoted;
-        private BigDecimal changePct;
-        /** 判定依据：选取规则 + tie-break + 今日状态证据。 */
-        private String reason;
-    }
 
     @Data
     public static class Level {
@@ -54,18 +42,13 @@ public class TiantiVO {
         private Integer board;
         /** 打分四层归属：极高位/中高位/中位/低位。 */
         private String layerLabel;
-        /** 今日在板的个股（含晋级成功与持稳）。 */
+        /** 今日在板的个股（含晋级成功与持稳），按封单金额从大到小排序。 */
         private Integer count;
         private List<Row> rows;
-        /** 昨日 n-1 板家数（晋级率分母）。 */
-        private Integer prevCount;
-        /** 今日成功晋级 n 板家数。 */
-        private Integer promotedCount;
-        /** 晋级率 %，昨日无 n-1 板时 null。 */
-        private Double promoRate;
-        /** 晋级成功名单（今日 n 板且昨日 n-1 板）。 */
-        private List<Row> success;
-        /** 晋级失败名单（昨日 n-1 板今日未到 n 板）。 */
+        /**
+         * 晋级失败名单（昨日 n-1 板今日未封住 n 板）。页面仅在 n≥3 层展示，
+         * 2 板层（首板晋级失败）样本太大，走首板生态页口径。
+         */
         private List<FailedRow> failed;
     }
 
@@ -98,7 +81,7 @@ public class TiantiVO {
         private String name;
         private String industry;
         private Integer prevBoard;
-        /** ZT=今日仍涨停（停在低板）/ ZB=今日炸板 / GONE=未触板（明细未覆盖）。 */
+        /** ZT=今日仍涨停（停在低板）/ ZB=今日炸板 / DT=今日跌停 / GONE=未触板（免费源无逐只行情，最新交易日尝试腾讯报价补全）。 */
         private String todayStatus;
         private BigDecimal changePct;
         private BigDecimal pullbackPct;

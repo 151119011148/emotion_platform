@@ -178,6 +178,18 @@ public class MarketController {
     }
 
     /**
+     * 昨涨停股今日逐只表现回补（<b>含首板</b>）：1 进 2 大面的全样本来源。
+     * 脚本从日 K（source=KBAR）或东财昨涨停板块（source=BK）取每只票当日涨跌幅 POST 上来，
+     * 服务端按库里的昨日涨停池归档；matched 少于 total 时大面仍是下界，响应里必须能看见。
+     */
+    @PostMapping("/zt-perf")
+    public ApiResponse<com.emotion.vo.ZtPerfVO> saveZtPerf(@RequestBody PremiumTierRequest body) {
+        Map<String, BigDecimal> pct = body.getPct() == null
+                ? Collections.<String, BigDecimal>emptyMap() : body.getPct();
+        return ApiResponse.ok(marketDataService.saveZtPerf(body.getTradeDate(), pct, body.getSource()));
+    }
+
+    /**
      * 某日的在列监管股与"监管股今日溢价"（第 9 维的人群）。
      * 名单是从 t_surveillance 推的，所以没刷新过时 count=0——那和"今天确实没有在列的票"
      * 在落库字段上靠 surv_count 的 0/NULL 区分，这里只如实交出表里能证明的部分。

@@ -280,11 +280,11 @@ class ScoreContextServiceTest {
     @Test
     void applyManualMetricsDoesNothingWhenEveryCellIsEmpty() {
         ScoreInputs in = ScoreInputs.empty();
-        in.putMetric("first_premium_pct", new BigDecimal("2.50")); // auto 值，模拟 LadderMetrics 已填
+        in.putMetric("prem_low", new BigDecimal("2.50")); // auto 值，模拟 LadderMetrics 已填
         ScoreContextService.applyManualMetrics(in, new DailyRecord());
 
         // 自动那一条原样保留
-        assertEquals(0, new BigDecimal("2.50").compareTo(in.metric("first_premium_pct")));
+        assertEquals(0, new BigDecimal("2.50").compareTo(in.metric("prem_low")));
         assertTrue(in.getMetricNotes().isEmpty(), "空 manual 不能污染 metricNotes");
     }
 
@@ -292,7 +292,7 @@ class ScoreContextServiceTest {
     @Test
     void applyManualMetricsOverridesAutoAndAnnotatesSource() {
         ScoreInputs in = ScoreInputs.empty();
-        in.putMetric("first_premium_pct", new BigDecimal("2.50"));
+        in.putMetric("prem_low", new BigDecimal("2.50"));
         DailyRecord record = new DailyRecord();
         record.setManualFirstPremiumPct(new BigDecimal("-1.80"));
         record.setManualSectorLimitUpCount(11);
@@ -301,10 +301,11 @@ class ScoreContextServiceTest {
         ScoreContextService.applyManualMetrics(in, record);
 
         Map<String, java.math.BigDecimal> metrics = in.getMetrics();
-        assertEquals(0, new BigDecimal("-1.80").compareTo(metrics.get("first_premium_pct")));
+        // 首板溢价人工列在时间截面重构后覆盖 D3 低位溢价 prem_low
+        assertEquals(0, new BigDecimal("-1.80").compareTo(metrics.get("prem_low")));
         assertEquals(0, new BigDecimal("11").compareTo(metrics.get("sector_limit_up_count")));
         assertEquals(0, new BigDecimal("3").compareTo(metrics.get("persistence_days")));
-        assertTrue(in.getMetricNotes().get("first_premium_pct").contains("人工覆盖"));
+        assertTrue(in.getMetricNotes().get("prem_low").contains("人工覆盖"));
     }
 
     /**
@@ -335,7 +336,7 @@ class ScoreContextServiceTest {
         assertEquals(0, new BigDecimal("90").compareTo(m.get("ladder_complete_score")));
         assertEquals(0, new BigDecimal("3").compareTo(m.get("persistence_days")));
         assertEquals(0, new BigDecimal("40").compareTo(m.get("top_high_turnover_pct")));
-        assertEquals(0, new BigDecimal("-1.80").compareTo(m.get("first_premium_pct")));
+        assertEquals(0, new BigDecimal("-1.80").compareTo(m.get("prem_low")));
         assertEquals(0, new BigDecimal("62.50").compareTo(m.get("first_sealed_rate")));
         assertEquals(0, BigDecimal.ONE.compareTo(m.get("top_high_break")));
         assertEquals(0, new BigDecimal("0.80").compareTo(m.get("anchor_supervision_discount")));
@@ -347,22 +348,29 @@ class ScoreContextServiceTest {
         assertTrue(notes.get("top_high_break").contains("是"), notes.get("top_high_break"));
     }
 
-    /** PRD 2.0 要素3：成交额聚集度只有人工口径（manual_amount_gather_pct → amount_gather_pct），且 null 不写=保持未评。 */
+    /**
+     * PRD 2.0 要素3：成交额聚集度固定涨停股口径自动值（PrdMetricsService 产 amount_gather_pct），
+     * 旧两市口径人工列 manual_amount_gather_pct 已停用——即使填了也不许覆盖自动值（同一指标只允许一个口径）。
+     */
     @Test
-    void manualAmountGatherPctFeedsTheOnlyHumanSourcedGatherKey() {
+    void manualAmountGatherPctNoLongerOverridesAutoGatherKey() {
+        // 人工列填了旧两市口径值：applyManualMetrics 不许把它写进 amount_gather_pct
         ScoreInputs in = ScoreInputs.empty();
         DailyRecord record = new DailyRecord();
         record.setManualAmountGatherPct(new BigDecimal("28.50"));
 
         ScoreContextService.applyManualMetrics(in, record);
 
-        assertEquals(0, new BigDecimal("28.50").compareTo(in.getMetrics().get("amount_gather_pct")));
-        assertTrue(in.getMetricNotes().get("amount_gather_pct").contains("人工覆盖"),
-                in.getMetricNotes().get("amount_gather_pct"));
+        assertFalse(in.getMetrics().containsKey("amount_gather_pct"),
+                "旧两市口径人工列已停用，不得写入 amount_gather_pct");
+        assertFalse(in.getMetricNotes().containsKey("amount_gather_pct"));
 
-        ScoreInputs none = ScoreInputs.empty();
-        ScoreContextService.applyManualMetrics(none, new DailyRecord());
-        assertFalse(none.getMetrics().containsKey("amount_gather_pct"), "没填就不许兜 0");
+        // 已有的自动值不能被人工列冲掉
+        ScoreInputs auto = ScoreInputs.empty();
+        auto.getMetrics().put("amount_gather_pct", new BigDecimal("50.46"));
+        ScoreContextService.applyManualMetrics(auto, record);
+        assertEquals(0, new BigDecimal("50.46").compareTo(auto.getMetrics().get("amount_gather_pct")),
+                "涨停股口径自动值必须原样保留");
     }
 
     /**

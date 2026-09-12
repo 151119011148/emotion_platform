@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -71,7 +72,11 @@ class BoardScoreCalculatorTest {
         DimNode theme = dim(t, "theme_main");
         assertEquals(5, theme.getSubs().size());
         assertEquals("zt_gather_pct", theme.getSubs().get(0).getSourceKey());
-        assertEquals("catalyst_hardness", theme.getSubs().get(3).getSourceKey());
+        // 高度/催化剂是 STRATEGY：空间板归属砍半、无题材行默认 50 的判断在 Java
+        assertEquals("height_gather", theme.getSubs().get(1).getSourceKey());
+        assertEquals("STRATEGY", theme.getSubs().get(1).getScoringKind());
+        assertEquals("catalyst", theme.getSubs().get(3).getSourceKey());
+        assertEquals("STRATEGY", theme.getSubs().get(3).getScoringKind());
         assertEquals(1.0, weightSum(theme.getSubs()), 1e-9);
 
         DimNode board = dim(t, "board");
@@ -83,15 +88,23 @@ class BoardScoreCalculatorTest {
         assertEquals("jr_low", promo.getChildren().get(0).getSourceKey());
         assertEquals("jr_top", promo.getChildren().get(3).getSourceKey());
 
-        // PRD 2.0：D5 龙头分工（总龙头50/中军20/跟风15/卡位10/反包5）
-        DimNode anchor = dim(t, "anchor");
-        assertEquals(5, anchor.getSubs().size());
-        assertEquals(1.0, weightSum(anchor.getSubs()), 1e-9);
-        SubNode zong = byKey(anchor.getSubs(), "dragon_zong_long");
-        assertEquals("MANUAL", zong.getScoringKind());
-        assertEquals("dragon_zong_long", zong.getSourceKey());
-        assertEquals(0.5, zong.getWeight(), 1e-9);
-        assertEquals("dragon_fan_bao", anchor.getSubs().get(4).getSourceKey());
+        // D5（2026-09-12 融合版）：高位生态 = 阵眼个体35 + 抱团资金30 + 监管压制20 + 监管反馈15
+        DimNode high = dim(t, "high");
+        assertEquals(0.25, high.getWeight(), 1e-9);
+        assertEquals("score_high", high.getRecordColumn());
+        assertEquals(4, high.getSubs().size());
+        SubNode anchorInd = byKey(high.getSubs(), "anchor_ind");
+        assertEquals(0.35, anchorInd.getWeight(), 1e-9);
+        assertEquals(4, anchorInd.getChildren().size());
+        assertEquals("d5a_action", anchorInd.getChildren().get(0).getSourceKey());
+        SubNode coalition = byKey(high.getSubs(), "coalition");
+        assertEquals(0.30, coalition.getWeight(), 1e-9);
+        SubNode structure = byKey(coalition.getChildren(), "c_structure");
+        assertEquals(4, structure.getChildren().size());
+        SubNode strength = byKey(coalition.getChildren(), "c_strength");
+        assertEquals(2, strength.getChildren().size());
+        assertEquals("d5_feedback", byKey(high.getSubs(), "feedback").getSourceKey());
+        assertEquals("STRATEGY", byKey(high.getSubs(), "feedback").getScoringKind());
     }
 
     private static DimNode dim(ScoringTree t, String key) {
@@ -114,22 +127,23 @@ class BoardScoreCalculatorTest {
     // ---------------------------------------------------------------- 策略分支
 
     @Test
-    void strategyIndexEnv() {
-        assertEquals(0, BoardScoreCalculator.strategyIndexEnv(m("index1_pct", 1.5, "index2_pct", 2.0, "index3_pct", 1.2))
-                .compareTo(BoardScoreCalculator.INDEX_ENV_FULL_UP));
-        assertEquals(0, BoardScoreCalculator.strategyIndexEnv(m("index1_pct", -2.0, "index2_pct", -1.5, "index3_pct", -1.2))
-                .compareTo(BoardScoreCalculator.INDEX_ENV_ALL_DOWN));
-        // 三指全绿但都没跌破 -1%（如 2026-09-10 -0.34/-0.61/-0.22）→ 弱跌日 35，不再落兜底 60
+    void strategyIndexEnv_continuous() {
+        // v2.1 连续函数 score=clamp(50 + 三指均值%×30, 0, 100)：0%→50、-1%→20、+1%→80、+1.5%→95，消除原 -1% 阈值跳变
+        assertEquals(0, BoardScoreCalculator.strategyIndexEnv(m("index1_pct", 1.5, "index2_pct", 1.5, "index3_pct", 1.5))
+                .compareTo(new BigDecimal("95")));
+        assertEquals(0, BoardScoreCalculator.strategyIndexEnv(m("index1_pct", -1.0, "index2_pct", -1.0, "index3_pct", -1.0))
+                .compareTo(new BigDecimal("20")));
+        assertEquals(0, BoardScoreCalculator.strategyIndexEnv(m("index1_pct", -2.0, "index2_pct", -2.0, "index3_pct", -2.0))
+                .compareTo(BigDecimal.ZERO));      // 低于 0 封底
+        assertEquals(0, BoardScoreCalculator.strategyIndexEnv(m("index1_pct", 0, "index2_pct", 0, "index3_pct", 0))
+                .compareTo(new BigDecimal("50"))); // 平盘=中性
+        // 三指全绿但均未破 -1%（原弱跌日 35）：连续函数按均值平滑滑落，不再有档位跳变
+        //   均值 (-0.34-0.61-0.22)/3=-0.39 → 50-11.7=38.3；(-1-0.5-0.2)/3=-0.5667 → 32.999
         assertEquals(0, BoardScoreCalculator.strategyIndexEnv(m("index1_pct", -0.34, "index2_pct", -0.61, "index3_pct", -0.22))
-                .compareTo(BoardScoreCalculator.INDEX_ENV_ALL_SOFT_DOWN));
-        // -1% 边界也算弱跌（严格 < -1% 才进全跌破位档）
+                .compareTo(new BigDecimal("38.30")));
         assertEquals(0, BoardScoreCalculator.strategyIndexEnv(m("index1_pct", -1.0, "index2_pct", -0.5, "index3_pct", -0.2))
-                .compareTo(BoardScoreCalculator.INDEX_ENV_ALL_SOFT_DOWN));
-        assertEquals(0, BoardScoreCalculator.strategyIndexEnv(m("index1_pct", -1.0, "index2_pct", -0.5, "index3_pct", 0.8))
-                .compareTo(BoardScoreCalculator.INDEX_ENV_TWO_DOWN));
-        assertEquals(0, BoardScoreCalculator.strategyIndexEnv(m("index1_pct", 0.2, "index2_pct", -0.1, "index3_pct", 0.3))
-                .compareTo(BoardScoreCalculator.INDEX_ENV_MID));
-        assertNull(BoardScoreCalculator.strategyIndexEnv(m("index1_pct", 1.5, "index2_pct", 2.0)));
+                .compareTo(new BigDecimal("32.999")));
+        assertNull(BoardScoreCalculator.strategyIndexEnv(m("index1_pct", 1.5, "index2_pct", 2.0))); // 缺一指=未评
     }
 
     @Test
@@ -159,6 +173,94 @@ class BoardScoreCalculatorTest {
         assertNull(BoardScoreCalculator.strategyBoardAnchor(m("limit_up_count", 50)));
     }
 
+    // ---------------------------------------------------------------- D2 空间板归属 / 催化剂缺省
+
+    @Test
+    void strategyHeightGather_spaceBoardOwnership() {
+        // 空间板不在主线：(板数比)×50 封顶 50。元件案例 50% → 25，而不是阶梯的 70
+        assertAmount("25", BoardScoreCalculator.strategyHeightGather(m("height_gather_pct", 50, "space_board_in_main", 0)));
+        assertAmount("45", BoardScoreCalculator.strategyHeightGather(m("height_gather_pct", 90, "space_board_in_main", 0)));
+        assertAmount("20", BoardScoreCalculator.strategyHeightGather(m("height_gather_pct", 40, "space_board_in_main", 0)));
+        // 空间板在主线：照旧走阶梯（50%→70、90%→95）
+        assertAmount("70", BoardScoreCalculator.strategyHeightGather(m("height_gather_pct", 50, "space_board_in_main", 1)));
+        assertAmount("95", BoardScoreCalculator.strategyHeightGather(m("height_gather_pct", 90, "space_board_in_main", 1)));
+        // 归属旗标缺失（非自动取数路径）：退原阶梯，不外推归属
+        assertAmount("70", BoardScoreCalculator.strategyHeightGather(m("height_gather_pct", 50)));
+        // 缺高度比=未评
+        assertNull(BoardScoreCalculator.strategyHeightGather(m("space_board_in_main", 0)));
+    }
+
+    @Test
+    void strategyCatalyst_defaults50OnlyWhenMainSectorActive() {
+        assertAmount("80", BoardScoreCalculator.strategyCatalyst(m("catalyst_hardness", 4)));
+        assertAmount("20", BoardScoreCalculator.strategyCatalyst(m("catalyst_hardness", 1)));
+        // 日内核心存在但无题材行：保守 50（人工未评）
+        assertAmount("50", BoardScoreCalculator.strategyCatalyst(m("main_sector_active", 1)));
+        // 连日内核心都没有（无涨停池）：整子未评，不凭空出分
+        assertNull(BoardScoreCalculator.strategyCatalyst(m("zt_gather_pct", 0)));
+    }
+
+    /**
+     * 9/11 元件案例完整重演：涨停聚集 22.5%(68) + 空间板不在本板块高度 25 + 成交额<15%(35)
+     * + 催化剂缺省 50 + 持续性首日 50 → 加权 45.25；萌芽封顶 50 不触发。
+     * 2026-09-12 D5 融合起龙头错位不再在 D2 扣分（×0.9 已下线），45.25 保持；错位只出信号，
+     * 扣分归 D5 阵眼一致性叶（100→60）。
+     */
+    @Test
+    void themeMain_yuanjianCase_noMisalignMultiplierAfterD5Fusion() {
+        Map<String, BigDecimal> metrics = m(
+                "zt_gather_pct", 22.5,
+                "height_gather_pct", 50, "space_board_in_main", 0,
+                "amount_gather_pct", 10,
+                "main_sector_active", 1,
+                "persistence_days", 1,
+                "mainline_stage_cap", 50,
+                "dragon_misalign", 1);
+        Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
+        assertAmount("45.25", r.getDimScores().get("theme_main"));
+        NodeEval theme = r.getDimEvals().get(1);
+        // D2 不再因错位扣分也不挂 note（封顶未触发）；错位只以信号形式可见
+        assertNull(theme.getNote(), "无封顶/无乘数时 note 应为 null，实际=" + theme.getNote());
+        // 错位仍以信号形式输出（不扣分但看得见）
+        assertTrue(r.getSignalFlags().contains(BoardScoreCalculator.SIG_ANCHOR_MISMATCH),
+                "龙头错位应输出信号，实际=" + r.getSignalFlags());
+        // 高度子项 25、催化子项 50（缺省）都能在 eval 树上看到
+        assertAmount("25", subEval(theme.getChildren(), "height_gather").getScore());
+        assertAmount("50", subEval(theme.getChildren(), "catalyst").getScore());
+    }
+
+    /** 强 readings + 萌芽天花板：加权 95.75 被压到 50；D5 融合后无错位乘数，封顶即终值。 */
+    @Test
+    void themeMain_sproutCeilingBinds() {
+        Map<String, BigDecimal> metrics = m(
+                "zt_gather_pct", 40,
+                "height_gather_pct", 90, "space_board_in_main", 1,
+                "amount_gather_pct", 40,
+                "catalyst_hardness", 5, "main_sector_active", 1,
+                "persistence_days", 5,
+                "mainline_stage_cap", 50,
+                "dragon_misalign", 1);
+        Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
+        assertAmount("50.00", r.getDimScores().get("theme_main"));
+        NodeEval theme = r.getDimEvals().get(1);
+        assertTrue(theme.getNote().contains("封顶 50"), "应挂封顶说明，实际=" + theme.getNote());
+        assertFalse(theme.getNote().contains("×0.9"), "D5 融合后 D2 不应再有错位乘数，实际=" + theme.getNote());
+    }
+
+    /** 退潮天花板 30：不设错位时强 readings 也只能到 30。 */
+    @Test
+    void themeMain_ebbCeiling() {
+        Map<String, BigDecimal> metrics = m(
+                "zt_gather_pct", 40,
+                "height_gather_pct", 90, "space_board_in_main", 1,
+                "amount_gather_pct", 40,
+                "catalyst_hardness", 5, "main_sector_active", 1,
+                "persistence_days", 5,
+                "mainline_stage_cap", 30);
+        Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
+        assertAmount("30.00", r.getDimScores().get("theme_main"));
+    }
+
     // ---------------------------------------------------------------- 求值：直加权和 / 未评剔分母 / MANUAL 夹取
 
     @Test
@@ -179,9 +281,9 @@ class BoardScoreCalculatorTest {
         Map<String, BigDecimal> metrics = boardBase("10"); // 中位晋级 10% → 中位吹哨 → 连板维 ×0.8
         Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
         // promo = 0.15*95 + 0.25*20(jr_mid=10→ELSE) + 0.20*95 + 0.40*95 = 76.25
-        // board num = .25*76.25 + .65*95 = 80.8125；五子权和=0.90 → raw=80.8125/0.90=89.7917；×0.8 = 71.83
-        assertAmount("71.83", r.getDimScores().get("board"));
-        assertAmount("71.83", r.getTotal());
+        // 时间截面 PRD 子权 .30/.25/.20/.15/.10：raw=.30*76.25+.70*95=89.375；×0.8(吹哨)=71.50
+        assertAmount("71.50", r.getDimScores().get("board"));
+        assertAmount("71.50", r.getTotal());
         assertTrue(r.getSignalFlags().contains(BoardScoreCalculator.SIG_WHISTLE));
         assertEquals(BoardScoreCalculator.STAGE_FERMENT, r.getStage());
         assertFalse(r.isForcedEbb());
@@ -194,14 +296,140 @@ class BoardScoreCalculatorTest {
                 "prem_low", 5, "prem_mid", 5, "prem_midhigh", 5, "prem_top", 5,
                 "big_low", 0, "big_mid", 0, "big_midhigh", 0, "big_top", 0,
                 "sealed_home_rate", 90, "reseal_rate", 80,
-                "board_total_count", 30);
+                "max_height", 30);
+    }
+
+    // ---------------------------------------------------------------- D3 口径修正（2026-09-12）
+
+    /** H=4：中高位/极高层叶子标 N/A（applicable=false、score 清空），不进分母；空间未打开 promo ×0.9。 */
+    @Test
+    void boardCalibration_h4_marksHighLayersNotApplicableAndSpacePenalty() {
+        Map<String, BigDecimal> metrics = m(
+                "jr_low", 15, "jr_mid", 37.5,   // 低/中位晋级，无高两层
+                "prem_low", -0.6, "prem_mid", 2.37,
+                "big_low", 0, "big_mid", 1,
+                "sealed_home_rate", 69, "reseal_rate", 54,
+                "max_height", 4);
+        Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
+        NodeEval board = r.getDimEvals().get(2);
+        NodeEval promo = subEval(board.getChildren(), "promo");
+        NodeEval promoTop = subEval(promo.getChildren(), "promo_top");
+        assertEquals(Boolean.FALSE, promoTop.getApplicable(), "H=4 极高位晋级应标 N/A");
+        assertNull(promoTop.getScore(), "N/A 叶子必须剔出分母");
+        NodeEval promoMid = subEval(promo.getChildren(), "promo_mid");
+        assertNull(promoMid.getAdjustment(), "无小样本基数键时不打折");
+        assertNotNull(promo.getAdjustment(), "H<5 晋级结构应有空间未打开修正");
+        // promo 裸合成=(.15*45+.25*65)/.40=57.5 → ×0.9=51.75
+        assertAmount("51.75", promo.getScore());
+    }
+
+    /** 小样本：中位晋级昨日基数<5 → 中位晋级叶子 ×0.8 并留修正说明。 */
+    @Test
+    void boardCalibration_smallSample_discountsMidPromoLeaf() {
+        Map<String, BigDecimal> metrics = m(
+                "jr_mid", 50, "jr_mid_base", 3,
+                "prem_mid", 1, "big_mid", 0,
+                "sealed_home_rate", 80, "reseal_rate", 80, "max_height", 4);
+        Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
+        NodeEval promoMid = subEval(subEval(r.getDimEvals().get(2).getChildren(), "promo").getChildren(), "promo_mid");
+        assertAmount("64.00", promoMid.getScore()); // 50%→GTE40=80 ×0.8
+        assertTrue(promoMid.getAdjustment().contains("小样本"));
+    }
+
+    /** 全局跌停外溢：跌停 21 家 → 大面结构 −35（95→60）。 */
+    @Test
+    void boardCalibration_limitDownSpilloverCutsBigLoss() {
+        Map<String, BigDecimal> metrics = boardBase("70");
+        metrics.put("limit_down_count", new BigDecimal("21"));
+        Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
+        NodeEval bigloss = subEval(r.getDimEvals().get(2).getChildren(), "bigloss");
+        assertAmount("60.00", bigloss.getScore()); // 95-35
+        assertTrue(bigloss.getAdjustment().contains("外溢 −35"));
+    }
+
+    /** 维分闸门：大盘分<40 → 大盘背离 ×0.85。龙头错位闸门 2026-09-12 起下线（只出信号，不乘维分）。 */
+    @Test
+    void boardCalibration_divergenceGateStacksOnDimScore() {
+        // 大盘分：三指 -1% → 20 分（<40）；其余子项缺省，大盘维仍出分
+        Map<String, BigDecimal> metrics = boardBase("70");
+        metrics.putAll(m("index1_pct", -1, "index2_pct", -1, "index3_pct", -1,
+                "turnover_ratio", 1.0, "red_ratio", 0.118, "limit_up_count", 40, "limit_down_count", 21,
+                "dragon_misalign", 1));
+        Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
+        NodeEval board = r.getDimEvals().get(2);
+        Map<String, BoardScoreCalculator.GateInfo> gates = new LinkedHashMap<>();
+        for (BoardScoreCalculator.GateInfo g : board.getGates()) {
+            gates.put(g.getKey(), g);
+        }
+        assertTrue(gates.get("divergence").isTriggered(), "跌停21+大盘<40 应触发大盘背离");
+        assertFalse(gates.containsKey("dragon_misalign"), "龙头错位闸门应已下线，实际 gates=" + gates.keySet());
+        // promo95；premium95×0.8(大盘背离)=76；bigloss=95-35=60；broken95；count95（H=30）
+        //   raw=.30*95+.25*76+.20*60+.15*95+.10*95=83.25；闸门仅 ×.85(背离)=70.76
+        assertAmount("70.76", r.getDimScores().get("board"));
+        // 错位不再乘维分，但信号仍在
+        assertTrue(r.getSignalFlags().contains(BoardScoreCalculator.SIG_ANCHOR_MISMATCH));
+    }
+
+    // ---------------------------------------------------------------- D4 纯 T 日校准 + 试错-兑现背离
+
+    /** D4 纯 T 日五子齐 → 95；结构上 first 维 5 个一级子，其中封单质量是含 2 叶的复合子。 */
+    @Test
+    void firstDim_pureTDayStructureAndFullScore() {
+        Map<String, BigDecimal> metrics = new TreeMap<>();
+        metrics.putAll(m("first_count", 60, "first_sealed_rate", 85, "first_bomb_rate", 5,
+                "first_avg_seal_amount", 4, "first_yizi_ratio", 35, "first_theme_gather_pct", 45));
+        Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
+        assertAmount("95.00", r.getDimScores().get("first"));
+        NodeEval first = r.getDimEvals().get(3);
+        assertEquals("first", first.getKey());
+        assertEquals(5, first.getChildren().size());
+        NodeEval sealQuality = subEval(first.getChildren(), "first_seal_quality");
+        assertEquals(2, sealQuality.getChildren().size());
+    }
+
+    /** 大盘背离（跌停≥10）时：首板数量 ×0.85、封板率 −10，维分按修正子项重算。 */
+    @Test
+    void firstCalibration_divergenceDiscountsCountAndSealedRate() {
+        Map<String, BigDecimal> metrics = new TreeMap<>();
+        metrics.putAll(m("first_count", 30, "first_sealed_rate", 73, "first_bomb_rate", 27,
+                "first_avg_seal_amount", 0.8, "first_yizi_ratio", 15, "first_theme_gather_pct", 18,
+                "limit_down_count", 21));
+        Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
+        NodeEval first = r.getDimEvals().get(3);
+        NodeEval count = subEval(first.getChildren(), "first_count");
+        // 30 只→GTE25=65 ×0.85=55.25
+        assertAmount("55.25", count.getScore());
+        assertTrue(count.getAdjustment().contains("×0.85"));
+        NodeEval sealed = subEval(first.getChildren(), "first_sealed");
+        // 73%→GTE70=80 −10=70
+        assertAmount("70.00", sealed.getScore());
+    }
+
+    /** 试错-兑现背离度=D4−D3：首板热、连板冷 → 严重背离标签；两维任一未评 → null。 */
+    @Test
+    void ecologyDivergence_firstMinusBoard() {
+        Map<String, BigDecimal> hot = new TreeMap<>();
+        hot.putAll(m("first_count", 60, "first_sealed_rate", 85, "first_bomb_rate", 5,
+                "first_avg_seal_amount", 4, "first_yizi_ratio", 35, "first_theme_gather_pct", 45));
+        Result onlyFirst = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), hot);
+        assertNull(onlyFirst.getEcologyDivergence(), "连板维未评时背离度应为 null");
+
+        Map<String, BigDecimal> both = new TreeMap<>(hot);
+        // 连板维给极低分：H=2、低位晋级率 0、封板率 30、无溢价/大面读数
+        both.putAll(m("max_height", 2, "jr_low", 0, "sealed_home_rate", 30, "reseal_rate", 20,
+                "limit_down_count", 21));
+        Result r2 = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), both);
+        BigDecimal d = r2.getEcologyDivergence();
+        assertNotNull(d);
+        assertTrue(d.doubleValue() > 30, "首板95 vs 连板冷应严重背离，实际 " + d);
+        assertTrue(r2.getEcologyDivergenceLabel().contains("严重背离"));
     }
 
     @Test
     void manual_isClamped0to100() {
-        Map<String, BigDecimal> metrics = m("dragon_zong_long", 150); // 越界人工分
+        Map<String, BigDecimal> metrics = m("d5a_action", 150); // 越界人工分（D5 阵眼行为叶）
         Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
-        assertAmount("100", r.getDimScores().get("anchor")); // 唯一可评子 → 维分=100
+        assertAmount("100", r.getDimScores().get("high")); // 唯一可评子 → 维分=100
         assertAmount("100", r.getTotal());
     }
 
@@ -227,22 +455,84 @@ class BoardScoreCalculatorTest {
         metrics.putAll(m("index1_pct", 1.5, "index2_pct", 1.5, "index3_pct", 1.5,
                 "turnover_ratio", 1.3, "red_ratio", 0.7, "limit_up_count", 90, "limit_down_count", 0,
                 "zt_gather_pct", 40, "height_gather_pct", 90, "amount_gather_pct", 40,
-                "catalyst_hardness", 5, "persistence_days", 5,
-                "first_count", 60, "first_sealed_rate", 85, "first_premium_pct", 4, "first_promo_1to2_rate", 30,
-                "first_1to2_big_count", 0,
-                "dragon_zong_long", 95, "dragon_zhong_jun", 95, "dragon_gen_feng", 95,
-                "dragon_ka_wei", 95, "dragon_fan_bao", 95));
+                "catalyst_hardness", 5, "persistence_days", 5));
+        metrics.putAll(firstFullMetrics());
+        metrics.putAll(d5Metrics());
         Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
-        // market: 100*.35 + 90*.25 + 85*.20 + 95*.20 = 93.50
-        assertAmount("93.50", r.getDimScores().get("market"));
+        // market v2.1：指数连续(均值+1.5%→95) + 量能(基础90 × 放量上涨1.2 = 108 → 封顶100) + 广度(0.7→85) + 涨跌停(95)
+        //   = 95*.35 + 100*.25 + 85*.20 + 95*.20 = 94.25
+        assertAmount("94.25", r.getDimScores().get("market"));
         // theme: 95*.25 + 95*.25 + 95*.20 + 100*.15 + 95*.15 = 95.75
         assertAmount("95.75", r.getDimScores().get("theme_main"));
         assertAmount("95.00", r.getDimScores().get("board"));
         assertAmount("95.00", r.getDimScores().get("first"));
-        assertAmount("95.00", r.getDimScores().get("anchor"));
-        // 总分（先按维四舍五入再加权，分母=1）：23.375 + 19.15 + 23.75 + 14.25 + 14.25 = 94.775 → 94.78
-        assertAmount("94.78", r.getTotal());
+        // D5：阵眼 95；结构=30%×100(占比30)+25%×90(封单40≤50)+25%×100(空间板2)+20%×95=96.5，
+        //   强度 95（溢价4→95/晋级60→95）→ 抱团=.6×96.5+.4×95=95.9；
+        //   压制=100（0家/0%/0扩散）；反馈=70（均涨10%、无核按钮=监管无效亢奋档）
+        //   high=.35×95+.30×95.9+.20×100+.15×70=92.52
+        assertAmount("92.52", r.getDimScores().get("high"));
+        // 总分（维分先四舍五入到 2 位再加权，分母=1）：
+        //   94.25×.22 + 95.75×.18 + 95×.22 + 95×.13 + 92.52×.25 = 94.35
+        assertAmount("94.35", r.getTotal());
         assertEquals(BoardScoreCalculator.STAGE_CLIMAX, r.getStage());
+    }
+
+    /** D5 feedback 五态 STRATEGY。 */
+    @Test
+    void d5FeedbackStrategy_fiveStates() {
+        assertNull(BoardScoreCalculator.strategyD5Feedback(new TreeMap<String, BigDecimal>()), "无键=未评");
+        assertAmount("0", BoardScoreCalculator.strategyD5Feedback(m("d5f_nuke", 1, "d5f_avg", 3)));
+        assertAmount("70", BoardScoreCalculator.strategyD5Feedback(m("d5f_nuke", 0, "d5f_avg", 6)));
+        assertAmount("85", BoardScoreCalculator.strategyD5Feedback(m("d5f_nuke", 0, "d5f_avg", 1)));
+        assertAmount("50", BoardScoreCalculator.strategyD5Feedback(m("d5f_nuke", 0, "d5f_avg", -2)));
+        assertAmount("25", BoardScoreCalculator.strategyD5Feedback(m("d5f_nuke", 0, "d5f_avg", -8)));
+        assertNull(BoardScoreCalculator.strategyD5Feedback(m("d5f_nuke", 0)), "nuke=0 但均价缺=未评");
+    }
+
+    /** D5 交叉信号：旗标 → 中文标签。 */
+    @Test
+    void d5SignalFlags() {
+        assertTrue(BoardScoreCalculator.detectSignals(m("d5_sig_death", 1)).contains(BoardScoreCalculator.SIG_DEATH));
+        assertTrue(BoardScoreCalculator.detectSignals(m("d5_sig_monitor_ignored", 1))
+                .contains(BoardScoreCalculator.SIG_MONITOR_IGNORED));
+        assertTrue(BoardScoreCalculator.detectSignals(m("d5_sig_monitor_works", 1))
+                .contains(BoardScoreCalculator.SIG_MONITOR_WORKS));
+        assertTrue(BoardScoreCalculator.detectSignals(m("d5_sig_sector_press", 1))
+                .contains(BoardScoreCalculator.SIG_SECTOR_PRESS));
+        List<String> h = BoardScoreCalculator.detectSignals(m("d5_sig_handover", 2));
+        assertTrue(h.contains(BoardScoreCalculator.SIG_ANCHOR_TAKEOVER));
+        assertTrue(BoardScoreCalculator.detectSignals(m("d5_sig_handover", 3))
+                .contains(BoardScoreCalculator.SIG_ANCHOR_DEAD));
+        assertTrue(BoardScoreCalculator.detectSignals(m("d5_sig_handover", 1))
+                .contains(BoardScoreCalculator.SIG_ANCHOR_WEAK));
+    }
+
+    /** D5 新增两条强制退潮。 */
+    @Test
+    void d5ForcedEbb() {
+        assertTrue(BoardScoreCalculator.detectForcedEbb(m("d5_force_top_break", 1)).forced);
+        assertTrue(BoardScoreCalculator.detectForcedEbb(m("d5_force_death", 1)).forced);
+        assertFalse(BoardScoreCalculator.detectForcedEbb(m("d5f_nuke", 1)).forced);
+    }
+
+    /** v2.1.1 量能系数收紧：普跌日量能贡献(0.25×量能分)必须严格低于指数贡献(0.35×指数分)。
+     *  以 -1% 普跌口径重演：三指均值-1% → 指数分20贡献7.0；平量基础70×0.35=24.5 贡献6.125<7.0。 */
+    @Test
+    void downDay_volumeContributionStrictlyBelowIndex() {
+        Map<String, BigDecimal> metrics = m(
+                "index1_pct", -1.0, "index2_pct", -1.0, "index3_pct", -1.0,
+                "turnover_ratio", 1.0,   // 平量：基础档 70
+                "red_ratio", 0.118);     // 涨跌家数比≈7.5:1：广度命中惩罚档
+        Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
+
+        NodeEval market = r.getDimEvals().get(0);
+        NodeEval index = subEval(market.getChildren(), "index_env");
+        NodeEval turnover = subEval(market.getChildren(), "turnover");
+        assertAmount("20", index.getScore());        // 50 + (-1×30)
+        assertAmount("24.5", turnover.getScore());   // 基础 70 × 平量下跌 0.35
+        assertTrue(0.25 * turnover.getScore().doubleValue() < 0.35 * index.getScore().doubleValue(),
+                "普跌日量能贡献必须严格低于指数贡献");
+        assertAmount("5", subEval(market.getChildren(), "breadth").getScore()); // 0.118<0.13 → 5
     }
 
     // ---------------------------------------------------------------- 结构信号
@@ -353,24 +643,48 @@ class BoardScoreCalculatorTest {
         assertNotNull(promo2.getScore(), "四层缺一层，剩余 3 层归一化后仍要出分");
     }
 
-    /** 命中档要写清楚："1.15 [?,?] → 分" 或 "1.15 >= 0.95 → 70"，供 tooltip 直接展示。 */
+    /**
+     * v2.1：量能/指数是 STRATEGY（价量配合 + 连续函数），命中详情改由 note 携带人话串；
+     * 广度仍是 BAND_LADDER，bandHit 保留（"0.7 ≥ 0.6 → 85"）。
+     */
     @Test
-    void nodeEvalRecordsBandHit() {
+    void nodeEvalRecordsNoteForStrategyAndBandHitForLadder() {
         Map<String, BigDecimal> metrics = fullMetrics();
         metrics.put("turnover_ratio", new BigDecimal("1.15"));
         Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
 
         NodeEval market = r.getDimEvals().get(0);
+
+        // 量能：基础 GTE0.95→70 × 放量上涨1.2(fullMetrics 三指均值+1.5%) = 84
         NodeEval turnover = subEval(market.getChildren(), "turnover");
-        assertEquals(0, new BigDecimal("1.15").compareTo(turnover.getRaw()));
-        assertAmount("70", turnover.getScore()); // GTE 0.95 → 70
-        assertNotNull(turnover.getBandHit(), "BAND_LADDER 命中必须留下人话");
-        assertTrue(turnover.getBandHit().contains("1.15"), "bandHit 应含 raw，实际=" + turnover.getBandHit());
-        assertTrue(turnover.getBandHit().contains("0.95"), "bandHit 应含阈值，实际=" + turnover.getBandHit());
-        assertTrue(turnover.getBandHit().contains("70"), "bandHit 应含分数，实际=" + turnover.getBandHit());
-        // STRATEGY 节点不写 bandHit（它压根没阶梯）
+        assertAmount("84", turnover.getScore());
+        assertNull(turnover.getBandHit(), "STRATEGY 节点不该有 bandHit");
+        assertNotNull(turnover.getNote(), "STRATEGY 节点应带价量配合 note");
+        assertTrue(turnover.getNote().contains("1.2"), "note 应含价量系数，实际=" + turnover.getNote());
+
+        // 广度仍是阶梯：命中档留人话
+        NodeEval breadth = subEval(market.getChildren(), "breadth");
+        assertEquals(0, new BigDecimal("0.7").compareTo(breadth.getRaw()));
+        assertNotNull(breadth.getBandHit(), "BAND_LADDER 命中必须留下人话");
+        assertTrue(breadth.getBandHit().contains("0.6"), "bandHit 应含阈值，实际=" + breadth.getBandHit());
+
+        // 指数 STRATEGY：连续函数 note，无 bandHit
         NodeEval idx = subEval(market.getChildren(), "index_env");
         assertNull(idx.getBandHit(), "STRATEGY 节点不该有 bandHit");
+        assertNotNull(idx.getNote(), "指数连续函数应带 note");
+    }
+
+    /**
+     * D5 高位生态全套读数：阵眼四子项 95；结构=96.5/强度=95（抱团 95.9）；压制 100；反馈 70（均涨 10%）。
+     * 各原始值对应的档位见 {@link #allDimsScored_totalIsDirectWeightedSum} 里的算式注释。
+     */
+    private static Map<String, BigDecimal> d5Metrics() {
+        return m(
+                "d5a_action", 95, "d5a_height", 95, "d5a_seal", 95, "d5a_consist", 95,
+                "d5c_ratio", 30, "d5c_seal", 40, "d5c_top", 2, "d5c_tier", 95,
+                "d5c_prem", 4, "d5c_jr", 60,
+                "d5p_count", 0, "d5p_high_ratio", 0, "d5p_spread", 0,
+                "d5f_nuke", 0, "d5f_avg", 10);
     }
 
     private static Map<String, BigDecimal> fullMetrics() {
@@ -379,12 +693,21 @@ class BoardScoreCalculatorTest {
                 "index1_pct", 1.5, "index2_pct", 1.5, "index3_pct", 1.5,
                 "turnover_ratio", 1.3, "red_ratio", 0.7, "limit_up_count", 90, "limit_down_count", 0,
                 "zt_gather_pct", 40, "height_gather_pct", 90, "amount_gather_pct", 40,
-                "catalyst_hardness", 5, "persistence_days", 5,
-                "first_count", 60, "first_sealed_rate", 85, "first_premium_pct", 4, "first_promo_1to2_rate", 30,
-                "first_1to2_big_count", 0,
-                "dragon_zong_long", 95, "dragon_zhong_jun", 95, "dragon_gen_feng", 95,
-                "dragon_ka_wei", 95, "dragon_fan_bao", 95));
+                "catalyst_hardness", 5, "persistence_days", 5));
+        metrics.putAll(firstFullMetrics());
+        metrics.putAll(d5Metrics());
         return metrics;
+    }
+
+    /** D4 首板生态纯 T 日五子全部喂满 95 档（封单质量复合子两叶齐 95）。 */
+    private static Map<String, BigDecimal> firstFullMetrics() {
+        return m(
+                "first_count", 60,
+                "first_sealed_rate", 85,
+                "first_bomb_rate", 5,
+                "first_avg_seal_amount", 4,
+                "first_yizi_ratio", 35,
+                "first_theme_gather_pct", 45);
     }
 
     private static NodeEval subEval(List<NodeEval> nodes, String key) {

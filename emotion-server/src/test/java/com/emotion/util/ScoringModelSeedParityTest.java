@@ -187,15 +187,11 @@ class ScoringModelSeedParityTest {
         assertEquals(expectedCount, byDimSub.size(),
                 "five_dim_v2 sub 种子行数与 builtinTree 展开数不一致（多/少=某层或某叶未同步）");
 
-        // 权重和口径:D1/D2/D4/D5 一级 sub=1.00,LAYER 层=1.00,炸板质量叶=1.00;
-        // D3(board)按 spec 25/20/20/15/10=0.90(引擎按已评子权重和归一化,允许 ≠1)。
+        // 权重和口径:五个维一级 sub 全部=1.00,LAYER 层=1.00,炸板质量叶=1.00。
+        // double 连加（如 D5 的 .35+.30+.20+.15）会出现 0.9999999999999999 的 IEEE 误差，
+        // 四舍五入到 2 位再比：真正的权重错误（如 .14）仍会立刻红。
         for (DimNode d : tree.getDims()) {
-            double dimSum = sumChildWeights(d.getSubs());
-            if ("board".equals(d.getDimKey())) {
-                assertBdConst(dimSum, "0.90", "board 一级 sub 权重和(spec=25/20/20/15/10)");
-            } else {
-                assertWeightSumOne(dimSum, "dim=" + d.getDimKey() + " 一级 sub 权重和");
-            }
+            assertWeightSumOne(sumChildWeights(d.getSubs()), "dim=" + d.getDimKey() + " 一级 sub 权重和");
             for (SubNode s : d.getSubs()) {
                 if (s.getChildren() != null && !s.getChildren().isEmpty()) {
                     assertWeightSumOne(sumChildWeights(s.getChildren()),
@@ -299,7 +295,8 @@ class ScoringModelSeedParityTest {
     // ==================== 通用小工具 ====================
 
     private static void assertWeightSumOne(double sum, String label) {
-        assertBdConst(sum, "1", label);
+        double rounded = Math.round(sum * 100.0) / 100.0;
+        assertBdConst(rounded, "1", label);
     }
 
     private static void assertBdConst(double sum, String expected, String label) {

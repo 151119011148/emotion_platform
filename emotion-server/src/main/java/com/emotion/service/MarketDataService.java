@@ -30,6 +30,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.emotion.dto.MarketFields;
 import com.emotion.entity.IndexClose;
 import com.emotion.entity.MarketStock;
+import com.emotion.entity.ZtPerf;
 import com.emotion.mapper.MarketStockMapper;
 import com.emotion.market.EastmoneyClient;
 import com.emotion.market.MarketDataException;
@@ -90,6 +91,7 @@ public class MarketDataService {
     private final TencentClient tencent;
     private final StockPoolWriter stockPoolWriter;
     private final PremiumTierStore premiumTierStore;
+    private final ZtPerfStore ztPerfStore;
     private final IndexCloseStore indexCloseStore;
     private final MarketStockMapper marketStockMapper;
     private final ExecutorService executor;
@@ -104,6 +106,7 @@ public class MarketDataService {
                              TencentClient tencent,
                              StockPoolWriter stockPoolWriter,
                              PremiumTierStore premiumTierStore,
+                             ZtPerfStore ztPerfStore,
                              IndexCloseStore indexCloseStore,
                              MarketStockMapper marketStockMapper,
                              @Qualifier("marketExecutor") ExecutorService executor,
@@ -114,6 +117,7 @@ public class MarketDataService {
         this.tencent = tencent;
         this.stockPoolWriter = stockPoolWriter;
         this.premiumTierStore = premiumTierStore;
+        this.ztPerfStore = ztPerfStore;
         this.indexCloseStore = indexCloseStore;
         this.marketStockMapper = marketStockMapper;
         this.executor = executor;
@@ -322,6 +326,51 @@ public class MarketDataService {
     }
 
     /**
+     * 1 进 2 大面全样本回补：脚本把昨日涨停池每只票今日涨跌幅（日 K / 东财昨涨停板块）POST 上来，
+     * 服务端按库里的昨日池归档成 t_zt_perf（<b>含首板</b>）。打分与首板成绩单读的就是这张表。
+     * 与 {@link #savePremiumTiers} 同一哲学：脚本只搬运，归档/落库只此一份口径。
+     */
+    public com.emotion.vo.ZtPerfVO saveZtPerf(LocalDate date, Map<String, BigDecimal> pctByCode,
+                                             String rawSource) {
+        if (date == null) {
+            throw new MarketDataException("必须指定 tradeDate");
+        }
+        LocalDate prevDate = prevPoolDate(date);
+        if (prevDate == null) {
+            throw new MarketDataException(date + " 之前没有涨停池明细，无法归昨日涨停股表现"
+                    + "（先拉一次 " + date + " 的行情把明细落进库）");
+        }
+        String source = (rawSource == null || rawSource.trim().isEmpty())
+                ? ZtPerfStore.SOURCE_KBAR : rawSource.trim().toUpperCase();
+        if (!ZtPerfStore.SOURCE_QUOTE.equals(source) && !ZtPerfStore.SOURCE_KBAR.equals(source)
+                && !ZtPerfStore.SOURCE_BK.equals(source)) {
+            throw new MarketDataException("source 只支持 QUOTE/KBAR/BK，收到：" + rawSource);
+        }
+        List<PoolRow> prev = poolRows(prevDate);
+        List<ZtPerf> rows = ZtPerfStore.buildRows(date, prev, pctByCode, source);
+        int written = ztPerfStore.replaceForDate(date, rows);
+        if (written < 0) {
+            throw new MarketDataException("交上来的涨跌幅一只都没匹配上 " + prevDate
+                    + " 的涨停池，t_zt_perf 未写（先检查代码键是否为 6 位代码）");
+        }
+        int first = 0;
+        for (PoolRow row : prev) {
+            Integer lbc = row.getLbc();
+            if (lbc == null || lbc <= 1) {
+                first++;
+            }
+        }
+        com.emotion.vo.ZtPerfVO vo = new com.emotion.vo.ZtPerfVO();
+        vo.setTradeDate(date);
+        vo.setPrevTradeDate(prevDate);
+        vo.setTotal(prev.size());
+        vo.setMatched(written);
+        vo.setPrevFirstCount(first);
+        vo.setSource(source);
+        return vo;
+    }
+
+    /**
      * 上一交易日 = 库里最后一个早于 date 且有涨停明细的日期。
      * 系统里没有交易日历表，明细表本身就是"哪天真的交易日过"的记录。
      */
@@ -442,6 +491,26 @@ public class MarketDataService {
         }
     }
 
+    /**
+     * 昨涨停股今日逐只表现落库（含首板）：1 进 2 大面全样本口径的唯一持久来源，
+     * 与档位表同等待遇——写失败只让这一维退回炸板池下界，六个字段照交。
+     */
+    private void writeZtPerf(Snapshot snap, PrevPool prevPool) {
+        try {
+            int written = ztPerfStore.replaceForDate(snap.requestedDate, snap.ztPerfRows);
+            if (written < 0) {
+                snap.notes.add("昨涨停逐只表现未入库（本次没走到报价那一步），保留上一次数据");
+            } else {
+                int total = prevPool == null ? written : Math.max(written, prevPool.result.getTc());
+                snap.notes.add("昨涨停今日表现已入库 " + written + "/" + total
+                        + " 只（含首板；未触板票的 1 进 2 大面靠它补齐）");
+            }
+        } catch (Exception e) {
+            log.warn("昨涨停逐只表现入库失败: {}", e.toString());
+            snap.warnings.add("昨涨停逐只表现入库失败：1 进 2 大面只剩炸板池口径，会系统性偏少");
+        }
+    }
+
     // ---------- 取数 ----------
 
     private Snapshot compute(LocalDate date) {
@@ -520,6 +589,7 @@ public class MarketDataService {
         snap.fields = fields;
         writeDetails(snap, limitUp, limitDown, broken, bigLoss);
         writePremiumTiers(snap);
+        writeZtPerf(snap, prevPool);
         writeIndexCloses(snap, indexBars);
         return snap;
     }
@@ -739,11 +809,15 @@ public class MarketDataService {
         }
         // 档位溢价吃的是同一次批量报价，零新增请求。它比整池均值晚一步被丢弃保护：
         // 整池越界只说明那一个标量不能用，逐档仍可能各自有效。
-        snap.premiumTiers = MarketMetrics.premiumTiers(prevPool.result.getRows(),
-                pctByCode(prevPool.result.getRows(), quotes));
+        Map<String, BigDecimal> pctByCode = pctByCode(prevPool.result.getRows(), quotes);
+        snap.premiumTiers = MarketMetrics.premiumTiers(prevPool.result.getRows(), pctByCode);
         for (String warning : snap.premiumTiers.getWarnings()) {
             snap.warnings.add("档位溢价：" + warning);
         }
+        // 逐只表现也吃同一份报价（含首板！档位表刻意不收首板，1 进 2 大面只能靠这份补未触板票）。
+        // 不新增任何上游请求；落库与档位表并列在 compute() 里，写失败不影响六个字段。
+        snap.ztPerfRows = ZtPerfStore.buildRows(snap.requestedDate, prevPool.result.getRows(),
+                pctByCode, ZtPerfStore.SOURCE_QUOTE);
         MarketMetrics.Premium premium = MarketMetrics.premium(prevPool.result.getRows(), quotes);
         if (premium.getMatched() == 0) {
             snap.warnings.add("溢价未取得：昨日涨停股在今日行情里一只都没匹配上");
@@ -966,6 +1040,8 @@ public class MarketDataService {
         private LocalDate snapshotDate;
         /** 档位溢价：与 yesterdayLimitPremium 同一次报价算出来的分组结果，可能为 null（没走到那一步）。 */
         private MarketMetrics.PremiumTiers premiumTiers;
+        /** 昨涨停股今日逐只表现（含首板）：同一次报价的归档行，可能为 null/空（没走到报价那一步）。 */
+        private List<ZtPerf> ztPerfRows;
         private boolean live;
         private final long computedAt = System.currentTimeMillis();
         private final List<String> notes = new ArrayList<>();

@@ -17,7 +17,7 @@
    - 盘面读数：`0 家跌停`、`0% 封板率` 都是会改变阶段判断的真实读数；`NULL` 才是"没取到"。
    - 打分：某子指标/整维 `NULL` = 未评，打分引擎把该维**从分母剔除**（未评 ≠ 0），既不兜 0 也不补惩罚值。
 2. **公开数据不绑 `user_id`，私人台账才绑。**
-   - 公开（谁复盘都该是同一个事实）：`t_market_stock` / `t_premium_tier` / `t_index_close` / `t_surveillance` / `t_stock` 及打分配置 4 表。
+   - 公开（谁复盘都该是同一个事实）：`t_market_stock` / `t_premium_tier` / `t_zt_perf` / `t_index_close` / `t_surveillance` / `t_stock` 及打分配置 4 表。
    - 私人：`t_daily_record` / `t_position` / `t_prediction` / `t_cycle` / `t_theme` / `t_leading_stock` / `t_anchor` / `t_node_event` / `t_user`。
    - 人工覆盖值（manual_*）只落在自己的 `t_daily_record` 行上，读时叠加到自动值上，**不污染公开表**。
 3. **打分真源是 Java 引擎，不是打分表。** `t_scoring_*` 4 张表只做展示/追溯，引擎运行时不读它们；两者逐字对齐由 `ScoringModelSeedParityTest` 钉死。改引擎常量必须同步种子并跑该测试。
@@ -31,6 +31,7 @@
 | t_daily_record | 每日复盘 | ✓ | 138 | **核心**：每日全部读数/打分/阶段/复盘文本 |
 | t_market_stock | 公开行情 | — | 339 | 涨停/跌停/炸板三池逐只明细 |
 | t_premium_tier | 公开行情 | — | 9 | 各连板档「昨涨停今溢价」 |
+| t_zt_perf | 公开行情 | — | 9 | 昨涨停股今日逐只表现（含首板，1 进 2 大面源） |
 | t_index_close | 公开行情 | — | 20 | 五大指数收盘 |
 | t_stock | 基础数据 | — | 0 | A股代码名称总表 |
 | t_surveillance | 监管 | — | 0 | 异动/严重异动/交易所监管事件 |
@@ -154,7 +155,7 @@
 | manual_first_sealed_rate | decimal(5,2) | 首板封住/(封住+炸)%，D4 封板率 |
 | manual_top_high_break | tinyint | 极高位是否爆量断板未回封(1是)，强制退潮条件4闸门 |
 | manual_anchor_supervision_discount | decimal(3,2) | 阵眼监管折扣乘数(0-1)，空=不打折 |
-| manual_amount_gather_pct | decimal(6,2) | v2 成交额聚集度%=主线成交额/两市 |
+| ~~manual_amount_gather_pct~~ | decimal(6,2) | 【已停用/不再进分】旧两市口径；D2 成交额聚集度固定=主线涨停股 amount/全部涨停股 amount（自动） |
 
 **汇总 / 阶段**
 
@@ -213,6 +214,7 @@
 | pullback_pct | decimal(6,2) | 是 | 自涨停回撤%（炸板池） |
 | big_loss | tinyint | 是 | 大面：回撤>7% 且收盘绿 |
 | seal_amount | decimal(18,2) | 是 | 封单额(元)=东财 fund，收盘封单资金 |
+| amount | decimal(18,2) | 是 | 当日成交额(元)=东财池接口 amount；D2 成交额聚集度取数源（池内口径，历史行可空） |
 | first_seal_time | int | 是 | 首次封板时间 HHMMSS(fbt)，判一字/T字 |
 | last_seal_time | int | 是 | 最后封板时间 HHMMSS(lbt) |
 | created_at | datetime | 是 | |
@@ -232,6 +234,22 @@
 | avg_pct | decimal(7,2) | 是 | 该档算术平均涨幅% |
 | max_pct | decimal(7,2) | 是 | 最大涨幅% |
 | min_pct | decimal(7,2) | 是 | 最小涨幅% |
+| created_at | datetime | 是 | |
+
+### t_zt_perf — 昨涨停股今日逐只表现（含首板）
+- 唯一键 `uk_date_code (trade_date, code)`；索引 `idx_date_prev(trade_date,prev_consecutive)`
+- t_premium_tier 刻意不收首板，本表逐只全收（含首板）：未触板票不在三池里，1 进 2 大面只能靠它补齐。
+- 实时快照随批量报价落（QUOTE）；历史由脚本日 K/BK0815 POST `/api/market/zt-perf` 回补（KBAR/BK）。
+
+| 列 | 类型 | 空 | 含义 |
+|---|---|:-:|---|
+| id | bigint PK | 否 | |
+| trade_date | date·MUL | 否 | 表现日 D（昨日涨停股今天的涨跌） |
+| code | varchar(6) | 否 | 6 位代码 |
+| name | varchar(20) | 否 | 证券简称 |
+| prev_consecutive | int | 否 | D-1 连板数：1=昨首板（1 进 2 分母口径） |
+| change_pct | decimal(6,2) | 否 | D 收盘涨跌幅%（相对昨收=昨涨停价） |
+| source | varchar(8) | 否 | QUOTE=批量快照 / KBAR=日K回补 / BK=东财昨涨停板块 |
 | created_at | datetime | 是 | |
 
 ### t_index_close — 五大指数收盘
@@ -489,9 +507,13 @@ PLAN 与 ANSWER 不互相拷贝；命中率由次日 ANSWER 按名称 join 前�
 | note | varchar(200) | 是 | |
 | created_at / updated_at | datetime | 是 | |
 
-**最近变更（2026-09-11）**：five_dim 与 five_dim_v2 两模型的 `market / index_env` 新增
-`rule_no=4  operator=COMPOUND  score=35  formula='三指全绿但均未破-1%(弱跌日)'`，
-原 ELSE 60 顺延为 `rule_no=5`。对应引擎常量 `BoardScoreCalculator.INDEX_ENV_ALL_SOFT_DOWN=35`。
+**最近变更（2026-09-11 大盘生态 v2.1）**：`market` 三个子指标换算法——`index_env`
+改连续函数 `clamp(50 + 三指均值%×30, 0, 100)`（锚点 0%→50 / -1%→20 / +1.5%→95，原阶梯档位常量已删除）；
+`turnover` 由 BAND_LADDER 改 STRATEGY（基础阶梯 90/70/45/25 再乘价量配合系数：放量涨1.2/
+平量涨1.1/缩量涨0.9/缩量跌0.6/平量跌0.35/放量跌0.3/放量暴跌0.15，封顶100；v2.1.1 收紧下跌侧重排，
+保证普跌日量能贡献严格低于指数贡献）；`breadth` 阶梯扩成 7 档 85/55/30/10/5/0/0，
+`<0.13`(≈涨跌家数比>7:1) 起逐级惩罚。阈值/系数常量统一在 `BoardScoreCalculator` 顶部 v2.1 注释区，
+改算法必须同步跑 `ScoringModelSeedParityTest`，并重放 schema.sql 尾部的存量迁移。
 
 ---
 

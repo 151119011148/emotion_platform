@@ -26,6 +26,8 @@ public class PoolRow {
     private BigDecimal price;
     /** 封单额（元）= 东财 fund，收盘封单资金。 */
     private BigDecimal fund;
+    /** 当日成交额（元）= 东财池接口 amount；D2 成交额聚集度（涨停池内资金板块占比）取数源。 */
+    private BigDecimal amount;
     /** 首次封板时间 HHMMSS（fbt）。92500=集合竞价封单。 */
     private Integer fbt;
     /** 最后封板时间 HHMMSS（lbt）。 */

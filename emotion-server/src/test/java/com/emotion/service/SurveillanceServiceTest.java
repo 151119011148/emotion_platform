@@ -79,15 +79,19 @@ class SurveillanceServiceTest {
         assertNull(SurveillanceService.memberOf(events, date("2026-08-21"), DAYS));
     }
 
-    /** 普通异常波动只给 3 个交易日——三档窗口里唯一会在一周内自己走完的。 */
+    /** 普通异常波动给 5 个交易日（D5 PRD 口径）——例行公告只展示不进分。 */
     @Test
-    void abnormalMoveWindowIsThreeTradingDays() {
+    void abnormalMoveWindowIsFiveTradingDays() {
         List<Surveillance> events = Arrays.asList(
                 event("605577", "龙版传媒", "2026-09-02", SurveillanceKind.ZD));
 
         assertEquals(1, SurveillanceService.memberOf(events, date("2026-09-03"), DAYS).getDayIndex());
         assertEquals(3, SurveillanceService.memberOf(events, date("2026-09-07"), DAYS).getDayIndex());
-        assertNull(SurveillanceService.memberOf(events, date("2026-09-08"), DAYS));
+        assertEquals(5, SurveillanceService.memberOf(events, date("2026-09-09"), DAYS).getDayIndex());
+        // 第 6 个交易日出窗：DAYS 只到 09-09，补两个交易日才能判
+        List<LocalDate> throughNextWeek = new ArrayList<>(DAYS);
+        throughNextWeek.add(date("2026-09-10"));
+        assertNull(SurveillanceService.memberOf(events, date("2026-09-10"), throughNextWeek));
     }
 
     /**
@@ -155,7 +159,7 @@ class SurveillanceServiceTest {
         assertNotNull(member);
         assertEquals(1, member.getEvents().size());
         assertEquals(1, member.getDayIndex());
-        assertEquals(3, member.getDays());
+        assertEquals(5, member.getDays());
         assertFalse(member.describe().contains(" + "));
     }
 

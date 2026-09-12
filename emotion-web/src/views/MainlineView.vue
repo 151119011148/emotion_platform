@@ -28,7 +28,6 @@
         style="margin: 16px 0" />
 
       <DimScoreBlock :date="date" dim-key="theme_main" title="D2 · 主线明确度" />
-      <DimScoreBlock :date="date" dim-key="anchor" title="D5 · 阵眼" />
 
       <!-- 生命周期轨道 -->
       <section class="block" v-loading="loading">

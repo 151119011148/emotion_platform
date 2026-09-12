@@ -22,6 +22,8 @@ import com.emotion.entity.MarketStock;
 import com.emotion.mapper.MarketStockMapper;
 import com.emotion.market.MarketMetrics;
 import com.emotion.market.PoolCounts;
+import com.emotion.market.StockPatterns;
+import com.emotion.util.BoardScoreCalculator;
 
 /**
  * 五维模型的「自动取数聚合器」：把 {@code t_market_stock}(日频个股连板)、{@code t_premium_tier}(逐档溢价)、
@@ -32,8 +34,12 @@ import com.emotion.market.PoolCounts;
  * 缺读数时引擎按已评权重归一化，人工列（Stage 5 在此之上叠加）补齐取不到的定性/首板溢价项。
  *
  * <p>四层（低/中/中高/极高）按<b>当日最高板 H 动态划界</b>（见 {@link #layerOf}），跨日按 code 匹配算晋级/大面：
- * 晋级率用"今 b 板家数 / 昨 b-1 板家数"，大面用"昨 b 板且今日炸成大面的家数"。上游未落 ZB 的连板数，故大面只能
+ * 晋级率用"今 b 板家数 / 昨 b-1 板家数"，大面用"昨 b 板且今日炸成大面的家数"。上游未落 ZB 的连板数，故四层大面只能
  * 靠昨日涨停池归属，非涨停来源的大面不计入（连板生态口径下的近似，已在 R3 里记为已知取数边界）。
+ *
+ * <p>1 进 2 大面比四层多一条<b>收盘口径</b>：昨首板今天低开闷杀、全天未触板的票不在任何池子里，
+ * 只数炸板池 big_loss 是系统性下界（09-11：22 只失败只数出 1 只，实有 5 只）；这类票的今日涨跌幅
+ * 由 t_zt_perf（昨涨停股今日逐只表现，含首板）补齐，收盘跌 &gt;7% 一并计入。
  */
 @Service
 public class LadderMetricsService {
@@ -48,19 +54,27 @@ public class LadderMetricsService {
     private final MarketStockMapper marketStockMapper;
     private final PremiumTierStore premiumTierStore;
     private final IndexCloseStore indexCloseStore;
+    private final ZtPerfStore ztPerfStore;
+    private final CrossDayQuoteAugmentor quoteAugmentor;
 
     public LadderMetricsService(MarketStockMapper marketStockMapper,
                                 PremiumTierStore premiumTierStore,
-                                IndexCloseStore indexCloseStore) {
+                                IndexCloseStore indexCloseStore,
+                                ZtPerfStore ztPerfStore,
+                                CrossDayQuoteAugmentor quoteAugmentor) {
         this.marketStockMapper = marketStockMapper;
         this.premiumTierStore = premiumTierStore;
         this.indexCloseStore = indexCloseStore;
+        this.ztPerfStore = ztPerfStore;
+        this.quoteAugmentor = quoteAugmentor;
     }
 
     /** 从库里读当天+前一交易日明细，产出 metrics；record 为合并了客观日表的 carrier，recent 为全局客观日历史窗。 */
     public Map<String, BigDecimal> build(LocalDate date, DailyRecord record, List<MarketDaily> recent) {
         List<MarketStock> todayZT = listPool(date, MarketStock.POOL_LIMIT_UP);
         List<MarketStock> todayLoss = listBigLoss(date);
+        // 今日全量炸板池（不限 big_loss）：首板炸板率按"首板封住 vs 首板炸板"的家数口径，需要全量 ZB。
+        List<MarketStock> todayZB = listPool(date, MarketStock.POOL_BROKEN);
         List<MarketStock> prevZT = Collections.emptyList();
         LocalDate prev = safePrevDetailDate(date);
         if (prev != null) {
@@ -73,7 +87,30 @@ public class LadderMetricsService {
             tiers = pt.getTiers();
         }
         List<IndexClose> idx = indexCloseStore.read(date);
-        return aggregate(todayZT, todayLoss, prevZT, pools, tiers, idx, record, recent);
+        // 昨涨停种子（各板高）今日的统一逐只报价：三池行内价 → t_zt_perf → 最新交易日腾讯兜底。
+        // 低位溢价/大面与天梯失败名单共用这一份，避免"页面有价、打分漏数"（09-11 渝三峡/国创高新即此问题）。
+        Map<String, BigDecimal> seedPct = quoteAugmentor.todayPoolPct(date);
+        for (Map.Entry<String, BigDecimal> e : safeReadPerf(date).entrySet()) {
+            seedPct.putIfAbsent(e.getKey(), e.getValue());
+        }
+        if (!prevZT.isEmpty()) {
+            List<String> seedCodes = new ArrayList<>();
+            for (MarketStock row : prevZT) {
+                if (row.getCode() != null) {
+                    seedCodes.add(row.getCode());
+                }
+            }
+            seedPct = quoteAugmentor.augmentGone(date, seedCodes, seedPct);
+        }
+        return aggregate(todayZT, todayLoss, todayZB, prevZT, pools, tiers, idx, record, recent, seedPct);
+    }
+
+    private Map<String, BigDecimal> safeReadPerf(LocalDate date) {
+        try {
+            return ztPerfStore.readPctByCode(date);
+        } catch (RuntimeException e) {
+            return Collections.emptyMap();
+        }
     }
 
     /**
@@ -81,17 +118,21 @@ public class LadderMetricsService {
      *
      * @param todayZT   当日涨停池明细（consecutive=今连板数）
      * @param todayLoss 当日大面明细（ZB 池且 big_loss=1）
+     * @param todayZB   当日全量炸板池明细（首板炸板率口径，不限 big_loss）
      * @param prevZT    前一交易日涨停池明细（consecutive=昨连板数），用于跨日匹配
      * @param pools     当日三池家数（封板率/回封率用）
-     * @param tiers     当日逐档溢价（board=昨连板数）
+     * @param tiers     当日逐档溢价（board=昨连板数，1=昨首板）
      * @param idx       当日指数收盘
      * @param record    当日客观读数 carrier（由 t_market_daily 合并：涨跌家数、量能、涨跌停、最高板兜底）
      * @param recent    该日之前若干交易日的<b>全局客观日行</b>（倒序），量能 20 日均用
+     * @param perfPct   当日"昨涨停股今日表现"逐只涨跌幅（code→%，含首板）；未触板票的大面只能靠它
      */
     static Map<String, BigDecimal> aggregate(List<MarketStock> todayZT, List<MarketStock> todayLoss,
+                                             List<MarketStock> todayZB,
                                              List<MarketStock> prevZT, PoolCounts pools,
                                              List<MarketMetrics.TierPremium> tiers, List<IndexClose> idx,
-                                             DailyRecord record, List<MarketDaily> recent) {
+                                             DailyRecord record, List<MarketDaily> recent,
+                                             Map<String, BigDecimal> perfPct) {
         Map<String, BigDecimal> out = new TreeMap<>();
 
         Map<Integer, Integer> todayByBoard = countByBoard(todayZT);
@@ -111,33 +152,40 @@ public class LadderMetricsService {
 
         Map<String, Integer> prevCodeBoard = codeToBoard(prevZT);
         Set<String> lossCodes = lossCodes(todayLoss);
-        // 1->2 promo rate needs yesterday's first-board denominator; putRate skips when missing.
-        putRate(out, "first_promo_1to2_rate", todayByBoard.get(2), prevByBoard.get(1));
-        // 1->2 big-loss count needs yesterday's pool to attribute against; skip rather than emit false 0.
-        if (!prevZT.isEmpty()) {
-            int firstToTwoBig = 0;
-            for (Map.Entry<String, Integer> e : prevCodeBoard.entrySet()) {
-                if (e.getValue() != null && e.getValue() == 1 && lossCodes.contains(e.getKey())) {
-                    firstToTwoBig++;
-                }
+        // 今日仍在涨停池的 code：跨日归属大面时先剔除（封住的票不可能是大面）。
+        Set<String> todayZtCodes = new HashSet<>();
+        for (MarketStock row : todayZT) {
+            if (row.getCode() != null) {
+                todayZtCodes.add(row.getCode());
             }
-            out.put("first_1to2_big_count", BigDecimal.valueOf(firstToTwoBig));
         }
+        Map<String, BigDecimal> perf = perfPct == null
+                ? Collections.<String, BigDecimal>emptyMap() : perfPct;
 
-        // 四层：仅在能定界(有 H)时产出；各层家数/溢价/大面缺样本则该键缺席
+        // 四层（时间截面 PRD v2.0：全部 T-1→T；低位层种子=昨日首板，1进2已并入 jr/prem/big_low）
         if (h != null && h >= 2) {
-            computeLayers(out, h, todayByBoard, prevByBoard, prevCodeBoard, lossCodes, tiers);
+            computeLayers(out, h, todayByBoard, prevByBoard, prevCodeBoard, lossCodes,
+                    tiers, prevZT, todayZtCodes, perf);
         }
 
-        // 炸板质量（家数封板率 / 回封率）用三池家数现算
+        // ---- D4 首板生态（纯 T 日）：只看今天新诞生的首板与首板炸板 ----
+        if (!todayZT.isEmpty()) {
+            buildFirstBoardDayMetrics(out, todayZT, todayZB, !prevZT.isEmpty(), prevCodeBoard);
+        }
+
+        // 炸板质量（家数封板率 / 回封率）用三池家数现算。
+        // 回封率口径必须与 MarketMetrics.resealRate / 落库列 / 复盘页完全一致：
+        // 分子=涨停池中炸板后又封住的家数，分母=分子+炸板池家数（所有开过板的个股），
+        // 只除以炸板家数会在"回封比炸板多"的日子算出 >100%（如 09-11 21/18=116.67%）。
         if (pools != null && !pools.isEmpty()) {
             int zt = pools.getZtCount();
             int zb = pools.getZbCount();
             if (zt + zb > 0) {
                 out.put("sealed_home_rate", pct(zt, zt + zb));
             }
-            if (zb > 0) {
-                out.put("reseal_rate", pct(pools.getResealCount(), zb));
+            int opened = pools.getResealCount() + zb;
+            if (opened > 0) {
+                out.put("reseal_rate", pct(pools.getResealCount(), opened));
             }
         }
 
@@ -152,10 +200,17 @@ public class LadderMetricsService {
         return out;
     }
 
+    /**
+     * 四层指标（时间截面 PRD v2.0）。层级一律以<b>今日板高</b>命名：
+     * 低位=今2板(种子昨1板)、中位=今3-4板、中高/极高动态划界。
+     * jr 用今 b 板/昨 b-1 板（本就是今日视角）；prem/big 的种子是昨 b 板，归 layerIndex(b+1,h)。
+     */
     private static void computeLayers(Map<String, BigDecimal> out, int h,
                                       Map<Integer, Integer> todayByBoard, Map<Integer, Integer> prevByBoard,
                                       Map<String, Integer> prevCodeBoard, Set<String> lossCodes,
-                                      List<MarketMetrics.TierPremium> tiers) {
+                                      List<MarketMetrics.TierPremium> tiers,
+                                      List<MarketStock> prevZT, Set<String> todayZtCodes,
+                                      Map<String, BigDecimal> perf) {
         String[] keyPrefix = {"jr", "prem", "big"};
         String[] layerSuffix = {"low", "mid", "midhigh", "top"};
         for (String p : keyPrefix) {
@@ -171,28 +226,66 @@ public class LadderMetricsService {
                     }
                     for (int li = 0; li < 4; li++) {
                         putRate(out, keyPrefix[0] + "_" + layerSuffix[li], num[li], den[li]);
+                        // 昨日基数家数：引擎用它判"小样本×0.8"；只在当日真实存在的层出键，
+                        // 且 den=0 不出（没有基数既不是 0 家也不是小样本，而是该晋级率未评）。
+                        if (den[li] > 0 && BoardScoreCalculator.layerActive(li, h)) {
+                            out.put("jr_" + layerSuffix[li] + "_base", BigDecimal.valueOf(den[li]));
+                        }
                     }
                     break;
                 case "big":
                     if (prevCodeBoard.isEmpty()) {
                         break; // no yesterday pool: cannot attribute big-loss to layers; keys stay absent
                     }
-                    for (Map.Entry<String, Integer> e : prevCodeBoard.entrySet()) {
-                        Integer b = e.getValue();
-                        if (b != null && b >= 2 && lossCodes.contains(e.getKey())) {
-                            count[layerIndex(b, h)]++;
+                    int[] seedBase = new int[4];
+                    for (MarketStock prev : prevZT) {
+                        Integer b = prev.getConsecutive() == null ? 1 : prev.getConsecutive();
+                        String code = prev.getCode();
+                        if (code == null || b < 1 || b > h) {
+                            continue; // 种子板高超出今日 H（其目标层不存在=N/A）
+                        }
+                        int li = layerIndex(b + 1, h);
+                        if (BoardScoreCalculator.layerActive(li, h)) {
+                            seedBase[li]++;
+                        }
+                        if (todayZtCodes.contains(code)) {
+                            continue; // 今日仍封住=不是大面
+                        }
+                        // 种子昨 b 板 → 今 b+1 板层；炸板 big_loss ∪ 未触板收盘跌>7%（统一报价 map 补价）并集
+                        boolean zbBigLoss = lossCodes.contains(code);
+                        if (!MarketMetrics.firstToTwoBigLoss(zbBigLoss, perf.get(code))) {
+                            continue;
+                        }
+                        if (BoardScoreCalculator.layerActive(li, h)) {
+                            count[li]++;
                         }
                     }
                     for (int li = 0; li < 4; li++) {
+                        // 本日无此板高层 → 键缺席（引擎标 N/A），不能用 0 命中"EQ 0→95"给不存在的层发满分
+                        if (!BoardScoreCalculator.layerActive(li, h)) {
+                            continue;
+                        }
                         out.put("big_" + layerSuffix[li], BigDecimal.valueOf(count[li]));
+                        // 大面率 = 大面家数 / 该层种子数（小样本比家数更公平，引擎阶梯按率打分）
+                        if (seedBase[li] > 0) {
+                            out.put("big_" + layerSuffix[li] + "_rate", pct(count[li], seedBase[li]));
+                            out.put("big_" + layerSuffix[li] + "_base", BigDecimal.valueOf(seedBase[li]));
+                        }
                     }
                     break;
                 case "prem":
+                    // 低位溢价 = 昨首板<b>全样本</b>今日均涨跌幅（三池∪perf∪腾讯统一报价），
+                    // 不依赖 t_premium_tier 是否落 board=1 档（09-11 未落档，旧链路只能靠人工列兜底）。
+                    premLowFromSeed(out, prevZT, perf);
                     for (MarketMetrics.TierPremium t : tiers) {
                         if (t.getBoard() < 2 || t.getAvgPct() == null) {
+                            continue; // board=1 已由全样本自关联计算；board≥2 走档位
+                        }
+                        // 种子昨 board 板 → 今 board+1 板层（旧实现按 layerIndex(board) 整体错位一层）
+                        int li = layerIndex(t.getBoard() + 1, h);
+                        if (!BoardScoreCalculator.layerActive(li, h)) {
                             continue;
                         }
-                        int li = layerIndex(t.getBoard(), h);
                         // 用档位家数做权重，聚合到该层再加权平均
                         BigDecimal w = BigDecimal.valueOf(Math.max(1, t.getStockCount()));
                         out.merge("prem_" + layerSuffix[li] + "__num", t.getAvgPct().multiply(w), BigDecimal::add);
@@ -209,6 +302,31 @@ public class LadderMetricsService {
                 default:
                     break;
             }
+        }
+    }
+
+    /**
+     * 低位溢价 = 昨日首板（consecutive=1）<b>全样本</b>今日均涨跌幅%（含成功与失败，失败价靠统一报价 map）。
+     * 无价样本跳过（不按 0 计）；一个价都没有则不出键（未评）。
+     */
+    private static void premLowFromSeed(Map<String, BigDecimal> out, List<MarketStock> prevZT,
+                                        Map<String, BigDecimal> seedPct) {
+        BigDecimal sum = BigDecimal.ZERO;
+        int n = 0;
+        for (MarketStock prev : prevZT) {
+            Integer b = prev.getConsecutive() == null ? 1 : prev.getConsecutive();
+            if (b != 1 || prev.getCode() == null) {
+                continue;
+            }
+            BigDecimal p = seedPct.get(prev.getCode());
+            if (p != null) {
+                sum = sum.add(p);
+                n++;
+            }
+        }
+        if (n > 0) {
+            out.put("prem_low", sum.divide(BigDecimal.valueOf(n), 2, RoundingMode.HALF_UP));
+            out.put("prem_low_base", BigDecimal.valueOf(n));
         }
     }
 
@@ -261,6 +379,84 @@ public class LadderMetricsService {
             }
         }
         return s;
+    }
+
+    /**
+     * D4 首板生态·纯 T 日指标：今日新首板（ZT 连板=1）的封住/炸板、封板率/炸板率、均封单、一字占比、题材聚集。
+     * 首板炸板=今日 ZB 池中昨日不在涨停池的票（与 ShoubanService 同口径）；昨日明细缺失时不出两个率，
+     * 避免把连板炸板误算成首板炸板。
+     */
+    private static void buildFirstBoardDayMetrics(Map<String, BigDecimal> out,
+                                                   List<MarketStock> todayZT, List<MarketStock> todayZB,
+                                                   boolean prevAvailable, Map<String, Integer> prevCodeBoard) {
+        List<MarketStock> firstRows = new ArrayList<>();
+        for (MarketStock row : todayZT) {
+            if (row.getConsecutive() != null && row.getConsecutive() == 1) {
+                firstRows.add(row);
+            }
+        }
+        int sealed = firstRows.size();
+        if (prevAvailable) {
+            int bombed = 0;
+            for (MarketStock row : todayZB) {
+                if (row.getCode() != null && !prevCodeBoard.containsKey(row.getCode())) {
+                    bombed++;
+                }
+            }
+            int attempts = sealed + bombed;
+            if (attempts > 0) {
+                out.put("first_sealed_rate", pct(sealed, attempts));
+                out.put("first_bomb_rate", pct(bombed, attempts));
+            }
+        }
+        // 首板均封单：只均有封单额的样本
+        BigDecimal sealSum = BigDecimal.ZERO;
+        int sealN = 0;
+        for (MarketStock row : firstRows) {
+            if (row.getSealAmount() != null) {
+                sealSum = sealSum.add(row.getSealAmount());
+                sealN++;
+            }
+        }
+        if (sealN > 0) {
+            // 单位=亿元（阶梯阈值受 t_scoring_rule DECIMAL(10,2) 限制，元值放不下）
+            BigDecimal avgYuan = sealSum.divide(BigDecimal.valueOf(sealN), 0, RoundingMode.HALF_UP);
+            out.put("first_avg_seal_amount",
+                    avgYuan.divide(BigDecimal.valueOf(100000000L), 2, RoundingMode.HALF_UP));
+        }
+        // 一字首板占比：只在能判形态（有首封时间）的样本里统计
+        int patternN = 0;
+        int yizi = 0;
+        for (MarketStock row : firstRows) {
+            if (row.getFirstSealTime() == null) {
+                continue;
+            }
+            patternN++;
+            if (StockPatterns.ONE_LINE.equals(StockPatterns.of(row))) {
+                yizi++;
+            }
+        }
+        if (patternN > 0) {
+            out.put("first_yizi_ratio", pct(yizi, patternN));
+        }
+        // 首板题材聚集度：最热行业首板数/有行业归属的首板总数
+        Map<String, Integer> byIndustry = new HashMap<>();
+        int industryN = 0;
+        for (MarketStock row : firstRows) {
+            String ind = row.getIndustry();
+            if (ind == null || ind.trim().isEmpty()) {
+                continue;
+            }
+            byIndustry.merge(ind, 1, Integer::sum);
+            industryN++;
+        }
+        if (industryN > 0) {
+            int top = 0;
+            for (Integer n : byIndustry.values()) {
+                top = Math.max(top, n);
+            }
+            out.put("first_theme_gather_pct", pct(top, industryN));
+        }
     }
 
     private static Integer maxHeight(Map<Integer, Integer> todayByBoard, DailyRecord record) {

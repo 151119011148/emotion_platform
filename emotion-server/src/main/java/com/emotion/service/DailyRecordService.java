@@ -240,7 +240,9 @@ public class DailyRecordService {
         record.setScoreThemeMain(r.getDimScores().get("theme_main"));
         record.setScoreBoard(r.getDimScores().get("board"));
         record.setScoreFirst(r.getDimScores().get("first"));
-        record.setScoreAnchor(r.getDimScores().get("anchor"));
+        // 2026-09-12 D5 融合：第 5 维 dimKey 由 anchor（龙头分工）换为 high（高位生态）。
+        // 旧 score_anchor 列不再写新值（载体上有历史值就保留=留痕；新行自然为 NULL）。
+        record.setScoreHigh(r.getDimScores().get("high"));
         record.setSignalFlags(r.getSignalFlags().isEmpty() ? null : String.join(",", r.getSignalFlags()));
         record.setForcedEbb(r.isForcedEbb() ? 1 : 0);
         record.setForcedEbbReason(r.getForcedEbbReason());
@@ -295,6 +297,8 @@ public class DailyRecordService {
         vo.setSignalFlags(r.getSignalFlags());
         vo.setForcedEbb(r.isForcedEbb());
         vo.setForcedEbbReason(r.getForcedEbbReason());
+        vo.setEcologyDivergence(r.getEcologyDivergence());
+        vo.setEcologyDivergenceLabel(r.getEcologyDivergenceLabel());
         vo.setSource(fromDb ? "DB" : "BUILTIN");
         if (in.getMetrics() != null) {
             vo.setMetrics(new java.util.LinkedHashMap<>(in.getMetrics()));
@@ -475,6 +479,7 @@ public class DailyRecordService {
         if (present.contains("manualFirstSealedRate")) record.setManualFirstSealedRate(req.getManualFirstSealedRate());
         if (present.contains("manualTopHighBreak")) record.setManualTopHighBreak(req.getManualTopHighBreak());
         if (present.contains("manualAnchorSupervisionDiscount")) record.setManualAnchorSupervisionDiscount(req.getManualAnchorSupervisionDiscount());
+        // 旧两市口径人工列：仅存档兼容，不再参与 D2 打分（成交额聚集度固定涨停股口径自动值）。
         if (present.contains("manualAmountGatherPct")) record.setManualAmountGatherPct(req.getManualAmountGatherPct());
 
         if (req.getMainTheme() != null) record.setMainTheme(req.getMainTheme());

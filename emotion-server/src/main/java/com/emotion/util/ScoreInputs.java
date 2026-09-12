@@ -68,6 +68,12 @@ public class ScoreInputs {
     /** Effective five-dim scoring tree snapshot (null = fall back to BoardScoreCalculator.builtinTree()). */
     private ScoringTree scoringTree;
 
+    /**
+     * D5 高位生态取数结构化结果（阵眼/抱团/监管四子项事实 + 交叉信号）。
+     * 与 metrics 同源同一次装配：metrics 喂引擎，这份 VO 直接给 /api/d5/high，避免接口侧再算一遍。
+     */
+    private com.emotion.vo.HighEcoVO highEcoVo;
+
     public BigDecimal metric(String key) {
         return metrics == null ? null : metrics.get(key);
     }

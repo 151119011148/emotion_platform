@@ -19,6 +19,13 @@ public final class MarketMetrics {
     /** 03 篇：大面 = 从涨停/大涨砸到绿盘，日内回撤 > 7%。 */
     public static final BigDecimal BIG_LOSS_PULLBACK = BigDecimal.valueOf(7);
 
+    /**
+     * 1 进 2 口径的<b>收盘</b>大面线：昨日收在涨停价（=昨收），今日收盘跌幅 {@code >7%}
+     * 即"从昨涨停砸下来回撤 &gt;7% 且收绿"，与 {@link #BIG_LOSS_PULLBACK} 同一个 7%，
+     * 只是参照价换成昨日涨停价，算式因此直接等于今日涨跌幅 {@code < -7%}（严格不等）。
+     */
+    public static final BigDecimal CLOSE_BIG_LOSS_PCT = BigDecimal.valueOf(-7);
+
     private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
 
     private MarketMetrics() {
@@ -275,6 +282,25 @@ public final class MarketMetrics {
         BigDecimal mean() {
             return sum.divide(BigDecimal.valueOf(matched), 2, RoundingMode.HALF_UP);
         }
+    }
+
+    /**
+     * 1 进 2 失败票是不是大面，两条路取并集（打分与首板成绩单共用这一个判据，避免各算各的）：
+     * <ul>
+     *   <li>(a) 今日炸板且 big_loss=1：冲 2 板当日被砸，参照价是今日涨停价（回撤&gt;7%且收绿）；</li>
+     *   <li>(b) 今日收盘涨跌幅 &lt; −7%：低开闷杀甚至跌停、全天没触板的票——它们不在 ZT/ZB/DT
+     *       任何池子里，只能靠逐只表现（t_zt_perf）给出收盘价。漏了这条路，22 只失败只会数出
+     *       炸板池里那 1 只（09-11 实测）。</li>
+     * </ul>
+     *
+     * @param brokenBigLoss 今日炸板池 big_loss 标记（未触板票为 false）
+     * @param todayClosePct 今日收盘涨跌幅 %；null=该票今日没有逐只报价，不能按 0 处理
+     */
+    public static boolean firstToTwoBigLoss(boolean brokenBigLoss, BigDecimal todayClosePct) {
+        if (brokenBigLoss) {
+            return true;
+        }
+        return todayClosePct != null && todayClosePct.compareTo(CLOSE_BIG_LOSS_PCT) < 0;
     }
 
     /** 大面命中名单 + 因缺字段无法判断的家数（后者意味着结果是下界，必须提示）。 */

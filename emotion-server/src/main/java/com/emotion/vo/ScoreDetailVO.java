@@ -32,6 +32,10 @@ public class ScoreDetailVO {
     private List<String> signalFlags = new ArrayList<>();
     private Boolean forcedEbb;
     private String forcedEbbReason;
+    /** 试错-兑现背离度=首板生态(D4)−连板生态(D3)；两维任一未评=null。 */
+    private BigDecimal ecologyDivergence;
+    /** 背离人话标签（严重背离/背离/青黄不接/均衡）。 */
+    private String ecologyDivergenceLabel;
     /** 与 ScoringModelVO.source 对齐："DB" 或 "BUILTIN"。 */
     private String source;
     /** 原始读数快照：给 tooltip 兜底显示；键=source_key。 */

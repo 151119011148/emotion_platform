@@ -46,6 +46,8 @@ public class MarketStock {
     private Integer bigLoss;
     /** 封单额（元），东财 fund，涨停池收盘封单资金；炸板/跌停池为 null。 */
     private BigDecimal sealAmount;
+    /** 当日成交额（元），东财池接口 amount；D2 成交额聚集度（池内口径）取数源，历史行可能为 null。 */
+    private BigDecimal amount;
     /** 首次封板时间 HHMMSS（东财 fbt），判一字/T字用。 */
     private Integer firstSealTime;
     /** 最后封板时间 HHMMSS（东财 lbt）。 */

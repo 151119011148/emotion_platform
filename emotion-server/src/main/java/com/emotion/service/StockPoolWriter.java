@@ -96,7 +96,8 @@ public class StockPoolWriter {
             stock.setChangePct(round2(row.getZdp()));
             stock.setClosePrice(yuan(row.getPrice()));
             stock.setLimitPrice(yuan(row.getLimitPrice()));
-            // 形态三字段只有涨停池有意义（fund/fbt/lbt 是涨停池专属返回）
+            // 成交额三池都返回；形态三字段只有涨停池有意义（fund/fbt/lbt 是涨停池专属返回）
+            stock.setAmount(row.getAmount());
             if (MarketStock.POOL_LIMIT_UP.equals(pool)) {
                 stock.setSealAmount(row.getFund());
                 stock.setFirstSealTime(row.getFbt());

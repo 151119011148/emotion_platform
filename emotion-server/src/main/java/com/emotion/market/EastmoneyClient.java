@@ -436,6 +436,8 @@ public class EastmoneyClient {
         row.setLimitPrice(decimal(node, "ztp"));
         // fund 封单额（元）、fbt/lbt 首末封板时间（HHMMSS）：封单额与一字/T字形态的唯一数据源
         row.setFund(decimal(node, "fund"));
+        // amount 当日成交额（元）：三个池都带，D2 成交额聚集度（涨停池内资金板块占比）取数源
+        row.setAmount(decimal(node, "amount"));
         row.setFbt(intOrNull(node, "fbt"));
         row.setLbt(intOrNull(node, "lbt"));
         return row;

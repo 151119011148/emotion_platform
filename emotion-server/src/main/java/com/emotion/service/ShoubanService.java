@@ -1,5 +1,7 @@
 package com.emotion.service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -13,16 +15,15 @@ import org.springframework.stereotype.Service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.emotion.entity.MarketStock;
 import com.emotion.mapper.MarketStockMapper;
-import com.emotion.market.MarketMetrics;
 import com.emotion.market.StockPatterns;
 import com.emotion.vo.ShoubanVO;
 
 /**
- * 首板池（PRD P3）：今日首板「封住」与「炸板」两表 + 1 进 2 晋级统计。
+ * 首板生态（时间截面 PRD v2.0，纯 T 日试错端）：今日首板「封住」与「炸板」两表 + T 日 summary。
  *
  * <p>封住 = 涨停池 1 板行；炸板 = 炸板池中<b>昨日未在涨停池</b>的行——昨日明细缺失时
  * 无法区分"首板尝试"和"连板尝试"，此时炸板表返回空而不是猜测，prevAvailable=false 交给前端提示。
- * 昨日首板今日均溢价直接读档位表 board=1 档（与打分第 4 维同一个数，不另算一份）。
+ * 1进2晋级/首板溢价/1进2大面是 T-1→T 兑现口径，已迁至连板生态低位层（见 LadderMetricsService 与 /tianti）。
  */
 @Service
 public class ShoubanService {
@@ -30,11 +31,9 @@ public class ShoubanService {
     private static final ZoneId CN = ZoneId.of("Asia/Shanghai");
 
     private final MarketStockMapper marketStockMapper;
-    private final PremiumTierStore premiumTierStore;
 
-    public ShoubanService(MarketStockMapper marketStockMapper, PremiumTierStore premiumTierStore) {
+    public ShoubanService(MarketStockMapper marketStockMapper) {
         this.marketStockMapper = marketStockMapper;
-        this.premiumTierStore = premiumTierStore;
     }
 
     public ShoubanVO vo(Long userId, LocalDate requested) {
@@ -45,28 +44,26 @@ public class ShoubanService {
         LocalDate prev = marketStockMapper.prevDetailDate(date);
         Map<String, Integer> prevBoard = new HashMap<>();
         boolean prevAvailable = prev != null;
-        List<MarketStock> prevZT = new ArrayList<>();
         if (prevAvailable) {
-            prevZT = listPool(prev, MarketStock.POOL_LIMIT_UP);
-            for (MarketStock row : prevZT) {
+            for (MarketStock row : listPool(prev, MarketStock.POOL_LIMIT_UP)) {
                 prevBoard.put(row.getCode(), row.getConsecutive() == null ? 1 : row.getConsecutive());
             }
         }
-
         String main = topIndustry(todayZT);
 
         ShoubanVO vo = new ShoubanVO();
         vo.setTradeDate(date);
-        vo.setPrevDate(prev);
         vo.setPrevAvailable(prevAvailable);
 
         List<ShoubanVO.Row> sealed = new ArrayList<>();
+        List<MarketStock> firstRows = new ArrayList<>();
         for (MarketStock row : todayZT) {
             int n = row.getConsecutive() == null ? 1 : row.getConsecutive();
             if (n != 1) {
                 continue;
             }
             sealed.add(rowOf(row, main));
+            firstRows.add(row);
         }
         vo.setSealed(sealed);
 
@@ -74,104 +71,73 @@ public class ShoubanService {
         if (prevAvailable) {
             for (MarketStock row : todayZB) {
                 if (prevBoard.containsKey(row.getCode())) {
-                    continue; // 昨日已在涨停池：今日是连板尝试，归连板天梯/炸板质量口径，不进首板池
+                    continue; // 昨日已在涨停池：今日是连板尝试，不进首板池
                 }
                 bombed.add(rowOf(row, main));
             }
         }
         vo.setBombed(bombed);
 
-        ShoubanVO.Summary s = new ShoubanVO.Summary();
-        s.setSealedCount(sealed.size());
-        s.setBombedCount(bombed.size());
-        int denom = sealed.size() + bombed.size();
-        s.setSealedRate(denom == 0 ? null : PrdMetricsService.pct(sealed.size(), denom));
-        s.setPrevFirstCount(prevBoard.size() == 0 ? 0 : countFirst(prevBoard));
-        int promo = 0;
-        for (MarketStock row : todayZT) {
-            Integer n = row.getConsecutive();
-            if (n != null && n == 2 && prevBoard.containsKey(row.getCode())
-                    && prevBoard.get(row.getCode()) == 1) {
-                promo++;
-            }
-        }
-        s.setPromoCount(promo);
-        s.setPromoRate(prevBoard.isEmpty() || s.getPrevFirstCount() == 0
-                ? null : PrdMetricsService.pct(promo, s.getPrevFirstCount()));
-        s.setPrevFirstPremiumPct(firstPremium(date));
-        vo.setSummary(s);
-
-        vo.setPromoDetail(promoDetail(date, prevAvailable, todayZT, todayZB, prevZT, prevBoard, main));
+        vo.setSummary(summary(firstRows, bombed.size(), prevAvailable));
         return vo;
     }
 
-    /**
-     * 1 进 2 成绩单（=「首板溢价」的逐只口径）：昨日首板的每一只，今天要么封上 2 板（成功），
-     * 要么停在 1 板/炸板/未触板（失败）。逐只涨跌幅只覆盖涨停/炸板池，未触板的不编数；
-     * 全样本均溢价仍以档位表 board=1（实时快照采集）为准。
-     */
-    private ShoubanVO.PromoDetail promoDetail(LocalDate date, boolean prevAvailable,
-                                              List<MarketStock> todayZT, List<MarketStock> todayZB,
-                                              List<MarketStock> prevZT,
-                                              Map<String, Integer> prevBoard, String main) {
-        ShoubanVO.PromoDetail p = new ShoubanVO.PromoDetail();
-        p.setSuccess(new ArrayList<ShoubanVO.Row>());
-        p.setFailed(new ArrayList<ShoubanVO.FailedRow>());
-        p.setAvgPremiumPct(firstPremium(date));
-        if (!prevAvailable) {
-            p.setPrevCount(0);
-            p.setPromotedCount(0);
-            return p;
+    /** 纯 T 日汇总：封板/炸板率、一字占比、均封单、题材聚集（与 LadderMetricsService 同口径）。 */
+    private ShoubanVO.Summary summary(List<MarketStock> firstRows, int bombed, boolean prevAvailable) {
+        ShoubanVO.Summary s = new ShoubanVO.Summary();
+        int sealed = firstRows.size();
+        s.setSealedCount(sealed);
+        s.setBombedCount(bombed);
+        if (prevAvailable && sealed + bombed > 0) {
+            s.setSealedRate(PrdMetricsService.pct(sealed, sealed + bombed));
+            s.setBombRate(PrdMetricsService.pct(bombed, sealed + bombed));
         }
-        int prevFirst = countFirst(prevBoard);
-        p.setPrevCount(prevFirst);
-
-        java.util.Set<String> promotedCodes = new java.util.HashSet<>();
-        for (MarketStock row : todayZT) {
-            Integer n = row.getConsecutive();
-            Integer prevN = prevBoard.get(row.getCode());
-            if (n != null && n == 2 && prevN != null && prevN == 1) {
-                p.getSuccess().add(rowOf(row, main));
-                promotedCodes.add(row.getCode());
+        // 一字家数/占比：只在能判形态（有首封时间）的样本里统计
+        int patternN = 0;
+        int yizi = 0;
+        BigDecimal sealSum = BigDecimal.ZERO;
+        int sealN = 0;
+        Map<String, Integer> byIndustry = new LinkedHashMap<>();
+        int industryN = 0;
+        for (MarketStock row : firstRows) {
+            if (row.getFirstSealTime() != null) {
+                patternN++;
+                if (StockPatterns.ONE_LINE.equals(StockPatterns.of(row))) {
+                    yizi++;
+                }
+            }
+            if (row.getSealAmount() != null) {
+                sealSum = sealSum.add(row.getSealAmount());
+                sealN++;
+            }
+            String ind = row.getIndustry();
+            if (ind != null && !ind.trim().isEmpty()) {
+                byIndustry.merge(ind, 1, Integer::sum);
+                industryN++;
             }
         }
-        // 失败：昨日首板里今天没封 2 板的，逐只判今日去向
-        for (MarketStock prev : prevZT) {
-            int pb = prev.getConsecutive() == null ? 1 : prev.getConsecutive();
-            if (pb != 1 || promotedCodes.contains(prev.getCode())) {
-                continue;
-            }
-            ShoubanVO.FailedRow f = new ShoubanVO.FailedRow();
-            f.setCode(prev.getCode());
-            f.setName(prev.getName());
-            f.setIndustry(prev.getIndustry());
-            MarketStock zt = findByCode(todayZT, prev.getCode());
-            MarketStock zb = findByCode(todayZB, prev.getCode());
-            if (zt != null) {
-                f.setTodayStatus("ZT");
-                f.setChangePct(zt.getChangePct());
-                f.setPattern(StockPatterns.of(zt));
-            } else if (zb != null) {
-                f.setTodayStatus("ZB");
-                f.setChangePct(zb.getChangePct());
-                f.setPullbackPct(zb.getPullbackPct());
-            } else {
-                f.setTodayStatus("GONE");
-            }
-            p.getFailed().add(f);
+        s.setYiziCount(yizi);
+        if (patternN > 0) {
+            s.setYiziRatio(new BigDecimal(yizi * 100)
+                    .divide(BigDecimal.valueOf(patternN), 2, RoundingMode.HALF_UP).doubleValue());
         }
-        p.setPromotedCount(p.getSuccess().size());
-        p.setPromoRate(prevFirst == 0 ? null : PrdMetricsService.pct(p.getSuccess().size(), prevFirst));
-        return p;
-    }
-
-    private static MarketStock findByCode(List<MarketStock> rows, String code) {
-        for (MarketStock row : rows) {
-            if (code != null && code.equals(row.getCode())) {
-                return row;
+        if (sealN > 0) {
+            s.setAvgSealAmount(sealSum.divide(BigDecimal.valueOf(sealN), 0, RoundingMode.HALF_UP));
+        }
+        String top = null;
+        int topN = 0;
+        for (Map.Entry<String, Integer> e : byIndustry.entrySet()) {
+            if (e.getValue() > topN) {
+                topN = e.getValue();
+                top = e.getKey();
             }
         }
-        return null;
+        s.setTopIndustry(top);
+        s.setTopIndustryCount(topN == 0 ? null : topN);
+        if (industryN > 0) {
+            s.setThemeGatherPct(PrdMetricsService.pct(topN, industryN));
+        }
+        return s;
     }
 
     private static ShoubanVO.Row rowOf(MarketStock row, String main) {
@@ -187,31 +153,6 @@ public class ShoubanService {
         r.setPattern(StockPatterns.of(row));
         r.setInMain(main != null && main.equals(row.getIndustry()));
         return r;
-    }
-
-    /** 昨日首板家数：昨日涨停池中连板数=1 的行数（键值即连板数）。 */
-    private static int countFirst(Map<String, Integer> prevBoard) {
-        int n = 0;
-        for (Integer b : prevBoard.values()) {
-            if (b != null && b == 1) {
-                n++;
-            }
-        }
-        return n;
-    }
-
-    /** 档位表 board=1 档的均溢价 = "昨日首板今日表现"；没落档位（含 0 家匹配）返回 null。 */
-    private Double firstPremium(LocalDate date) {
-        MarketMetrics.PremiumTiers tiers = premiumTierStore.read(date);
-        if (tiers == null || tiers.getTiers() == null) {
-            return null;
-        }
-        for (MarketMetrics.TierPremium t : tiers.getTiers()) {
-            if (t.getBoard() == 1) {
-                return t.getAvgPct() == null ? null : t.getAvgPct().doubleValue();
-            }
-        }
-        return null;
     }
 
     private static String topIndustry(List<MarketStock> zt) {

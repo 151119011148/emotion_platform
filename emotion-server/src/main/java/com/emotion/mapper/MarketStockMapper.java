@@ -19,11 +19,11 @@ public interface MarketStockMapper extends BaseMapper<MarketStock> {
     @Insert("<script>"
             + "INSERT INTO t_market_stock (trade_date, code, name, pool, market, industry, "
             + "consecutive, break_count, change_pct, close_price, limit_price, pullback_pct, big_loss, "
-            + "seal_amount, first_seal_time, last_seal_time) VALUES "
+            + "seal_amount, amount, first_seal_time, last_seal_time) VALUES "
             + "<foreach collection='rows' item='r' separator=','>"
             + "(#{r.tradeDate},#{r.code},#{r.name},#{r.pool},#{r.market},#{r.industry},"
             + "#{r.consecutive},#{r.breakCount},#{r.changePct},#{r.closePrice},#{r.limitPrice},"
-            + "#{r.pullbackPct},#{r.bigLoss},#{r.sealAmount},#{r.firstSealTime},#{r.lastSealTime})"
+            + "#{r.pullbackPct},#{r.bigLoss},#{r.sealAmount},#{r.amount},#{r.firstSealTime},#{r.lastSealTime})"
             + "</foreach></script>")
     int insertBatch(@Param("rows") List<MarketStock> rows);
 
