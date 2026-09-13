@@ -40,5 +40,29 @@ public class Position {
     private String action;
     private String plannedAction;
     private String discipline;
+    /** 所属板块/D2 核心板块（手填或自动）。 */
+    private String industry;
+    /** 买入时板数。 */
+    private Integer boardNum;
+    /** 持仓中 / 今日清仓（三段式①/② 分组）。 */
+    private String status;
+    /** 清仓延迟天数（应做未及时做）。 */
+    private Integer delayDays;
+    /** 纪律评分 0-100，违规按延迟折减。 */
+    private Integer disciplineScore;
+    /** 次日处理决策（竞价裁决）。 */
+    private String nextDayPlan;
+    /** 次日高开→动作（分档①，外溢用）。 */
+    private String planOpen;
+    /** 次日炸板→动作（分档②，外溢用）。 */
+    private String planBreak;
+    /** 次日平开/低开→动作（分档③，外溢用）。 */
+    private String planLow;
+    /** 次日跌停→动作（分档④，外溢用）。 */
+    private String planFall;
+    /** 外溢闭环：0=待裁决，1=已在次日复盘页标记执行。 */
+    private Integer executed;
+    /** 标记执行时回填的真实动作。 */
+    private String actualAction;
     private LocalDateTime createdAt;
 }

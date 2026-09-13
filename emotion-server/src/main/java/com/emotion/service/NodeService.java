@@ -141,6 +141,14 @@ public class NodeService {
         return existing;
     }
 
+    /** 删除自己的一个节点事件；不存在/非本人则抛错。 */
+    public void deleteNode(Long userId, Long id) {
+        int n = nodeEventMapper.delete(new LambdaQueryWrapper<NodeEvent>()
+                .eq(NodeEvent::getId, id)
+                .eq(NodeEvent::getUserId, userId));
+        if (n == 0) throw new RuntimeException("节点事件不存在或无权操作");
+    }
+
     // ---------- 读侧富化 ----------
 
     /** 唯一的富化入口：拷贝 + 阵眼血缘 + 节点票存活 + 监管标记。 */

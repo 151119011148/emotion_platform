@@ -150,7 +150,8 @@ class PrdMetricsServiceTest {
         assertEquals("退潮", PrdMetricsService.lifecycleStage(4, 9, "HOLD", 3, 4), "涨停腰斩也退潮");
         assertEquals("萌芽", PrdMetricsService.lifecycleStage(6, 0, "PROMOTE", 1, 4));
         assertEquals("确认", PrdMetricsService.lifecycleStage(6, 0, "PROMOTE", 2, 4));
-        assertEquals("扩散", PrdMetricsService.lifecycleStage(6, 0, "PROMOTE", 3, 4));
+        assertEquals("确认", PrdMetricsService.lifecycleStage(6, 0, "PROMOTE", 3, 4), "2026-09-13 收紧：3 天（进前五含弱日）不再够扩散");
+        assertEquals("扩散", PrdMetricsService.lifecycleStage(6, 0, "PROMOTE", 4, 4), "连续 4 天才算扩散");
         assertEquals("亢奋", PrdMetricsService.lifecycleStage(6, 0, "PROMOTE", 5, 4));
         assertEquals("亢奋", PrdMetricsService.lifecycleStage(6, 0, "PROMOTE", 1, 7), "H≥7 直接亢奋");
     }

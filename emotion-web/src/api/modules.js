@@ -29,7 +29,14 @@ export const recordApi = {
    * 持仓台账：body 是这天的<b>全部</b>行，服务端整日替换，所以调用方必须把行发全——少发一行就是删掉一行。
    * 预判与对答案没有编辑口了：{@code t_prediction} 只由那天导入的 md 整日替换（PLAN 与 ANSWER 一起换）。
    */
-  savePositions: (date, rows) => api.put('/records/positions', rows, { params: { date } })
+  savePositions: (date, rows) => api.put('/records/positions', rows, { params: { date } }),
+  getPositions: (date) => api.get('/records/positions', { params: { date }, skipErrorToast: true }),
+  // 外溢①：仪表盘「待裁决」卡，取最近一条未执行决策
+  latestPendingPosition: (before) => api.get('/records/positions/pending/latest', { params: { before }, skipErrorToast: true }),
+  // 外溢②：次日复盘页顶部「昨日遗留决策」，取最近 limit 条未执行决策
+  pendingPositions: (before, limit = 5) => api.get('/records/positions/pending', { params: { before, limit }, skipErrorToast: true }),
+  // 标记某持仓已执行，闭环回填真实动作
+  markPositionExecuted: (id, action) => api.post(`/records/positions/${id}/execute`, null, { params: { action } })
 }
 
 export const nodeApi = {
@@ -37,6 +44,7 @@ export const nodeApi = {
   getCurrent: () => api.get('/nodes/current'),
   create: (data) => api.post('/nodes', data),
   update: (id, data) => api.put(`/nodes/${id}`, data),
+  deleteNode: (id) => api.delete(`/nodes/${id}`),
   // 复算建议：只读，不写库。判据不齐时它自己会说"缺哪一样"
   suggest: (id) => api.get(`/nodes/${id}/suggest`),
   // 采纳只回传指纹，那八个值由服务端重算并逐字段比对后落库
@@ -162,7 +170,9 @@ export const reviewApi = {
   buildConcepts: () => api.post('/review/concepts/build', null, { timeout: 600000 }),
   conceptsStatus: () => api.get('/review/concepts/status', { skipErrorToast: true }),
   // 近 N 个月可复盘交易日（有涨停明细的日，降序，第一个=最近交易日）
-  tradingDays: () => api.get('/review/trading-days', { skipErrorToast: true })
+  tradingDays: () => api.get('/review/trading-days', { skipErrorToast: true }),
+  // 股票远程搜索（A股字典 t_stock）：按代码前缀/名称模糊，供持仓台账选股下拉
+  searchStocks: (kw) => api.get('/review/stocks/search', { params: { kw }, skipErrorToast: true })
 }
 
 /**

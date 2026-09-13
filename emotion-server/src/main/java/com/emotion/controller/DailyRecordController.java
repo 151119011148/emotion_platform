@@ -234,6 +234,45 @@ public class DailyRecordController {
         return ApiResponse.ok(reviewLedgerService.savePositions(userId, parse(date), rows));
     }
 
+    /** 读取某日持仓台账（三条段式扩展列随行返回），日期切换时前端回填编辑表。 */
+    @GetMapping("/positions")
+    public ApiResponse<List<com.emotion.entity.Position>> getPositions(Authentication auth,
+                                                                       @RequestParam String date) {
+        Long userId = (Long) auth.getPrincipal();
+        return ApiResponse.ok(reviewLedgerService.readPositions(userId, parse(date)));
+    }
+
+    /**
+     * 外溢点①：仪表盘「待裁决」卡——最近一条未执行决策的持仓。
+     * before 缺省 = 今天（历史日期仍待裁决的也能被带到，避免跨日漏办）。
+     */
+    @GetMapping("/positions/pending/latest")
+    public ApiResponse<com.emotion.entity.Position> latestPending(Authentication auth,
+                                                                  @RequestParam(required = false) String before) {
+        Long userId = (Long) auth.getPrincipal();
+        LocalDate b = before == null ? LocalDate.now() : parse(before);
+        return ApiResponse.ok(reviewLedgerService.latestPendingPosition(userId, b));
+    }
+
+    /** 外溢点②：次日（T+1）复盘页顶部——最近一批未执行决策（昨日遗留），limit 缺省 5。 */
+    @GetMapping("/positions/pending")
+    public ApiResponse<List<com.emotion.entity.Position>> pendingPositions(Authentication auth,
+                                                                           @RequestParam(required = false) String before,
+                                                                           @RequestParam(defaultValue = "5") int limit) {
+        Long userId = (Long) auth.getPrincipal();
+        LocalDate b = before == null ? LocalDate.now() : parse(before);
+        return ApiResponse.ok(reviewLedgerService.pendingPositions(userId, b, limit));
+    }
+
+    /** 标记某持仓已执行：回填真实动作，executed 置 1，闭环完成。 */
+    @PostMapping("/positions/{id}/execute")
+    public ApiResponse<Boolean> markExecuted(Authentication auth,
+                                             @PathVariable Long id,
+                                             @RequestParam(required = false) String action) {
+        Long userId = (Long) auth.getPrincipal();
+        return ApiResponse.ok(reviewLedgerService.markPositionExecuted(userId, id, action));
+    }
+
     /**
      * 整日替换当天预判与对答案，PLAN + ANSWER 两批一起发、一起换（少发一种就是把它清掉）。
      * <b>复盘页已经没有这块编辑口</b>：这两批行现在只由那天导入的 md 写，这个入口留作同一套语义的手工口。

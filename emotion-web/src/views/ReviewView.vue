@@ -2,7 +2,17 @@
   <div class="review-page">
     <!-- ============ 顶栏：日期 + 一键拉取 + 导出 + 就绪状态 ============ -->
     <div class="page-header">
-      <h2>每日复盘</h2>
+      <h2>每日复盘<el-tooltip placement="top" effect="dark">
+          <template #content>
+            <div style="max-width: 340px; line-height: 1.6;">
+              按下「一键拉取行情」后按序执行：<br>
+              T1 回补历史缺口 → T2/T3 拉全市场池子 → T4 连板天梯 → T5 行业/题材聚合 →<br>
+              T6 监管信号 → T7 动态整理 → T8 五维（D1-D5）重算与就绪度点亮。<br>
+              全程 SSE 实时回传，任一步失败只标黄、不中断后续。
+            </div>
+          </template>
+          <span class="fp-help">?</span>
+        </el-tooltip></h2>
       <el-date-picker v-model="form.tradeDate" type="date" value-format="YYYY-MM-DD"
         :disabled-date="disableDate" placeholder="选择交易日" style="width: 160px" />
       <span class="header-spacer"></span>
@@ -11,6 +21,29 @@
       <el-button :loading="exportingDoc" :disabled="!form.tradeDate" @click="handleExportDoc">
         导出复盘文档
       </el-button>
+    </div>
+
+    <!-- ============ 外溢②：昨日（T-1）遗留决策，次日 9:25 竞价时回到页面第一眼就能处理 ============ -->
+    <div v-if="pendingCarry.length" class="pend-block">
+      <div class="pend-head">⚠️ 昨日遗留决策（{{ pendingCarryDate }} 写，今日执行）</div>
+      <div v-for="p in pendingCarry" :key="p.id" class="pend-row">
+        <span class="pend-stock"><b>{{ p.stockName }}</b> <span class="muted">{{ p.stockCode }}</span>
+          <span v-if="p.boardNum" class="pend-board">{{ p.boardNum }}板</span>
+          <span v-if="p.industry" class="pend-ind">{{ p.industry }}</span></span>
+        <span class="pend-plan">
+          <span v-if="p.planOpen" class="pend-tier">高开→{{ p.planOpen }}</span>
+          <span v-if="p.planBreak" class="pend-tier">炸板→{{ p.planBreak }}</span>
+          <span v-if="p.planLow" class="pend-tier">平开/低开→{{ p.planLow }}</span>
+          <span v-if="p.planFall" class="pend-tier">跌停→{{ p.planFall }}</span>
+          <span v-if="!p.planOpen && !p.planBreak && !p.planLow && !p.planFall && p.nextDayPlan"
+                class="pend-tier">{{ p.nextDayPlan }}</span>
+        </span>
+        <span class="pend-act">
+          <el-input v-model="pendingAct[p.id]" size="small" placeholder="今日实际动作" style="width: 150px" />
+          <el-button size="small" type="primary" plain :loading="markingPend" @click="markExecuted(p)">标记执行</el-button>
+        </span>
+      </div>
+      <div class="pend-done">✅ 执行后点「标记执行」，自动回填实际动作并关闭该裁决。</div>
     </div>
 
     <!-- ============ 拉取进度（T1-T8 流式回传） ============ -->
@@ -28,6 +61,51 @@
         </div>
       </div>
     </div>
+
+    <!-- ============ 五维评分总览（置顶，先看全局结论再看各维细节） ============ -->
+    <section class="dim-block score-overview">
+      <div class="block-head">
+        <h3>五维评分</h3>
+        <span class="header-spacer"></span>
+        <ScoreChip :score="score.total" label="总分" />
+      </div>
+      <template v-if="score.available">
+        <div class="five-strip">
+          <div class="fv">
+            <span>D1 大盘</span><b class="sv">{{ fmtScore(score.d1) }}</b>
+            <i class="done" v-if="score.d1 != null"></i><i class="pending" v-else></i>
+          </div>
+          <div class="fv">
+            <span>D2 主线</span><b class="sv">{{ fmtScore(score.d2) }}</b>
+            <i class="done" v-if="score.d2 != null"></i><i class="pending" v-else></i>
+          </div>
+          <div class="fv">
+            <span>D3 连板</span><b class="sv">{{ fmtScore(score.d3) }}</b>
+            <i class="done" v-if="score.d3 != null"></i><i class="pending" v-else></i>
+          </div>
+          <div class="fv">
+            <span>D4 首板</span><b class="sv">{{ fmtScore(score.d4) }}</b>
+            <i class="done" v-if="score.d4 != null"></i><i class="pending" v-else></i>
+          </div>
+          <div class="fv">
+            <span>D5 高位</span><b class="sv">{{ fmtScore(score.d5) }}</b>
+            <i class="done" v-if="score.d5 != null"></i><i class="pending" v-else></i>
+          </div>
+        </div>
+        <div class="score-meta">
+          <span>温度 {{ fmtScore(score.temperature) }}</span>
+          <el-tag v-if="score.stage" size="small" :type="stageTagType">{{ score.stage }}</el-tag>
+          <el-tag v-if="score.forcedEbb === 1" size="small" type="danger" effect="dark">强制退潮</el-tag>
+          <span v-if="score.scoredDims != null" class="muted">已评 {{ score.scoredDims }}/5 维</span>
+        </div>
+        <p v-if="score.signalFlags" class="signal-line">{{ score.signalFlags }}</p>
+        <p v-if="score.forcedEbbReason" class="ebb-reason">⛔ {{ score.forcedEbbReason }}</p>
+      </template>
+      <div v-else class="empty-note">
+        该日还没有复盘记录：先「一键拉取行情」落库原始数据，评分在下方「保存复盘」后自动计算
+        （职责分离——拉取只落原始数据，不洗人工维评分）。
+      </div>
+    </section>
 
     <!-- ============ D1 大盘生态 ============ -->
     <section class="dim-block" :class="readinessClass('D1')">
@@ -229,134 +307,184 @@
       <div v-else class="empty-note">高位生态未取到（/d5/high）</div>
     </section>
 
-    <!-- 总览评分卡 -->
-    <section class="dim-block score-overview">
-      <div class="block-head">
-        <h3>五维评分</h3>
-        <span class="header-spacer"></span>
-        <ScoreChip :score="score.total" label="总分" />
-      </div>
-      <template v-if="score.available">
-        <div class="five-strip">
-          <div class="fv">
-            <span>D1 大盘</span><b class="sv">{{ fmtScore(score.d1) }}</b>
-            <i class="done" v-if="score.d1 != null"></i><i class="pending" v-else></i>
-          </div>
-          <div class="fv">
-            <span>D2 主线</span><b class="sv">{{ fmtScore(score.d2) }}</b>
-            <i class="done" v-if="score.d2 != null"></i><i class="pending" v-else></i>
-          </div>
-          <div class="fv">
-            <span>D3 连板</span><b class="sv">{{ fmtScore(score.d3) }}</b>
-            <i class="done" v-if="score.d3 != null"></i><i class="pending" v-else></i>
-          </div>
-          <div class="fv">
-            <span>D4 首板</span><b class="sv">{{ fmtScore(score.d4) }}</b>
-            <i class="done" v-if="score.d4 != null"></i><i class="pending" v-else></i>
-          </div>
-          <div class="fv">
-            <span>D5 高位</span><b class="sv">{{ fmtScore(score.d5) }}</b>
-            <i class="done" v-if="score.d5 != null"></i><i class="pending" v-else></i>
-          </div>
+    <!-- ============ 持仓台账（整表替换当天行） ============ -->
+    <section class="entry-collapse">
+      <div class="entry-body">
+        <h4 class="entry-title">持仓台账 <span class="dim-muted">整表替换当天行</span></h4>
+        <div v-if="posRows.length" class="ledger-summary">
+          <span>持仓 <b>{{ posRows.length }}</b> 只</span>
+          <span>总成本 <b>{{ moneyText(ledgerSummary.totalCost) }}</b></span>
+          <span>总现价 <b>{{ moneyText(ledgerSummary.totalPrice) }}</b></span>
+          <span :class="pctClass(ledgerSummary.floatPct)">浮动 {{ moneyText(ledgerSummary.floatAmount) }}（{{ signed(ledgerSummary.floatPct) }}%）</span>
         </div>
-        <div class="score-meta">
-          <span>温度 {{ fmtScore(score.temperature) }}</span>
-          <el-tag v-if="score.stage" size="small" :type="stageTagType">{{ score.stage }}</el-tag>
-          <el-tag v-if="score.forcedEbb === 1" size="small" type="danger" effect="dark">强制退潮</el-tag>
-          <span v-if="score.scoredDims != null" class="muted">已评 {{ score.scoredDims }}/5 维</span>
+        <div class="ledger">
+          <div class="card-head">
+            <span class="header-spacer"></span>
+            <el-button size="small" @click="addPositionRow">加一行</el-button>
+            <el-button size="small" type="primary" plain :loading="savingPos" @click="savePositions">
+              保存台账
+            </el-button>
+          </div>
+          <el-tabs v-model="posTab" class="pos-tabs">
+            <!-- ① 当前持仓 -->
+            <el-tab-pane label="① 当前持仓" name="hold">
+              <el-table :data="holdingRows" size="small" empty-text="无当前持仓，点「加一行」录入" class="dim-table">
+                <el-table-column label="股票（代码/名称）" min-width="200">
+                  <template #default="{ row }">
+                    <el-select v-model="row.stockCode" filterable remote clearable size="small"
+                      :remote-method="(q) => searchStocks(q, row)" :loading="row._loading"
+                      placeholder="输代码或名称搜索" @change="pickStock(row)" @clear="row.stockName = ''">
+                      <el-option v-for="s in row._results" :key="s.code" :value="s.code" :label="s.code + ' ' + s.name" />
+                    </el-select>
+                  </template>
+                </el-table-column>
+                <el-table-column label="板块" width="96">
+                  <template #default="{ row }"><el-input v-model="row.industry" size="small" placeholder="板块" /></template>
+                </el-table-column>
+                <el-table-column label="板数" width="70">
+                  <template #default="{ row }">
+                    <el-input-number v-model="row.boardNum" size="small" :min="1" :max="10" :controls="false" style="width: 100%" placeholder="板" />
+                  </template>
+                </el-table-column>
+                <el-table-column label="成本" width="92">
+                  <template #default="{ row }">
+                    <el-input-number v-model="row.costPrice" size="small" :min="0" :precision="2" :controls="false" style="width: 100%" />
+                  </template>
+                </el-table-column>
+                <el-table-column label="现价" width="92">
+                  <template #default="{ row }">
+                    <el-input-number v-model="row.currentPrice" size="small" :min="0" :precision="2" :controls="false" style="width: 100%" />
+                  </template>
+                </el-table-column>
+                <el-table-column label="浮动%" width="86">
+                  <template #default="{ row }">
+                    <el-input-number v-model="row.floatPct" size="small" :precision="2" :controls="false" style="width: 100%" placeholder="自动" />
+                  </template>
+                </el-table-column>
+                <el-table-column label="动作" width="96">
+                  <template #default="{ row }"><el-input v-model="row.action" size="small" placeholder="今日" /></template>
+                </el-table-column>
+                <el-table-column label="应做" width="96">
+                  <template #default="{ row }"><el-input v-model="row.plannedAction" size="small" placeholder="计划" /></template>
+                </el-table-column>
+                <el-table-column label="纪律" width="90">
+                  <template #default="{ row }">
+                    <el-select v-model="row.discipline" size="small" clearable placeholder="未填">
+                      <el-option v-for="d in DISCIPLINES" :key="d" :label="d" :value="d" />
+                    </el-select>
+                  </template>
+                </el-table-column>
+                <el-table-column label="次日决策" min-width="150">
+                  <template #default="{ row }"><el-input v-model="row.nextDayPlan" size="small" placeholder="竞价裁决/预案" /></template>
+                </el-table-column>
+                <el-table-column label="状态" width="92">
+                  <template #default="{ row }">
+                    <el-select v-model="row.status" size="small" placeholder="持仓中">
+                      <el-option label="持仓中" value="持仓中" />
+                      <el-option label="今日清仓" value="今日清仓" />
+                    </el-select>
+                  </template>
+                </el-table-column>
+                <el-table-column label="删" width="46" align="center">
+                  <template #default="{ row }">
+                    <el-button size="small" text type="danger" @click="removePos(row)">×</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-tab-pane>
+
+            <!-- ② 今日清仓 -->
+            <el-tab-pane label="② 今日清仓" name="cleared">
+              <el-table :data="clearedRows" size="small" empty-text="今日无清仓记录" class="dim-table">
+                <el-table-column label="股票（代码/名称）" min-width="200">
+                  <template #default="{ row }">
+                    <el-select v-model="row.stockCode" filterable remote clearable size="small"
+                      :remote-method="(q) => searchStocks(q, row)" :loading="row._loading"
+                      placeholder="输代码或名称搜索" @change="pickStock(row)" @clear="row.stockName = ''">
+                      <el-option v-for="s in row._results" :key="s.code" :value="s.code" :label="s.code + ' ' + s.name" />
+                    </el-select>
+                  </template>
+                </el-table-column>
+                <el-table-column label="板块" width="96">
+                  <template #default="{ row }"><el-input v-model="row.industry" size="small" /></template>
+                </el-table-column>
+                <el-table-column label="成本" width="92">
+                  <template #default="{ row }"><el-input-number v-model="row.costPrice" size="small" :min="0" :precision="2" :controls="false" style="width: 100%" /></template>
+                </el-table-column>
+                <el-table-column label="现价" width="92">
+                  <template #default="{ row }"><el-input-number v-model="row.currentPrice" size="small" :min="0" :precision="2" :controls="false" style="width: 100%" /></template>
+                </el-table-column>
+                <el-table-column label="浮动%" width="86">
+                  <template #default="{ row }"><el-input-number v-model="row.floatPct" size="small" :precision="2" :controls="false" style="width: 100%" /></template>
+                </el-table-column>
+                <el-table-column label="动作" width="96">
+                  <template #default="{ row }"><el-input v-model="row.action" size="small" placeholder="今日" /></template>
+                </el-table-column>
+                <el-table-column label="应做" width="96">
+                  <template #default="{ row }"><el-input v-model="row.plannedAction" size="small" placeholder="计划" /></template>
+                </el-table-column>
+                <el-table-column label="纪律" width="90">
+                  <template #default="{ row }">
+                    <el-select v-model="row.discipline" size="small" clearable placeholder="未填">
+                      <el-option v-for="d in DISCIPLINES" :key="d" :label="d" :value="d" />
+                    </el-select>
+                  </template>
+                </el-table-column>
+                <el-table-column label="延迟天" width="78">
+                  <template #default="{ row }"><el-input-number v-model="row.delayDays" size="small" :min="0" :controls="false" style="width: 100%" /></template>
+                </el-table-column>
+                <el-table-column label="纪律分" width="86">
+                  <template #default="{ row }"><el-input-number v-model="row.disciplineScore" size="small" :min="0" :max="100" :controls="false" style="width: 100%" /></template>
+                </el-table-column>
+                <el-table-column label="状态" width="92">
+                  <template #default="{ row }">
+                    <el-select v-model="row.status" size="small">
+                      <el-option label="持仓中" value="持仓中" />
+                      <el-option label="今日清仓" value="今日清仓" />
+                    </el-select>
+                  </template>
+                </el-table-column>
+                <el-table-column label="删" width="46" align="center">
+                  <template #default="{ row }">
+                    <el-button size="small" text type="danger" @click="removePos(row)">×</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-tab-pane>
+
+            <!-- ③ 次日处理决策：统一查看/补充次日竞价裁决 -->
+            <el-tab-pane label="③ 次日处理决策" name="plan">
+              <el-table :data="posRows" size="small" empty-text="暂无持仓，无需次日决策" class="dim-table">
+                <el-table-column label="股票" min-width="150">
+                  <template #default="{ row }">
+                    <span class="pos-stock">{{ row.stockCode }} <b>{{ row.stockName }}</b></span>
+                    <span v-if="row.industry" class="pos-industry">{{ row.industry }}</span>
+                    <span v-if="row.boardNum" class="pos-board">{{ row.boardNum }}板</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="次日决策分档（竞价裁决）" min-width="420">
+                  <template #default="{ row }">
+                    <div class="plan-tiers">
+                      <span class="pt-label">
+                        {{ row.nextDayPlan ? '综合' : row.boardNum ? row.boardNum + '板面临几进几，按分档填：' : '按分档填：' }}
+                      </span>
+                      <span class="pt-cell">高开→<el-input v-model="row.planOpen" size="small" placeholder="冲高减半" /></span>
+                      <span class="pt-cell">炸板→<el-input v-model="row.planBreak" size="small" placeholder="板砸" /></span>
+                      <span class="pt-cell">平开/低开→<el-input v-model="row.planLow" size="small" placeholder="竞价走" /></span>
+                      <span class="pt-cell">跌停→<el-input v-model="row.planFall" size="small" placeholder="割" /></span>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="综合预案" min-width="180">
+                  <template #default="{ row }"><el-input v-model="row.nextDayPlan" size="small" placeholder="一段话兜底（可留空）" /></template>
+                </el-table-column>
+              </el-table>
+              <div class="plan-tip">💡 分档四格是②仪表盘「待裁决」卡的取数源；写一格即可外溢，全写更好。</div>
+            </el-tab-pane>
+          </el-tabs>
         </div>
-        <p v-if="score.signalFlags" class="signal-line">{{ score.signalFlags }}</p>
-        <p v-if="score.forcedEbbReason" class="ebb-reason">⛔ {{ score.forcedEbbReason }}</p>
-      </template>
-      <div v-else class="empty-note">
-        该日还没有复盘记录：先「一键拉取行情」落库原始数据，评分在下方「保存复盘」后自动计算
-        （职责分离——拉取只落原始数据，不洗人工维评分）。
       </div>
     </section>
-
-    <!-- ============ 评分录入 + 复盘记录（人工读数据 + 保存） ============ -->
-    <el-collapse class="entry-collapse">
-      <el-collapse-item title="评分录入（人工读数 + 强制退潮 + 持仓台账）" name="entry">
-        <div class="entry-body">
-          <div class="ebb-chip" v-if="ebbActive">
-            <span class="ebb-chip-ico">⛔</span><b>强制退潮</b> — {{ ebbReason || '已命中强制退潮条件' }}
-          </div>
-
-          <h4 class="entry-title">D2 / D4 / D5 人判读数 + 强制退潮闸门（与各维度页同源）</h4>
-          <div v-if="!formReady" class="panel-warn">
-            这天的记录没读回来：下面的人工读数（manual_* + 涨跌家数）这次<b>不会</b>发出
-            （发了就等于把你已存的值连同你没显示的格子一起洗成空）。
-          </div>
-          <div class="stat-grid">
-            <EditableStatCard v-for="m in MANUAL_METRICS" :key="m.metric"
-              v-model="form[m.field]" :label="m.label" :unit="m.unit"
-              :min="m.min" :max="m.max" :precision="m.precision" :step="m.step"
-              :ph="m.ph" :hint="m.hint" />
-          </div>
-
-          <div class="action-row">
-            <el-button type="primary" :loading="saving" @click="handleSave">
-              {{ recordId ? '更新记录' : '提交记录' }}
-            </el-button>
-            <span v-if="savedRecord && savedRecord.totalScore != null" class="saved-score">
-              当前总分 {{ savedRecord.totalScore }} / 温度 {{ savedRecord.temperature ?? '—' }}
-            </span>
-          </div>
-
-          <h4 class="entry-title">持仓台账（整表替换当天行）</h4>
-          <div class="ledger">
-            <div class="card-head">
-              <span class="header-spacer"></span>
-              <el-button size="small" @click="addPositionRow">加一行</el-button>
-              <el-button size="small" type="primary" plain :loading="savingPos" @click="savePositions">
-                保存台账
-              </el-button>
-            </div>
-            <el-table :data="posRows" size="small" empty-text="这天还没有持仓，点「加一行」录" class="dim-table">
-              <el-table-column label="代码" width="92">
-                <template #default="{ row }"><el-input v-model="row.stockCode" size="small" placeholder="6位" /></template>
-              </el-table-column>
-              <el-table-column label="名称" width="100">
-                <template #default="{ row }"><el-input v-model="row.stockName" size="small" placeholder="名称" /></template>
-              </el-table-column>
-              <el-table-column label="成本" width="100">
-                <template #default="{ row }">
-                  <el-input-number v-model="row.costPrice" size="small" :min="0" :precision="2" :controls="false" style="width: 100%" />
-                </template>
-              </el-table-column>
-              <el-table-column label="现价" width="100">
-                <template #default="{ row }">
-                  <el-input-number v-model="row.currentPrice" size="small" :min="0" :precision="2" :controls="false" style="width: 100%" />
-                </template>
-              </el-table-column>
-              <el-table-column label="浮动%" width="100">
-                <template #default="{ row }">
-                  <el-input-number v-model="row.floatPct" size="small" :precision="2" :controls="false" style="width: 100%" placeholder="自动" />
-                </template>
-              </el-table-column>
-              <el-table-column label="动作" width="100">
-                <template #default="{ row }"><el-input v-model="row.action" size="small" placeholder="今日实际" /></template>
-              </el-table-column>
-              <el-table-column label="应做" width="100">
-                <template #default="{ row }"><el-input v-model="row.plannedAction" size="small" placeholder="计划" /></template>
-              </el-table-column>
-              <el-table-column label="纪律" width="100">
-                <template #default="{ row }">
-                  <el-select v-model="row.discipline" size="small" clearable placeholder="未填">
-                    <el-option v-for="d in DISCIPLINES" :key="d" :label="d" :value="d" />
-                  </el-select>
-                </template>
-              </el-table-column>
-              <el-table-column label="删" width="52" align="center">
-                <template #default="{ $index }">
-                  <el-button size="small" text type="danger" @click="posRows.splice($index, 1)">×</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-          </div>
-        </div>
-      </el-collapse-item>
-    </el-collapse>
 
     <!-- 监管人工补录弹窗 -->
     <el-dialog v-model="openSurv" title="人工补录监管" width="420px">
@@ -381,8 +509,9 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { recordApi, importApi, reviewApi, prdApi, d5Api } from '../api/modules'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import EditableStatCard from '../components/EditableStatCard.vue'
 
 /* ======================================================================= */
@@ -503,6 +632,13 @@ async function loadTradingDays() {
   try {
     const r = await reviewApi.tradingDays()
     tradingDays.value = r?.data || []
+    // 从仪表盘「去处理」跳入：query.date 指定决策日，优先定位到它（在交易日集合里才采纳）
+    const route = useRoute()
+    const q = route.query?.date
+    if (q && tradingDays.value.includes(q)) {
+      form.tradeDate = q   // 触发下方 watch → handleDateChange
+      return
+    }
     // 进入页面优先选最近交易日：当前选中日不在交易日集合里就切到集合第一个（最近交易日）
     if (tradingDays.value.length && !tradingDays.value.includes(form.tradeDate)) {
       form.tradeDate = tradingDays.value[0]   // 触发下方 watch → handleDateChange
@@ -524,7 +660,13 @@ const stageTagType = computed(() => {
 
 const DISCIPLINES = ['遵守', '违约', '待执行']
 const posRows = ref([])
+const posTab = ref('hold')
 const savingPos = ref(false)
+/* 外溢②：昨日遗留决策带出 */
+const pendingCarry = ref([])
+const pendingCarryDate = ref('')
+const pendingAct = ref({})
+const markingPend = ref(false)
 
 async function loadRecord(date) {
   formReady.value = false
@@ -567,6 +709,8 @@ function handleDateChange(date) {
   loadRecord(date)
   loadDashboard(date)
   loadReuse(date)
+  loadPositions(date).catch(() => {})
+  loadPendingCarry(date)
 }
 watch(() => form.tradeDate, d => handleDateChange(d))
 
@@ -661,17 +805,94 @@ function saveFile(name, text) {
 
 /* 台账 */
 function addPositionRow() {
-  posRows.value.push({ stockCode: '', stockName: '', costPrice: null, currentPrice: null, floatPct: null, action: '', plannedAction: '', discipline: '' })
+  posRows.value.push({ stockCode: '', stockName: '', costPrice: null, currentPrice: null, floatPct: null, action: '', plannedAction: '', discipline: '', industry: '', boardNum: null, status: '持仓中', delayDays: null, disciplineScore: null, nextDayPlan: '', planOpen: '', planBreak: '', planLow: '', planFall: '', executed: 0, actualAction: '', _results: [], _loading: false })
 }
 async function savePositions() {
   const date = form.tradeDate
   if (!date) return
+  // 整表替换护栏：先确认再覆盖，避免手滑保存丢掉当天已录持仓
+  try {
+    await ElMessageBox.confirm(
+      `将整表替换 ${date} 的 ${posRows.value.length} 行持仓（替换前旧行会自动快照，可回滚），确认？`,
+      '覆盖持仓台账',
+      { confirmButtonText: '确认覆盖', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch { return }
   savingPos.value = true
   try {
-    await recordApi.savePositions(date, posRows.value)
-    ElMessage.success('持仓台账已存')
+    const rows = posRows.value.map(({ stockCode, stockName, costPrice, currentPrice, floatPct, action, plannedAction, discipline, industry, boardNum, status, delayDays, disciplineScore, nextDayPlan, planOpen, planBreak, planLow, planFall, executed, actualAction }) =>
+      ({ stockCode, stockName, costPrice, currentPrice, floatPct, action, plannedAction, discipline, industry, boardNum, status, delayDays, disciplineScore, nextDayPlan, planOpen, planBreak, planLow, planFall, executed, actualAction }))
+    await recordApi.savePositions(date, rows)
+    ElMessage.success('持仓台账已存（旧行已自动快照）')
   } catch (e) { /* 拦截器弹 */ } finally { savingPos.value = false }
 }
+
+/* 加载某日持仓台账回填编辑表 */
+async function loadPositions(date) {
+  const res = await recordApi.getPositions(date).catch(() => null)
+  if (form.tradeDate !== date) return
+  posRows.value = (res?.data || []).map((r) => ({
+    stockCode: r.stockCode || '', stockName: r.stockName || '',
+    costPrice: r.costPrice, currentPrice: r.currentPrice, floatPct: r.floatPct,
+    action: r.action || '', plannedAction: r.plannedAction || '', discipline: r.discipline || '',
+    industry: r.industry || '', boardNum: r.boardNum, status: r.status || '持仓中',
+    delayDays: r.delayDays, disciplineScore: r.disciplineScore, nextDayPlan: r.nextDayPlan || '',
+    planOpen: r.planOpen || '', planBreak: r.planBreak || '', planLow: r.planLow || '', planFall: r.planFall || '',
+    executed: r.executed || 0, actualAction: r.actualAction || '',
+    _results: [], _loading: false
+  }))
+}
+const holdingRows = computed(() => posRows.value.filter((r) => !r.status || r.status === '持仓中'))
+const clearedRows = computed(() => posRows.value.filter((r) => r.status === '今日清仓'))
+
+/* 外溢②：加载昨日遗留决策（未执行、且日期在当前交易日之前/等于当天） */
+async function loadPendingCarry(date) {
+  if (!date) return
+  const res = await recordApi.pendingPositions(date, 5).catch(() => null)
+  if (form.tradeDate !== date) return
+  const list = res?.data || []
+  pendingCarry.value = list
+  pendingCarryDate.value = list.length ? (list[0].tradeDate || '').slice(0, 10) : ''
+  const acts = {}
+  for (const p of list) acts[p.id] = p.actualAction || ''
+  pendingAct.value = acts
+}
+
+/* 外溢闭环：标记执行，回填实际动作，关闭裁决 */
+async function markExecuted(p) {
+  markingPend.value = true
+  try {
+    await recordApi.markPositionExecuted(p.id, pendingAct.value[p.id] || '')
+    ElMessage.success(`${p.stockName} 今日处理已记录，裁决关闭`)
+    await loadPendingCarry(form.tradeDate)
+    loadPositions(form.tradeDate).catch(() => {})
+  } catch (e) { /* 拦截器弹 */ } finally { markingPend.value = false }
+}
+
+/* 股票远程搜索下拉 + 台账汇总 */
+const searchStocks = async (q, row) => {
+  if (!q || !q.trim()) { row._results = []; return }
+  row._loading = true
+  try {
+    const d = await reviewApi.searchStocks(q.trim())
+    row._results = (Array.isArray(d) ? d : (d?.data || [])).slice(0, 12)
+  } catch (e) { row._results = [] } finally { row._loading = false }
+}
+function pickStock(row) {
+  const hit = (row._results || []).find((s) => s.code === row.stockCode)
+  row.stockName = hit ? hit.name : row.stockName
+}
+const ledgerSummary = computed(() => {
+  let cost = 0, price = 0
+  for (const r of posRows.value) {
+    const c = Number(r.costPrice), p = Number(r.currentPrice)
+    if (!Number.isNaN(c)) cost += c
+    if (!Number.isNaN(p)) price += p
+  }
+  const floatAmount = price - cost
+  const floatPct = cost ? (floatAmount / cost) * 100 : 0
+  return { totalCost: cost, totalPrice: price, floatAmount, floatPct }
+})
 
 /* 监管人工补录 */
 const openSurv = ref(false)
@@ -720,6 +941,7 @@ onMounted(async () => {
 .fetch-progress { background: #131c28; border: 1px solid #22303f; border-radius: 12px; padding: 12px 16px; margin-bottom: 18px; }
 .fp-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .fp-title { color: #8899a6; font-size: 13px; font-weight: 600; }
+.fp-help { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-left: 4px; border-radius: 50%; background: #2a3b4d; color: #67e8f9; font-size: 11px; font-weight: 700; line-height: 1; cursor: help; vertical-align: middle; }
 .fp-live { color: #22d3ee; font-size: 12px; animation: blink 1s steps(2, start) infinite; }
 @keyframes blink { to { opacity: .3; } }
 .fp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
@@ -891,7 +1113,30 @@ onMounted(async () => {
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 10px; }
 .action-row { display: flex; align-items: center; gap: 12px; margin: 14px 0; }
 .saved-score { color: #fbbf24; font-size: 13px; }
+.ledger-summary { display: flex; flex-wrap: wrap; gap: 16px 22px; margin-bottom: 10px; padding: 9px 12px; background: #121c2a; border: 1px solid #22303f; border-radius: 8px; font-size: 13px; color: #c7d3df; }
+.ledger-summary b { color: #fff; font-weight: 600; }
+.ledger-summary .up { color: #e3534f; }
+.ledger-summary .down { color: #22c55e; }
 .ledger .card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .ebb-chip { display: flex; gap: 8px; align-items: center; padding: 9px 12px; border-radius: 8px; background: rgba(239, 68, 68, .16); border: 1px solid #ef4444; color: #fecaca; font-size: 12.5px; margin-bottom: 12px; }
 .panel-warn { color: #d97706; font-size: 12px; margin: 8px 0; line-height: 1.5; }
+.pend-block { background: linear-gradient(135deg, rgba(245,158,11,.12), rgba(245,158,11,.04)); border: 1px solid #b45309; border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; }
+.pend-head { color: #fbbf24; font-size: 13.5px; font-weight: 700; margin-bottom: 8px; }
+.pend-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px dashed rgba(180,83,9,.35); flex-wrap: wrap; }
+.pend-row:first-of-type { border-top: none; }
+.pend-stock { color: #fff; font-size: 13px; min-width: 140px; }
+.pend-board { color: #f59e0b; font-size: 12px; margin-left: 6px; }
+.pend-ind { color: #94a3b8; font-size: 12px; margin-left: 6px; }
+.pend-plan { display: flex; gap: 10px; flex-wrap: wrap; flex: 1; }
+.pend-tier { background: #1c2a3a; color: #e2e8f0; font-size: 12px; padding: 2px 8px; border-radius: 6px; border: 1px solid #2a3b4f; }
+.pend-tip { color: #94a3b8; font-size: 12px; }
+.pend-act { display: flex; gap: 8px; align-items: center; }
+.pend-done { color: #22c55e; font-size: 12px; margin-top: 8px; }
+.plan-tiers { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.pt-label { color: #94a3b8; font-size: 12px; }
+.pt-cell { display: inline-flex; align-items: center; gap: 4px; color: #cbd5e0; font-size: 12px; }
+.pt-cell .el-input { width: 108px; }
+.pos-industry { color: #94a3b8; font-size: 12px; margin-left: 8px; }
+.pos-board { color: #f59e0b; font-size: 12px; margin-left: 6px; }
+.plan-tip { color: #94a3b8; font-size: 12px; margin-top: 8px; }
 </style>

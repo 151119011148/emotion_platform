@@ -4,10 +4,20 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.emotion.entity.Stock;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 
 public interface StockMapper extends BaseMapper<Stock> {
+
+    /**
+     * 模糊搜索股票：代码前缀命中或名称含 kw（拼音/汉字都可）。按代码是否精确、代码长度升序，
+     * 保证输入 6 位完整代码时精确命中排最前。
+     */
+    @Select("SELECT id, code, name, market, board FROM t_stock "
+            + "WHERE code LIKE CONCAT(#{kw}, '%') OR name LIKE CONCAT('%', #{kw}, '%') "
+            + "ORDER BY (code = #{kw}) DESC, LENGTH(code) ASC LIMIT 12")
+    List<Stock> search(@Param("kw") String kw);
 
     /**
      * 按 code 唯一键 upsert。

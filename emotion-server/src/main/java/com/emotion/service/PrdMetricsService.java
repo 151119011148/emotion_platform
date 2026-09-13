@@ -120,7 +120,7 @@ public class PrdMetricsService {
         public String zongLongAction;          // PROMOTE/HOLD/BREAK/ABSENT
         /** 总龙头判定依据（人话）：选取规则 + 同板高 tie-break + 今日状态证据。 */
         public String dragonReason;
-        /** 主线是否成立（评分对象已确认）：人工标记或自动主线（连续≥3 热度日）。连续天数口径见 {@link #consecutiveDays}，今天 3–4 仍活跃不算断。 */
+        /** 主线是否成立（评分对象已确认）：人工标记或自动主线（连续≥3 天）。连续天数口径见 {@link #consecutiveTop5Days}——连续排进板块前五才算一天。 */
         public boolean mainlineConfirmed;
         /** D2 评分对象是否由人工主线标记（t_mainline_mark）产生。 */
         public boolean manuallyMarked;
@@ -148,7 +148,7 @@ public class PrdMetricsService {
         public String theme;
         public int zt;                 // 当日涨停家数
         public int maxBoard;           // 板块内最高连板
-        public int persistenceDays;    // 连续热度天数（当日该行业 ZT≥5 往前数）
+        public int persistenceDays;    // 连续热度天数（连续排进板块表前五往前数）
         public String flag;            // NEW(1天🆕)/WATCH(2天)/MAIN(≥3天⭐)
         public boolean isMainline;     // persistenceDays >= MAINLINE_CONFIRM_DAYS
         public MarketStock leader;     // 板块内最高板（可 null）
@@ -417,7 +417,7 @@ public class PrdMetricsService {
         s.mainlineConfirmed = main != null && lineConfirmed;
         int mainZt = main == null ? 0 : (industryZt.get(main) == null ? 0 : industryZt.get(main));
         s.mainZt = mainZt;
-        s.persistenceDays = main == null ? null : consecutiveDays(dailyIndustryZt, date, main);
+        s.persistenceDays = main == null ? null : consecutiveTop5Days(dailyIndustryZt, date, main);
 
         // ---------- 高度（总龙头=最高连板；同板高取涨幅最大，同涨幅取代码保证确定性） ----------
         int maxBoard = 0;
@@ -510,7 +510,7 @@ public class PrdMetricsService {
                 s.metrics.put("amount_gather_pct", bd(p));
             }
         }
-        // 持续性：已在评分对象选择处经 consecutiveDays 算好（同一阈值 HOT_ZT_THRESHOLD），这里只落 metrics 键。
+        // 持续性：已在评分对象选择处经 consecutiveTop5Days 算好（连续进前五口径），这里只落 metrics 键。
         if (main != null) {
             s.metrics.put("persistence_days", BigDecimal.valueOf(s.persistenceDays == null ? 0 : s.persistenceDays));
         }
@@ -609,6 +609,10 @@ public class PrdMetricsService {
                 if (main != null && main.equals(row.getIndustry())) {
                     continue;
                 }
+                // 总龙头已占"全市场最高标"角色，不再兼作卡位，保证一只票全页唯一角色（总龙 > 中军 > 卡位 > 反包）。
+                if (zongLong != null && zongLong.getCode() != null && zongLong.getCode().equals(row.getCode())) {
+                    continue;
+                }
                 int n = row.getConsecutive() == null ? 1 : row.getConsecutive();
                 if (n > otherTop) {
                     otherTop = n;
@@ -690,7 +694,11 @@ public class PrdMetricsService {
 
     /**
      * 生命周期阶段（确定性规则，与主线详情页同源）：退潮优先（总龙头断板 BREAK，或主线涨停今日≤昨日一半），
-     * 否则持续性 ≥5 天或全市场 H≥7 → 亢奋；≥3 扩散；≥2 确认；其余萌芽。调用方须保证日内核心存在。
+     * 否则持续性 ≥5 天或全市场 H≥7 → 亢奋；≥4 扩散；≥2 确认；其余萌芽。
+     * <p>2026-09-13 收紧：扩散门槛从「连续 3 天」提到「连续 4 天」。因为持续性走的是「进前五」口径——
+     * 靠微弱家数（如元件 09-09/10 仅 2 家）蹭进前五也算一天，3 天就被判扩散会高估板块效应；
+     * 提到 4 天后，只有真正连续多日够强的板块才够到扩散/更高的 85 上限，避免对单日爆发的板块过早乐观。
+     * 调用方须保证日内核心存在。
      */
     static String lifecycleStage(int mainZt, int prevMainZt, String zongLongAction,
                                  Integer persistenceDays, int maxBoard) {
@@ -702,7 +710,7 @@ public class PrdMetricsService {
         if (days >= 5 || maxBoard >= 7) {
             return "亢奋";
         }
-        if (days >= 3) {
+        if (days >= 4) {
             return "扩散";
         }
         if (days >= 2) {
@@ -844,7 +852,9 @@ public class PrdMetricsService {
     }
 
     /**
-     * 任意行业的连续持续天数（走 PERSISTENCE_WINDOW），主线持续性与雷达区共用这一个口径，杜绝双标。
+     * 任意行业的"连续活跃天数"（≥{@link #SEED_ZT_THRESHOLD} 家涨停才算一天，走 PERSISTENCE_WINDOW）。
+     * 被板块表/主线的「进前五」口径 {@link #consecutiveTop5Days} 取代后，这个阈值口径仅保留给单测与
+     * 显式需要"活跃"语义的场景，不再作为主线的持续性来源——主线持续性统一走前五口径，杜绝双标。
      *
      * <p><b>活跃口径（2026-09-13 定稿）</b>：数的是"连续活跃"而不是"过热"。只要该行业当日涨停家数
      * 达到 {@link #SEED_ZT_THRESHOLD}（3 家，区别于"过热日" ≥ {@link #HOT_ZT_THRESHOLD}5），这一天就算

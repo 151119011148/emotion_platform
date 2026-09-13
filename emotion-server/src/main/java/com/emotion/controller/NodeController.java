@@ -56,6 +56,13 @@ public class NodeController {
         return ApiResponse.ok(nodeService.update(userId, id, event));
     }
 
+    @DeleteMapping("/{id}")
+    public ApiResponse<Void> delete(Authentication auth, @PathVariable Long id) {
+        Long userId = (Long) auth.getPrincipal();
+        nodeService.deleteNode(userId, id);
+        return ApiResponse.ok(null);
+    }
+
     /** 「从今日天梯新增节点」的轻量预填：D0日期/涨停跌停家数/最高板/今日龙头候选。只读本地表。 */
     @GetMapping("/ladder-intel")
     public ApiResponse<com.emotion.vo.NodePrefillVO> ladderIntel(Authentication auth,

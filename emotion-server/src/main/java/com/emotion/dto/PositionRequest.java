@@ -23,4 +23,28 @@ public class PositionRequest {
     private String plannedAction;
     /** 遵守 / 违约 / 待执行；留空 = 这行不参与纪律统计。 */
     private String discipline;
+    /** 所属板块/D2 核心板块。 */
+    private String industry;
+    /** 买入时板数。 */
+    private Integer boardNum;
+    /** 持仓中 / 今日清仓（三段式①/② 分组）。 */
+    private String status;
+    /** 清仓延迟天数（应做未及时做）。 */
+    private Integer delayDays;
+    /** 纪律评分 0-100，违规按延迟折减。 */
+    private Integer disciplineScore;
+    /** 次日处理决策（竞价裁决）。 */
+    private String nextDayPlan;
+    /** 次日高开→动作（分档①）。 */
+    private String planOpen;
+    /** 次日炸板→动作（分档②）。 */
+    private String planBreak;
+    /** 次日平开/低开→动作（分档③）。 */
+    private String planLow;
+    /** 次日跌停→动作（分档④）。 */
+    private String planFall;
+    /** 外溢闭环：0=待裁决，1=已标记执行。 */
+    private Integer executed;
+    /** 标记执行时回填的真实动作。 */
+    private String actualAction;
 }

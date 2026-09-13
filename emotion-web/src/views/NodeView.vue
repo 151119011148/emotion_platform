@@ -202,11 +202,13 @@
         </el-table-column>
         <el-table-column label="节点票" min-width="170" show-overflow-tooltip>
           <template #default="{ row }">
-            <div class="nc">
-              <span class="nc-name">{{ row.nodeStock || '—' }}</span>
-              <el-tag v-if="row.surveillance" type="danger" size="small" title="SEVERE/EXCH 监管">⚠</el-tag>
-              <el-tag v-if="row.nodeStockStatus" size="small"
-                :type="onLadder(row.nodeStockStatus) ? 'success' : 'danger'">{{ row.nodeStockStatus }}</el-tag>
+            <div class="node-stock">
+              <div class="ns-name" :title="row.nodeStock || ''">{{ row.nodeStock || '—' }}</div>
+              <div class="ns-meta" v-if="row.surveillance || row.nodeStockStatus">
+                <el-tag v-if="row.surveillance" type="danger" size="small" class="ns-tag" title="SEVERE/EXCH 监管">⚠ 监管</el-tag>
+                <el-tag v-if="row.nodeStockStatus" size="small" class="ns-tag"
+                  :type="onLadder(row.nodeStockStatus) ? 'success' : 'danger'">{{ row.nodeStockStatus }}</el-tag>
+              </div>
             </div>
           </template>
         </el-table-column>
@@ -215,7 +217,7 @@
             <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
             <div class="reason-tags" v-if="reasonTags(row).length">
               <el-tag v-for="t in reasonTags(row)" :key="t" size="small"
-                :type="row.status === '失效' ? 'danger' : 'success'" class="reason-tag">{{ t }}</el-tag>
+                :type="row.status === '失效' ? 'danger' : 'success'" class="reason-tag">{{ reasonLabel(t) }}</el-tag>
             </div>
           </template>
         </el-table-column>
@@ -229,9 +231,12 @@
             <span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="88" fixed="right">
+        <el-table-column label="操作" min-width="120" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" text type="primary" @click="openSuggest(row)">复算</el-button>
+            <div class="nc">
+              <el-button size="small" text type="primary" @click="openSuggest(row)">复算</el-button>
+              <el-button size="small" text type="danger" @click="handleDelete(row)">删除</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -403,7 +408,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { nodeApi, anchorsApi } from '../api/modules'
 import NodeSuggestPanel from '../components/NodeSuggestPanel.vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const router = useRouter()
 const currentNode = ref(null)
@@ -556,7 +561,14 @@ function buildPlan(system, ld) {
     ? ladderLeaders.value.filter(x => x.industry && x.industry === ld.industry)
     : ladderLeaders.value
   const cands = sameIndustry.map(x => x.name)
-  const candsText = cands.length ? cands.slice(0, 6).join('、') + (cands.length > 6 ? ' 等' + cands.length + '只' : '') : '（候选为空）'
+  let candsText
+  if (cands.length) {
+    candsText = cands.slice(0, 6).join('、') + (cands.length > 6 ? ' 等' + cands.length + '只' : '')
+  } else if (system === 'B' && ld.industry) {
+    candsText = `（候选为空：板块「${ld.industry}」今日涨停池无≥2板，板块当日退潮）`
+  } else {
+    candsText = '（候选为空）'
+  }
   return {
     systemType: system,
     anchorStock: ld.name,
@@ -710,6 +722,13 @@ function reasonTags(row) {
   ;(row.causeTags || []).forEach(t => { if (!tags.includes(t)) tags.push(t) })
   return tags
 }
+/** 副标签去重显示：主状态标签已含「有效/失效」，副标签只留强度或机理，避免「有效·强」与「有效」并列重复。 */
+function reasonLabel(t) {
+  const m = /^(有效|失效)\W?(.*)$/.exec(t)
+  if (m && m[2]) return m[2]
+  if (t.endsWith('失效') && t !== '失效') return t.slice(0, -2)
+  return t
+}
 /** 周期阶段可能带括注（如"退潮(强制)"），按前缀落到六态色带对应的段上。 */
 function stageKey(cycle) {
   if (!cycle) return ''
@@ -732,6 +751,26 @@ function evaluateFilters(detail) {
     out[rule.flag] = v == null ? null : rule.pass(v)
   }
   return out
+}
+
+async function handleDelete(row) {
+  const label = `${row.d0Date || ''} ${row.anchorName || row.anchorStock || ''} ${row.systemType === 'A' ? '总节点' : '板块节点'}`.trim()
+  try {
+    await ElMessageBox.confirm(`确定删除节点「${label}」？此操作不可撤销。`, '删除节点事件', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch (e) {
+    return
+  }
+  try {
+    await nodeApi.deleteNode(row.id)
+    ElMessage.success('已删除')
+    loadNodes()
+  } catch (e) {
+    ElMessage.error('删除失败')
+  }
 }
 
 async function loadNodes() {
@@ -898,6 +937,10 @@ onMounted(() => {
 .nc .el-tag { margin: 0; }
 .nboard { color: #9fb2c6; font-size: 11px; white-space: nowrap; }
 .nc-theme { color: #8899a6; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.node-stock { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ns-name { font-weight: 600; color: #e6ecf2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ns-meta { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.ns-tag { margin: 0; }
 
 .filter-field { width: 100%; }
 .filter-field-label { display: block; font-size: 12px; color: #8899a6; margin-bottom: 4px; }

@@ -80,12 +80,12 @@ function buildOption() {
   const dates = rows.map((r) => r.date)
   const range = axisRange(rows)
   // 只画与可见纵轴重叠的带（自适应缩放后越界的带不铺，避免一大片无意义底色）。
-  // 带名不再标在图上：markArea 逐带 label 会被渲染成堆叠乱文（实测四带名字挤成一团），
-  // 带义由右上角图例 + 阈值虚线承担
+  // 不渲染带名：markArea 数据项一旦带 name 就会被 ECharts 渲染成带内堆叠文字（实测四带名
+  // 挤成一团乱文）。因此这里不传 name，并在 markArea 上显式 label.show=false 双保险。
   const bands = BANDS
     .filter((b) => b.max > range.min && b.min < range.max)
     .map((b) => [
-      { name: b.label, yAxis: Math.max(b.min, range.min), itemStyle: { color: b.fill } },
+      { yAxis: Math.max(b.min, range.min), itemStyle: { color: b.fill } },
       { yAxis: Math.min(b.max, range.max), itemStyle: { color: b.fill } }
     ])
 
@@ -201,6 +201,7 @@ function buildOption() {
         },
         markArea: {
           silent: true,
+          label: { show: false },
           data: bands
         },
         markPoint: {

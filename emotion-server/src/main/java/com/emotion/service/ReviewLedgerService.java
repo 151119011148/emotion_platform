@@ -6,7 +6,9 @@ import com.emotion.dto.PredictionRequest;
 import com.emotion.entity.Position;
 import com.emotion.entity.Prediction;
 import com.emotion.entity.Stock;
+import com.emotion.entity.MarketStock;
 import com.emotion.mapper.StockMapper;
+import com.emotion.mapper.MarketStockMapper;
 import com.emotion.util.ReviewImportParser;
 import org.springframework.stereotype.Service;
 
@@ -47,13 +49,16 @@ public class ReviewLedgerService {
     private final PositionStore positionStore;
     private final PredictionStore predictionStore;
     private final StockMapper stockMapper;
+    private final MarketStockMapper marketStockMapper;
 
     public ReviewLedgerService(PositionStore positionStore,
                                PredictionStore predictionStore,
-                               StockMapper stockMapper) {
+                               StockMapper stockMapper,
+                               MarketStockMapper marketStockMapper) {
         this.positionStore = positionStore;
         this.predictionStore = predictionStore;
         this.stockMapper = stockMapper;
+        this.marketStockMapper = marketStockMapper;
     }
 
     /**
@@ -105,10 +110,78 @@ public class ReviewLedgerService {
                 continue;
             }
             p.setDiscipline(discipline.isEmpty() ? null : discipline);
+            p.setIndustry(emptyToNull(r.getIndustry()));
+            p.setBoardNum(r.getBoardNum());
+            String status = trim(r.getStatus());
+            if (!status.isEmpty() && !"持仓中".equals(status) && !"今日清仓".equals(status)) {
+                errors.add(at + "状态只能是 持仓中/今日清仓，收到：" + status);
+                continue;
+            }
+            p.setStatus(status.isEmpty() ? null : status);
+            p.setDelayDays(r.getDelayDays());
+            p.setDisciplineScore(rangeScore(errors, at, "纪律分", r.getDisciplineScore()));
+            p.setNextDayPlan(emptyToNull(r.getNextDayPlan()));
+            p.setPlanOpen(emptyToNull(r.getPlanOpen()));
+            p.setPlanBreak(emptyToNull(r.getPlanBreak()));
+            p.setPlanLow(emptyToNull(r.getPlanLow()));
+            p.setPlanFall(emptyToNull(r.getPlanFall()));
+            // executed：前端可不传（默认0=待裁决）；显式传1视为已标记执行
+            p.setExecuted(r.getExecuted() == null ? 0 : (r.getExecuted() == 1 ? 1 : 0));
+            p.setActualAction(emptyToNull(r.getActualAction()));
             out.add(p);
         }
         throwIfAny(errors);
         return positionStore.replaceForDate(userId, date, out);
+    }
+
+    /** 读取某日持仓台账（含三段式扩展列 + 次日决策分档/外溢列），日期切换时前端回填编辑表。 */
+    public List<Position> readPositions(Long userId, LocalDate date) {
+        List<Position> rows = positionStore.read(userId, date);
+        fillClosePrice(date, rows);
+        return rows;
+    }
+
+    /** 现价为空时，从当日行情明细表回填收盘价（方案 P1：现价自动取行情，不手填）。 */
+    private void fillClosePrice(LocalDate date, List<Position> rows) {
+        if (rows.isEmpty()) {
+            return;
+        }
+        for (Position p : rows) {
+            if (p.getCurrentPrice() != null) {
+                continue;
+            }
+            if (p.getStockCode() == null || p.getStockCode().isEmpty()) {
+                continue;
+            }
+            // t_market_stock 一天一行池内记录，同一只股可能出现在涨停/炸板池；按 code 取当日任一池收盘价
+            List<MarketStock> hits = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
+                    .eq(MarketStock::getTradeDate, date)
+                    .eq(MarketStock::getCode, p.getStockCode())
+                    .last("LIMIT 1"));
+            if (!hits.isEmpty() && hits.get(0).getClosePrice() != null) {
+                BigDecimal close = hits.get(0).getClosePrice();
+                p.setCurrentPrice(close);
+                // 顺带补算浮动%（原 Supplier 语义：手记值是 final，这里只在确实有空档时反推）
+                if (p.getFloatPct() == null) {
+                    p.setFloatPct(floatPctOf(p.getCostPrice(), close));
+                }
+            }
+        }
+    }
+
+    /** 最近待裁决持仓（外溢点①：仪表盘「待裁决」卡）。 */
+    public Position latestPendingPosition(Long userId, LocalDate beforeOrEqual) {
+        return positionStore.latestPending(userId, beforeOrEqual);
+    }
+
+    /** 次日页顶部「昨日遗留决策」：最近一批未执行决策。 */
+    public List<Position> pendingPositions(Long userId, LocalDate beforeOrEqual, int limit) {
+        return positionStore.pendingList(userId, beforeOrEqual, limit);
+    }
+
+    /** 标记某持仓已执行，闭环：回填真实动作，executed 置 1。 */
+    public boolean markPositionExecuted(Long userId, Long positionId, String actualAction) {
+        return positionStore.markExecuted(userId, positionId, emptyToNull(actualAction));
     }
 
     /**
@@ -223,6 +296,18 @@ public class ReviewLedgerService {
         if (!errors.isEmpty()) {
             throw new IllegalArgumentException(String.join("；", errors));
         }
+    }
+
+    /** 纪律评分校验：0-100 整数，越界或负数告警。 */
+    private static Integer rangeScore(List<String> errors, String at, String label, Integer value) {
+        if (value == null) {
+            return null;
+        }
+        if (value < 0 || value > 100) {
+            errors.add(at + label + "要在 0-100 之间，收到：" + value);
+            return null;
+        }
+        return value;
     }
 
     private static boolean blankPosition(PositionRequest r) {

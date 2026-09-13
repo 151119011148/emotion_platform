@@ -3,7 +3,7 @@
     <div class="page-header">
       <h2>主线与日内核心
         <DimIntroTip title="主线区（已确认·打D2分）+ 雷达区（候选池·不打D2分）双轨，与打分引擎同源"
-          body="雷达区=当日所有有涨停的行业扫描（只标连续天数与强度）；连续 3 个交易日（含今天）该行业涨停≥5 家，才晋级主线区打 D2 分。雷达区可点击「升级到主线区」落人工标记。" />
+          body="雷达区=当日所有有涨停的行业扫描（只标连续天数与强度）；连续 3 个交易日（含今天）该行业排进板块前五，才晋级主线区打 D2 分。雷达区可点击「升级到主线区」落人工标记。" />
       </h2>
       <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" :clearable="false"
         :disabled-date="notBeforeToday" style="width: 168px" />
@@ -324,9 +324,9 @@ function rankIndex(i) {
 function mainlineTitle() {
   const v = vo.value
   if (v?.mainlineConfirmed) {
-    return `「${v.mainIndustry}」已连续 ${v.persistenceDays ?? 0} 个交易日有热度（≥5 家涨停），已晋级为主线`
+    return `「${v.mainIndustry}」已连续 ${v.persistenceDays ?? 0} 个交易日排进板块前五，已晋级为主线`
   }
-  return `「${v.mainIndustry}」今日最热但热度未满连续 3 个交易日（当前 ${v.persistenceDays ?? 0} 天），暂为日内核心，未晋级主线`
+  return `「${v.mainIndustry}」今日最热但排进前五未满连续 3 个交易日（当前 ${v.persistenceDays ?? 0} 天），暂为日内核心，未晋级主线`
 }
 
 /** 该雷达行是否是当前人工标记的主线（显示「取消升级」）。 */

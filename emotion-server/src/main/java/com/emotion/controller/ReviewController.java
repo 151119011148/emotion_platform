@@ -16,6 +16,7 @@ import com.emotion.entity.IndustrySnapshot;
 import com.emotion.entity.MarketDaily;
 import com.emotion.entity.ReviewFetch;
 import com.emotion.mapper.MarketStockMapper;
+import com.emotion.mapper.StockMapper;
 import com.emotion.mapper.SurveillanceMapper;
 import com.emotion.market.SurveillanceKind;
 import com.emotion.market.SurveillanceNotice;
@@ -71,6 +72,7 @@ public class ReviewController {
     private final SurveillanceService surveillanceService;
     private final SurveillanceMapper surveillanceMapper;
     private final MarketStockMapper marketStockMapper;
+    private final StockMapper stockMapper;
     private final ConceptIndexService conceptIndexService;
     private final TopicHeatService topicHeatService;
     private final TencentClient tencent;
@@ -87,6 +89,7 @@ public class ReviewController {
                             SurveillanceService surveillanceService,
                             SurveillanceMapper surveillanceMapper,
                             MarketStockMapper marketStockMapper,
+                            StockMapper stockMapper,
                             ConceptIndexService conceptIndexService,
                             TopicHeatService topicHeatService,
                             TencentClient tencent,
@@ -102,6 +105,7 @@ public class ReviewController {
         this.surveillanceService = surveillanceService;
         this.surveillanceMapper = surveillanceMapper;
         this.marketStockMapper = marketStockMapper;
+        this.stockMapper = stockMapper;
         this.conceptIndexService = conceptIndexService;
         this.topicHeatService = topicHeatService;
         this.tencent = tencent;
@@ -116,6 +120,15 @@ public class ReviewController {
         List<LocalDate> days = marketStockMapper.listDetailDatesBetween(from, today);
         Collections.reverse(days); // 降序：最近交易日在前，前端默认取第一个
         return ApiResponse.ok(days.stream().map(LocalDate::toString).collect(Collectors.toList()));
+    }
+
+    /** 股票远程搜索（A股字典 t_stock）：按代码前缀 / 名称模糊，供持仓台账选股下拉使用。 */
+    @GetMapping("/stocks/search")
+    public ApiResponse<List<com.emotion.entity.Stock>> searchStocks(@RequestParam String kw) {
+        if (kw == null || kw.trim().isEmpty()) {
+            return ApiResponse.ok(Collections.emptyList());
+        }
+        return ApiResponse.ok(stockMapper.search(kw.trim()));
     }
 
     /** 一键拉取：T1-T8 编排 + SSE 流式进度。每个任务先发 running 再发终结状态。 */
