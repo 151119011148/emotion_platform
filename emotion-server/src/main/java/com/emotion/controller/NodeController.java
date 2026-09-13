@@ -9,6 +9,7 @@ import com.emotion.vo.NodeSuggestVO;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -31,19 +32,19 @@ public class NodeController {
     }
 
     @GetMapping
-    public ApiResponse<List<NodeEvent>> list(Authentication auth) {
+    public ApiResponse<List<com.emotion.vo.NodeVO>> list(Authentication auth) {
         Long userId = (Long) auth.getPrincipal();
         return ApiResponse.ok(nodeService.listByUser(userId));
     }
 
     @GetMapping("/current")
-    public ApiResponse<NodeEvent> getCurrent(Authentication auth) {
+    public ApiResponse<com.emotion.vo.NodeVO> getCurrent(Authentication auth) {
         Long userId = (Long) auth.getPrincipal();
         return ApiResponse.ok(nodeService.getCurrent(userId));
     }
 
     @PostMapping
-    public ApiResponse<NodeEvent> create(Authentication auth, @RequestBody NodeEvent event) {
+    public ApiResponse<com.emotion.vo.NodeVO> create(Authentication auth, @RequestBody NodeEvent event) {
         Long userId = (Long) auth.getPrincipal();
         return ApiResponse.ok(nodeService.create(userId, event));
     }
@@ -55,7 +56,16 @@ public class NodeController {
         return ApiResponse.ok(nodeService.update(userId, id, event));
     }
 
-    /** 复算一遍：建议是什么、哪几条读数、缺哪一样，全部摊开。只读，不写库。 */
+    /** 「从今日天梯新增节点」的轻量预填：D0日期/涨停跌停家数/最高板/今日龙头候选。只读本地表。 */
+    @GetMapping("/ladder-intel")
+    public ApiResponse<com.emotion.vo.NodePrefillVO> ladderIntel(Authentication auth,
+                                                                 @RequestParam(required = false) String date) {
+        LocalDate d = (date == null || date.trim().isEmpty()) ? null : LocalDate.parse(date);
+        return ApiResponse.ok(nodeService.ladderIntel(d));
+    }
+
+    /**
+     * 复算一遍：建议是什么、哪几条读数、缺哪一样，全部摊开。只读，不写库。 */
     @GetMapping("/{id}/suggest")
     public ApiResponse<NodeSuggestVO> suggest(Authentication auth, @PathVariable Long id) {
         Long userId = (Long) auth.getPrincipal();

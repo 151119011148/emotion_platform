@@ -4,11 +4,15 @@ import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.emotion.dto.MainlinePromoteRequest;
 import com.emotion.market.MarketDataException;
 import com.emotion.service.MainlineService;
 import com.emotion.service.PrdMetricsService;
@@ -61,6 +65,20 @@ public class PrdController {
     public ApiResponse<MainlineVO> mainline(Authentication auth,
                                             @RequestParam(required = false) String date) {
         return ApiResponse.ok(mainlineService.vo(userId(auth), parse(date)));
+    }
+
+    /** 双轨 v0.2：雷达区「升级到主线区」→ 落人工主线标记，返回更新后的双轨数据。 */
+    @PostMapping("/mainline/promote")
+    public ApiResponse<MainlineVO> promote(Authentication auth,
+                                           @RequestBody MainlinePromoteRequest req) {
+        return ApiResponse.ok(mainlineService.promote(userId(auth), req.getTradeDate(), req.getIndustry()));
+    }
+
+    /** 双轨 v0.2：取消人工主线标记，返回更新后的双轨数据。 */
+    @DeleteMapping("/mainline/promote")
+    public ApiResponse<MainlineVO> cancel(Authentication auth,
+                                          @RequestBody MainlinePromoteRequest req) {
+        return ApiResponse.ok(mainlineService.cancel(userId(auth), req.getTradeDate(), req.getIndustry()));
     }
 
     /** 登录态里带的是账号 id（JwtAuthFilter 放进 principal），题材行按它查各自的登记。 */

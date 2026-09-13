@@ -1,16 +1,43 @@
 <template>
   <div class="market-page">
     <div class="page-header">
-      <h2>大盘生态</h2>
+      <h2>大盘生态
+        <DimIntroTip title="第 1 维 · 大盘生态（权重 25%）：指数环境 35 / 量能 25 / 广度 20 / 涨跌停 20"
+          body="指数与盘面读数全部来自本地表（复盘 md 导入或行情回补）；打分明细与仪表盘第 1 维同源，改权重刷新即变。" />
+      </h2>
       <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" :clearable="false"
         :disabled-date="notBeforeToday" style="width: 168px" />
     </div>
-    <el-alert class="intro" type="info" :closable="false" show-icon>
-      <template #title>第 1 维 · 大盘生态（权重 25%）：指数环境 35 / 量能 25 / 广度 20 / 涨跌停 20</template>
-      <div class="intro-body">
-        <p>指数与盘面读数全部来自本地表（复盘 md 导入或行情回补）；打分明细与仪表盘第 1 维同源，改权重刷新即变。</p>
+
+    <!-- D1 打分明细 -->
+    <section class="block score-block" :class="{ 'score-collapsed': !scoreOpen }" v-loading="scoring.detailLoading">
+      <div class="block-head score-head" @click="scoreOpen = !scoreOpen">
+        <h3>大盘生态打分 <span class="fold-tag">{{ scoreOpen ? '收起 ▲' : '展开 ▼' }}</span></h3>
+        <span v-if="marketDim" class="dim-score" :class="bandClass(marketDim.score)">
+          {{ marketDim.score == null ? '未评' : Number(marketDim.score).toFixed(2) + ' 分' }}
+        </span>
       </div>
-    </el-alert>
+      <div v-show="scoreOpen">
+      <el-empty v-if="!marketDim" description="当日读数未取到，第 1 维未评（不计入分母）" :image-size="60" />
+      <el-table v-else :data="marketDim.children || []">
+        <el-table-column prop="label" label="子项" width="120" />
+        <el-table-column label="权重" width="80">
+          <template #default="{ row }">×{{ row.weight }}</template>
+        </el-table-column>
+        <el-table-column label="得分" width="90" align="right">
+          <template #default="{ row }">
+            <span v-if="row.score == null" class="missing">未评</span>
+            <span v-else :class="bandClass(row.score)">{{ Number(row.score).toFixed(0) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="读数 / 命中档" min-width="260">
+          <template #default="{ row }">
+            <span class="band-hit">{{ row.bandHit || strategyText(row) || '—' }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      </div>
+    </section>
 
     <!-- 强制退潮：命中即无视总分按退潮应对（引擎 forcedEbb 真值，非前端阈值） -->
     <div v-if="forcedEbb" class="ebb-banner">
@@ -20,6 +47,9 @@
         <span class="ebb-reason">{{ forcedEbbReason || '详见五维结构信号' }}</span>
       </div>
     </div>
+
+    <!-- D1 分走势：点任意一天切日期 -->
+    <DimScoreCurve :rows="curveRows" :selected="date" name="大盘生态" @select="date = $event" />
 
     <!-- 五大指数 -->
     <section class="block" v-loading="loading">
@@ -70,34 +100,6 @@
         <span class="stat-sub">家</span>
       </div>
     </div>
-
-    <!-- D1 打分明细 -->
-    <section class="block" v-loading="scoring.detailLoading">
-      <div class="block-head">
-        <h3>大盘生态打分</h3>
-        <span v-if="marketDim" class="dim-score" :class="bandClass(marketDim.score)">
-          {{ marketDim.score == null ? '未评' : Number(marketDim.score).toFixed(2) + ' 分' }}
-        </span>
-      </div>
-      <el-empty v-if="!marketDim" description="当日读数未取到，第 1 维未评（不计入分母）" :image-size="60" />
-      <el-table v-else :data="marketDim.children || []">
-        <el-table-column prop="label" label="子项" width="120" />
-        <el-table-column label="权重" width="80">
-          <template #default="{ row }">×{{ row.weight }}</template>
-        </el-table-column>
-        <el-table-column label="得分" width="90" align="right">
-          <template #default="{ row }">
-            <span v-if="row.score == null" class="missing">未评</span>
-            <span v-else :class="bandClass(row.score)">{{ Number(row.score).toFixed(0) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="读数 / 命中档" min-width="260">
-          <template #default="{ row }">
-            <span class="band-hit">{{ row.bandHit || strategyText(row) || '—' }}</span>
-          </template>
-        </el-table-column>
-      </el-table>
-    </section>
   </div>
 </template>
 
@@ -107,6 +109,8 @@ import { useRoute } from 'vue-router'
 import { marketApi, recordApi } from '../api/modules'
 import { useScoringStore } from '../stores/scoring'
 import { signed, fiveDimBandClassOf } from '../utils/scores'
+import DimScoreCurve from '../components/DimScoreCurve.vue'
+import DimIntroTip from '../components/DimIntroTip.vue'
 
 const route = useRoute()
 const scoring = useScoringStore()
@@ -118,6 +122,13 @@ const loading = ref(false)
 const indexes = ref([])
 const idxTradeDate = ref('')
 const record = ref(null)
+
+/** 曲线往回取多少个日历日去凑最近 30 个交易日：留足长假，取 90 天。 */
+const LOOKBACK_DAYS = 90
+const CURVE_ROWS = 30
+const curveRows = ref([])
+// D1 打分明细默认折叠
+const scoreOpen = ref(false)
 
 const metrics = computed(() => scoring.detail?.metrics || {})
 const marketDim = computed(() => (scoring.detail?.dims || []).find((d) => d.key === 'market') || null)
@@ -174,6 +185,13 @@ function notBeforeToday(d) {
   return d.getTime() > Date.now()
 }
 
+/** 补 T00:00:00 按本地时区解析，否则 new Date('2026-09-04') 走 UTC 会少一天。 */
+function shiftDays(iso, days) {
+  const d = new Date(iso + 'T00:00:00')
+  d.setDate(d.getDate() - days)
+  return d.toLocaleDateString('en-CA')
+}
+
 async function load() {
   loading.value = true
   try {
@@ -184,6 +202,12 @@ async function load() {
     indexes.value = idxRes?.data?.indexes || []
     idxTradeDate.value = idxRes?.data?.tradeDate || ''
     record.value = recRes?.data || null
+    // 曲线与异动监管页同一取数口：range 返回按日升序，切出最近一段直接喂图
+    const rangeRes = await recordApi.getRange(shiftDays(date.value, LOOKBACK_DAYS), date.value).catch(() => null)
+    curveRows.value = ((rangeRes && rangeRes.data) || []).slice(-CURVE_ROWS).map((r) => ({
+      date: r.tradeDate,
+      score: r.scoreMarket
+    }))
     // 实时家数只在看今天时有意义
     liveBreadth.value = null
     if (date.value === todayStr) {
@@ -270,6 +294,29 @@ watch(date, load)
   font-size: 15px;
   color: #e1e8ed;
 }
+
+/* 打分明细折叠头（与连板/首板页同一套） */
+.score-head { cursor: pointer; user-select: none; border-radius: 8px; transition: background .15s; }
+.score-head:hover { background: rgba(255, 255, 255, .025); }
+.score-head:hover h3 { color: #fff; }
+.fold-tag {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  color: #9fb2c6;
+  background: #22303f;
+  border: 1px solid #3a4d63;
+  border-radius: 999px;
+  line-height: 1.7;
+  transition: color .18s, border-color .18s, background .18s, transform .12s;
+  vertical-align: middle;
+}
+.score-head:hover .fold-tag { color: #ffd166; border-color: #ffd166; background: #2b3d52; }
+.score-head:active .fold-tag { transform: translateY(1px); background: #2f4258; }
+.score-block.score-collapsed .block-head { margin-bottom: 0; border-bottom: 1px dashed #33455a; }
 .sub {
   font-size: 12px;
   color: #8899a6;

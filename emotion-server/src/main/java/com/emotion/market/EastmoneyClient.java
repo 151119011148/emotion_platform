@@ -84,6 +84,154 @@ public class EastmoneyClient {
         return pool("/getTopicZTPool", "fbt%3Aasc", date);
     }
 
+    // ---------- 概念板块（D2 题材索引） ----------
+
+    /**
+     * 全市场概念板块清单（东财 m:90+t:3，504 个左右）。pz 硬上限 100，只能按 pn 翻页；
+     * 每一页返回该板块的 BK 代码（f12）与名称（f14）。进阶翻页护栏见 {@link #allStocks()}。
+     */
+    public List<ConceptBoard> listConcepts() {
+        List<ConceptBoard> all = new ArrayList<>();
+        for (int pn = 1; pn <= MAX_LIST_PAGES; pn++) {
+            String url = listBase + "/api/qt/clist/get"
+                    + "?ut=" + ut + "&pn=" + pn + "&pz=" + LIST_PAGE_SIZE
+                    + "&po=1&np=1&fltt=2&invt=2&fid=f3"
+                    + "&fs=m:90+t:3+f:!50"
+                    + "&fields=f12,f14";
+            ConceptBoardsPage page = parseConceptBoards(fetcher.getText(url));
+            if (!page.isOk()) {
+                throw new RuntimeException("概念板块清单第 " + pn + " 页失败：" + page.getReason());
+            }
+            all.addAll(page.getRows());
+            if (all.size() >= page.getTotal() || page.getRows().isEmpty()) {
+                return all;
+            }
+            if (pn == MAX_LIST_PAGES) {
+                log.warn("概念板块清单撞上页数护栏 {}，结果可能不全", MAX_LIST_PAGES);
+                return all;
+            }
+        }
+        return all;
+    }
+
+    /** 包级可见，便于用 fixture 离线单测。 */
+    ConceptBoardsPage parseConceptBoards(String body) {
+        ConceptBoardsPage page = new ConceptBoardsPage();
+        if (body == null) {
+            page.setOk(false);
+            page.setReason("行情源无响应");
+            return page;
+        }
+        JsonNode data;
+        try {
+            JsonNode root = mapper.readTree(body);
+            if (root.path("rc").asInt(-1) != 0) {
+                page.setOk(false);
+                page.setReason("行情源返回码 " + root.path("rc").asInt(-1));
+                return page;
+            }
+            data = root.path("data");
+            if (data.isMissingNode() || data.isNull()) {
+                page.setOk(false);
+                page.setReason("行情源未给出概念板块清单");
+                return page;
+            }
+        } catch (IOException e) {
+            log.warn("概念板块清单响应解析失败: {}", e.getClass().getSimpleName());
+            page.setOk(false);
+            page.setReason("行情源响应无法解析");
+            return page;
+        }
+        page.setOk(true);
+        page.setTotal(data.path("total").asInt(0));
+        for (JsonNode node : data.path("diff")) {
+            String code = text(node, "f12");
+            String name = text(node, "f14");
+            if (code == null || name == null) {
+                continue;
+            }
+            ConceptBoard b = new ConceptBoard();
+            b.setCode(code);
+            b.setName(name);
+            page.getRows().add(b);
+        }
+        return page;
+    }
+
+    /**
+     * 一个概念板块的全部成分股（f12 股票代码 + f14 简称）。板块成员一般不足 100，
+     * 但留翻页护栏以防哪天概念被做到超大。
+     */
+    public ConceptMembers conceptMembers(String conceptCode) {
+        ConceptMembers merged = new ConceptMembers();
+        for (int pn = 1; pn <= MAX_LIST_PAGES; pn++) {
+            String url = listBase + "/api/qt/clist/get"
+                    + "?ut=" + ut + "&pn=" + pn + "&pz=" + LIST_PAGE_SIZE
+                    + "&po=1&np=1&fltt=2&invt=2&fid=f12"
+                    + "&fs=b:" + conceptCode
+                    + "&fields=f12,f14";
+            ConceptMembers page = parseConceptMembers(fetcher.getText(url));
+            if (!page.isOk()) {
+                throw new RuntimeException("概念 " + conceptCode + " 成分股第 " + pn + " 页失败：" + page.getReason());
+            }
+            merged.setOk(true);
+            merged.setTotal(page.getTotal());
+            merged.getRows().addAll(page.getRows());
+            if (page.getRows().isEmpty() || merged.getRows().size() >= merged.getTotal()) {
+                return merged;
+            }
+            if (pn == MAX_LIST_PAGES) {
+                log.warn("概念 {} 成分股撞上页数护栏 {}，结果可能不全", conceptCode, MAX_LIST_PAGES);
+                return merged;
+            }
+        }
+        return merged;
+    }
+
+    /** 包级可见，便于用 fixture 离线单测。 */
+    ConceptMembers parseConceptMembers(String body) {
+        ConceptMembers m = new ConceptMembers();
+        if (body == null) {
+            m.setOk(false);
+            m.setReason("行情源无响应");
+            return m;
+        }
+        JsonNode data;
+        try {
+            JsonNode root = mapper.readTree(body);
+            if (root.path("rc").asInt(-1) != 0) {
+                m.setOk(false);
+                m.setReason("行情源返回码 " + root.path("rc").asInt(-1));
+                return m;
+            }
+            data = root.path("data");
+            if (data.isMissingNode() || data.isNull()) {
+                m.setOk(false);
+                m.setReason("行情源未给出成分股");
+                return m;
+            }
+        } catch (IOException e) {
+            log.warn("概念成分股响应解析失败: {}", e.getClass().getSimpleName());
+            m.setOk(false);
+            m.setReason("行情源响应无法解析");
+            return m;
+        }
+        m.setOk(true);
+        m.setTotal(data.path("total").asInt(0));
+        for (JsonNode node : data.path("diff")) {
+            String code = text(node, "f12");
+            String name = text(node, "f14");
+            if (code == null) {
+                continue;
+            }
+            com.emotion.market.StockRow row = new com.emotion.market.StockRow();
+            row.setCode(code);
+            row.setName(name);
+            m.getRows().add(row);
+        }
+        return m;
+    }
+
     public PoolResult limitDown(LocalDate date) {
         return pool("/getTopicDTPool", "fund%3Aasc", date);
     }

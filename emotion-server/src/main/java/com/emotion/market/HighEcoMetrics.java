@@ -96,11 +96,15 @@ public final class HighEcoMetrics {
         return DUAN_BAN;
     }
 
-    // ---------------- 高位阈值（动态，承接 PRD 3.1） ----------------
+    // ---------------- 高位阈值（固定 ≥5，承接原型四层划界） ----------------
 
-    /** H>=5: 高位=5板及以上；H<5: 高位=H-1板及以上（最高板+次高板，至少 3 板）。 */
+    /**
+     * 高位=5板及以上（固定）。与 中位=3-4板、低位=2板 构成互斥三档，避免高点不高时的
+     * 「高位回落到 3 板与中位 3-4 板重叠」问题；最高板 H<5 时高位家数为 0（无 5 板股），
+     * 属合理空态而非兜 0。
+     */
     public static int highThreshold(int h) {
-        return h >= 5 ? 5 : Math.max(3, h - 1);
+        return 5;
     }
 
     // ---------------- 子项1：阵眼个体 ----------------
@@ -382,6 +386,39 @@ public final class HighEcoMetrics {
             return false;
         }
         return counts.getOrDefault(3, 0) == 0 && counts.getOrDefault(4, 0) == 0;
+    }
+
+    // ---------------- D5 强信号守卫（否决权/无头折扣/强制封顶，2026-09-13） ----------------
+
+    /** 监管反馈否决权：监管股核按钮≥1 时监管压制分减半（否则"票少压制轻"会盖住"被监管股集体崩盘"）。 */
+    public static final BigDecimal GUARD_NUKE_VETO_MULT = new BigDecimal("0.5");
+    /** 无头抱团折扣：总龙头失效时抱团分放低（结构再完整，没了核心次日大概率补跌）。 */
+    public static final BigDecimal GUARD_HEADLESS_MULT = new BigDecimal("0.85");
+    /** 强制风控封顶：force flag 触发时 D5 总分封到崩塌顶。 */
+    public static final int GUARD_FORCE_CAP = 20;
+
+    /** 监管反馈否决权：nuke≥1 时压制分 ×{@link #GUARD_NUKE_VETO_MULT}；未评/未触发返回原分。 */
+    public static Integer pressureAfterNukeVeto(Integer pressureScore, int nuke) {
+        if (pressureScore == null || nuke < 1) {
+            return pressureScore;
+        }
+        return (int) Math.round(pressureScore * GUARD_NUKE_VETO_MULT.doubleValue());
+    }
+
+    /** 无头抱团折扣：总龙头失效（龙头易主 level≥3）时抱团分 ×{@link #GUARD_HEADLESS_MULT}；否则原分。 */
+    public static Integer coalitionAfterHeadless(Integer coalitionScore, int handoverLevel) {
+        if (coalitionScore == null || handoverLevel < 3) {
+            return coalitionScore;
+        }
+        return (int) Math.round(coalitionScore * GUARD_HEADLESS_MULT.doubleValue());
+    }
+
+    /** 强制风控封顶：触发时 D5 总分封到 {@link #GUARD_FORCE_CAP}（崩塌顶）；未触发/未评返回原分。 */
+    public static Integer cappedByForce(Integer score, boolean force) {
+        if (score == null || !force || score <= GUARD_FORCE_CAP) {
+            return score;
+        }
+        return GUARD_FORCE_CAP;
     }
 
     // ---------------- 强制风控（PRD 七、节） ----------------

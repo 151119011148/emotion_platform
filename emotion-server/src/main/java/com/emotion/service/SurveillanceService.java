@@ -377,14 +377,7 @@ public class SurveillanceService {
         }
     }
 
-    /** 卡片要的那份结果：名单 + 均值 + 人话算式。第 9 维的分数在打分时算，这里不复制一份档位表。 */
-    public SurveillanceVO vo(LocalDate requestedDate) {
-        LocalDate date = requestedDate != null ? requestedDate : LocalDate.now(CN);
-        return voOf(date, listOn(date, null));
-    }
-
-    /**
-     * 与 {@link #vo} 同一份卡片装配，但名单由调用方传入——D5 融合后同一次在列名单要同时喂
+    /** 名单由调用方传入——D5 融合后同一次在列名单要同时喂
      * 旧第 9 维与高位生态的压制/反馈子项，再拉一次 listOn 就是平白多打十几到三十几次上游。
      */
     public SurveillanceVO voOf(LocalDate date, List<SurvivalMember> members) {

@@ -29,6 +29,8 @@ public class NodeSuggestVO {
     private String suggestedStatus;
     /** 一句话来路，采纳时原样写进 {@code t_node_event.status_note}。 */
     private String reason;
+    /** 状态来路细分原因：有效·强/有效·中等/有效·板块达标；反包失效/晋级清零失效。采纳时写进 conclusion_reason。 */
+    private String conclusionReason;
 
     // ---- 建议写入的八个字段（今天前端一个字都写不进去的那八个），全部与实体同名同类型 ----
     private LocalDate t1Date;

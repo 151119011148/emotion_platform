@@ -24,7 +24,7 @@ import com.emotion.market.PoolCounts;
 
 /**
  * 五维模型「自动取数聚合器」口径。全内存 fixture，不碰 DB / Spring。
- * 覆盖：四层划界(H=2/4/5/7/8/9/10/12) 边界、晋级率日环比、溢价按档位家数加权、大面用昨日 ZT∩今日炸板 code 归属、
+ * 覆盖：三层划界(低=2/中=3-4/高=5板+，对齐高位生态) 边界、晋级率日环比、溢价按档位家数加权、大面用昨日 ZT∩今日炸板 code 归属、
  * 1 进 2、家数封板率/回封率、红盘率、量能 20 日均、指数 i→index{i}_pct 映射、缺读数=键缺席(绝不兜 0)。
  */
 class LadderMetricsServiceTest {
@@ -120,40 +120,23 @@ class LadderMetricsServiceTest {
         assertEquals(0, new BigDecimal(expected).compareTo(actual), "expected " + expected + " but got " + actual);
     }
 
-    // ---------------- 四层划界：H 动态 ----------------
+    // ---------------- 三层划界：低=2 / 中=3-4 / 高=5板+ ----------------
 
     @Test
-    void hsplit_isMaxOfFourAndCeilingHalfH() {
-        assertEquals(4, LadderMetricsService.hsplit(2));
-        assertEquals(4, LadderMetricsService.hsplit(4));
-        assertEquals(4, LadderMetricsService.hsplit(5));
-        assertEquals(4, LadderMetricsService.hsplit(7));
-        assertEquals(4, LadderMetricsService.hsplit(8));
-        assertEquals(5, LadderMetricsService.hsplit(9));
-        assertEquals(5, LadderMetricsService.hsplit(10));
-        assertEquals(6, LadderMetricsService.hsplit(12));
-    }
-
-    @Test
-    void layerIndex_lowIsTwoMidIsThreeFourAndHighBandsSplitByH() {
-        // 低位恒=2；中位恒=3~4；5 板归中高还是极高，取决于 H。
-        for (int h : new int[] { 5, 6, 7, 8 }) {
+    void layerIndex_threeTiersFixed_alignedWithHighEcoD5() {
+        // 三层固定划界（2026-09-13 简化，与高位生态 D5 同界）：低=2、中=3-4、高=5 板+，
+        // 不再按 H 细分中高位/极高位（H<9 时中高位为空且与 D5 高度重复）。
+        for (int h : new int[] { 2, 3, 4, 5, 7, 8, 9, 12 }) {
             assertEquals(0, LadderMetricsService.layerIndex(2, h), "low @H=" + h);
             assertEquals(1, LadderMetricsService.layerIndex(3, h), "mid @H=" + h);
             assertEquals(1, LadderMetricsService.layerIndex(4, h), "mid @H=" + h);
-            // H<9 时中高位段空档，5 板直接归极高（spec 的边界自然处理）。
-            assertEquals(3, LadderMetricsService.layerIndex(5, h), "no midhigh @H=" + h);
+            assertEquals(2, LadderMetricsService.layerIndex(5, h), "high @H=" + h);
+            assertEquals(2, LadderMetricsService.layerIndex(6, h), "high @H=" + h);
+            assertEquals(2, LadderMetricsService.layerIndex(8, h), "high @H=" + h);
         }
-        assertEquals(2, LadderMetricsService.layerIndex(5, 9));
-        assertEquals(3, LadderMetricsService.layerIndex(6, 9));
-        assertEquals(2, LadderMetricsService.layerIndex(5, 10));
-        assertEquals(3, LadderMetricsService.layerIndex(6, 10));
-        assertEquals(3, LadderMetricsService.layerIndex(7, 10));
-        assertEquals(2, LadderMetricsService.layerIndex(6, 12));
-        assertEquals(3, LadderMetricsService.layerIndex(7, 12));
     }
 
-    // ---------------- 四层晋级率：今 b 板 / 昨 b-1 板 ----------------
+    // ---------------- 三层晋级率：今 b 板 / 昨 b-1 板 ----------------
 
     @Test
     void jrRates_matchDayOverDayBoardByBoard() {
@@ -167,15 +150,13 @@ class LadderMetricsServiceTest {
                 zt("R1", 4));
         Map<String, BigDecimal> m = agg(today, Collections.emptyList(), prev, null,
                 Collections.emptyList(), Collections.emptyList(), null, Collections.emptyList());
-        // 低位 H=5 → 只有 5 板归极高，2/3/4 板都留在低/中，5 是 b<=hsplit(5)=4? 否 → 极高。
+        // 三层：低位=今2板/昨1板；中位=今3-4板/昨2-3板；高位=今5板+/昨4+板。
         // low: 今 2 板 3 家 / 昨 1 板 6 家
         assertAmount("50.00", m.get("jr_low"));
         // mid: 今 (3 板 2 + 4 板 0) = 2 / 昨 (2 板 2 + 3 板 0) = 2
         assertAmount("100.00", m.get("jr_mid"));
-        // midhigh @H=5: hsplit=4 → 无 b<=4 且 b>=5 的档位落入 midhigh
-        assertNull(m.get("jr_midhigh"), "midhigh 层当日无成员应缺席而非 0");
-        // top: 今 5 板 1 家 / 昨 4 板 1 家
-        assertAmount("100.00", m.get("jr_top"));
+        // high: 今 5 板 1 家 / 昨 4 板 1 家（5 板+对齐高位生态，不再细分）
+        assertAmount("100.00", m.get("jr_high"));
         assertAmount("5", m.get("max_height"));
         assertAmount("6", m.get("board_total_count"));
         assertAmount("0", m.get("first_count"));
@@ -193,29 +174,31 @@ class LadderMetricsServiceTest {
         assertAmount("3", m.get("max_height"));
     }
 
-    // ---------------- 四层溢价：按档位家数加权 ----------------
+    // ---------------- 三层溢价：按档位家数加权 ----------------
 
     @Test
     void premLayer_weightedByStockCount() {
         // 时间截面 PRD：tier.board=昨板高种子，归"今 board+1 板层"。H=4：
-        // board=1→低位、board=2/3→中位、board=4→今5板层不存在(N/A 丢弃)。
+        // 低位溢价=昨首板全样本（从 prevZT 自关联 perf），tier board=1 已由全样本承接；
+        // board=2/3→中位、board=4→今5板层，H=4 高位层不存在(N/A 丢弃)。
         List<MarketMetrics.TierPremium> tiers = Arrays.asList(
-                tier(1, 5, "3.00"),   // 昨首板 → prem_low
-                tier(2, 20, "5.00"),  // 昨2板 → 中位
-                tier(3, 10, "2.00"),  // 昨3板 → 中位
+                tier(2, 20, "5.00"),  // 昨2板 → 今3板层 中位
+                tier(3, 10, "2.00"),  // 昨3板 → 今4板层 中位
                 tier(4, 5, "-1.00")); // 昨4板 → 今5板层，H=4 不存在 → 丢弃
-        Map<String, BigDecimal> m = agg(Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
-                null, tiers, Collections.emptyList(), record(4, null, null, null, null, null),
-                Collections.emptyList());
+        List<MarketStock> prevZT = Collections.singletonList(zt("F0", 1));
+        Map<String, BigDecimal> perf = new HashMap<>();
+        perf.put("F0", new BigDecimal("3.00"));
+        Map<String, BigDecimal> m = agg(Collections.emptyList(), Collections.emptyList(), prevZT, null,
+                tiers, Collections.emptyList(), record(4, null, null, null, null, null),
+                Collections.emptyList(), perf);
         assertAmount("3.00", m.get("prem_low"));
         assertAmount("4.00", m.get("prem_mid")); // (5*20 + 2*10)/30 = 4.00
-        assertNull(m.get("prem_midhigh"));
-        assertNull(m.get("prem_top"));
+        assertNull(m.get("prem_high"), "H=4 时高位层不存在，prem_high 应缺席=N/A");
     }
 
     @Test
     void premLayer_nullAvgPct_excludedFromWeightedMean() {
-        // board=3 种子归今4板层=中位；board=4 无价不参与（且本就归属 N/A 层）
+        // board=3 种子归今4板层=中位；board=4 无价不参与（H=5 时其高位层虽活跃，但无价排除）
         List<MarketMetrics.TierPremium> tiers = Arrays.asList(
                 tier(3, 10, "2.00"),
                 tier(4, 100, null));
@@ -226,12 +209,12 @@ class LadderMetricsServiceTest {
         assertAmount("2.00", m.get("prem_mid"));
     }
 
-    // ---------------- 四层大面：昨 ZT 归属 ∩ 今 ZB+big_loss ----------------
+    // ---------------- 三层大面：昨 ZT 归属 ∩ 今 ZB+big_loss ----------------
 
     @Test
     void bigLayer_attributedByYesterdaySeedBoard_plusOneLayer() {
         // 时间截面 PRD：层级以"今日板高"命名，昨 b 板种子的大面归 layerIndex(b+1)。
-        // H=8：b=2/3 → 中位，b=5/8 → 极高（b=h 高标断板归极高）；ZZZ 非昨池不归属。
+        // H=8：b=2/3 → 中位，b=5/8 → 高位(5板+，不再细分成极高)；ZZZ 非昨池不归属。
         List<MarketStock> prev = Arrays.asList(
                 zt("L1", 3), zt("L2", 5), zt("L3", 3), zt("L4", 2), zt("L5", 8));
         List<MarketStock> todayLoss = Arrays.asList(loss("L1"), loss("L2"), loss("L4"), loss("L5"), loss("ZZZ"));
@@ -240,15 +223,15 @@ class LadderMetricsServiceTest {
                 Collections.emptyList());
         assertAmount("0", m.get("big_low")); // 无昨首板大面
         assertAmount("2", m.get("big_mid")); // L1(昨3→今4层)、L4(昨2→今3层)
-        // H<9 中高层本日不存在=N/A：键缺席（不能用 0 命中 EQ0→95 给不存在的层发满分）
-        assertNull(m.get("big_midhigh"), "中高层本日不存在，big_midhigh 应缺席=N/A 而非 0");
-        assertAmount("2", m.get("big_top")); // L2(昨5→今6层)、L5(昨8高标断板→极高)
+        assertAmount("2", m.get("big_high")); // L2(昨5→今6层)、L5(昨8高标断板→高位)
+        assertAmount("66.67", m.get("big_mid_rate")); // 2/3
+        assertAmount("100.00", m.get("big_high_rate")); // 2/2
     }
 
     @Test
     void bigLow_isFirstToTwoBigLoss_yesterdayFirstBoardSeeds() {
         // 低位大面 = 1进2大面：昨首板今 big_loss=1 计入；昨 3 板的 M1 归中位不进低位。
-        // 今日需有 H≥2 四层才产出：用 record 携带 H=2。
+        // 今日需有 H≥2 三层才产出：用 record 携带 H=2。
         List<MarketStock> prev = Arrays.asList(zt("F1", 1), zt("F2", 1), zt("F3", 1), zt("M1", 3));
         List<MarketStock> todayLoss = Arrays.asList(loss("F1"), loss("M1"));
         Map<String, BigDecimal> m = agg(Collections.emptyList(), todayLoss, prev, null,
@@ -478,7 +461,7 @@ class LadderMetricsServiceTest {
         assertAmount("2", m.get("first_count"));
         assertAmount("0", m.get("board_total_count"));
         assertAmount("1", m.get("max_height"));
-        assertFalse(m.containsKey("jr_low"), "h<2 时四层不出");
+        assertFalse(m.containsKey("jr_low"), "h<2 时三层不出");
     }
 
     @Test

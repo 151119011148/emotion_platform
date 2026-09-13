@@ -205,15 +205,22 @@ CREATE TABLE IF NOT EXISTS t_node_event (
     node_valid TINYINT DEFAULT 0 COMMENT '节点是否有效',
     node_stock VARCHAR(50) DEFAULT '' COMMENT '确认的节点票',
     node_stock_max_board INT DEFAULT 0 COMMENT '节点票最高板数',
+    anchor_id BIGINT DEFAULT NULL COMMENT '锚定龙头关联的人工阵眼(t_anchor.id)；NULL=未关联(仍可手填)',
+    theme VARCHAR(50) DEFAULT NULL COMMENT '所属题材/板块(系统B必填)',
+    d0_score DECIMAL(5,2) DEFAULT NULL COMMENT 'D0当日情绪总分(five_dim总分或旧温度)，节点产生时市场温度',
+    d0_cycle VARCHAR(20) DEFAULT NULL COMMENT 'D0当日周期阶段(退潮/启动/发酵/高潮/...)',
+    last_recalc_at DATETIME DEFAULT NULL COMMENT '上次复算(T+1自动判定/人工复算)时间，数据新鲜度',
+    conclusion_reason VARCHAR(30) DEFAULT NULL COMMENT '状态来路细分原因：有效·强/有效·中等/有效·板块达标；反包失效/晋级清零失效。权威写在采纳时，读完端再按需叠加监管/情绪退潮标签',
     filter_passed TINYINT DEFAULT 0 COMMENT '前置过滤器是否通过',
     filter_detail TEXT COMMENT '过滤器明细(JSON)',
     status VARCHAR(20) DEFAULT '待验证' COMMENT '待验证/有效/失效',
-    status_note VARCHAR(300) COMMENT '状态来路：平台那条建议是怎么算出来的，一句话',
+    status_note VARCHAR(300) COMMENT '状态来路：这条状态/失效原因是按哪几个数算出来的，一句话',
     note TEXT COMMENT '备注',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 
     INDEX idx_user_id (user_id),
-    INDEX idx_status (status)
+    INDEX idx_status (status),
+    INDEX idx_anchor (anchor_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 每日盘面个股明细（涨停/跌停/炸板三个池逐只落库，供仪表盘 hover 展示真实名单）
@@ -290,6 +297,17 @@ CREATE TABLE IF NOT EXISTS t_zt_perf (
     UNIQUE KEY uk_date_code (trade_date, code),
     INDEX idx_date_prev (trade_date, prev_consecutive)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='昨日涨停股今日表现逐只(含首板,公开数据,不绑用户)';
+
+-- 天梯人工总龙头：全市场最高连板自动标"空间板"，"总龙头"是用户某日手动指定的身份（绑用户）。
+CREATE TABLE IF NOT EXISTS t_manual_leader (
+    user_id BIGINT NOT NULL COMMENT '账号',
+    trade_date DATE NOT NULL COMMENT '交易日',
+    code VARCHAR(6) NOT NULL COMMENT '6位代码',
+    name VARCHAR(20) NOT NULL COMMENT '证券简称(与t_stock反查一致)',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (user_id, trade_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='连板天梯某日人工总龙头(每账号每交易日一行)';
 
 -- 周期阵眼/总龙头：第 8 维的来源。跨度只存起止日，最高连板/回撤等一律从日 K 现算，不让人手填。
 CREATE TABLE IF NOT EXISTS t_anchor (
@@ -598,6 +616,16 @@ INSERT IGNORE INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator
 -- 存量那两天（09-03/09-04）的对照值不回补：读取路径是"列优先、md 兜底"，老值照样看得见，
 -- 等他下次在这天填一次才以列为准。
 
+-- 2026-09-13 节点追踪改版：节点事件关联人工阵眼、补题材/情绪分/复算时间派生列。存量库跑下两条：
+-- ALTER TABLE t_node_event
+--     ADD COLUMN anchor_id BIGINT DEFAULT NULL COMMENT '锚定龙头关联的人工阵眼(t_anchor.id)；NULL=未关联(仍可手填)' AFTER node_stock_max_board,
+--     ADD COLUMN theme VARCHAR(50) DEFAULT NULL COMMENT '所属题材/板块(系统B必填)' AFTER anchor_id,
+--     ADD COLUMN d0_score DECIMAL(5,2) DEFAULT NULL COMMENT 'D0当日情绪总分(five_dim总分或旧温度)，节点产生时市场温度' AFTER theme,
+--     ADD COLUMN d0_cycle VARCHAR(20) DEFAULT NULL COMMENT 'D0当日周期阶段(退潮/启动/发酵/高潮/...)' AFTER d0_score,
+--     ADD COLUMN last_recalc_at DATETIME DEFAULT NULL COMMENT '上次复算(T+1自动判定/人工复算)时间，数据新鲜度' AFTER d0_cycle;
+-- ALTER TABLE t_node_event ADD INDEX idx_anchor (anchor_id);
+-- ALTER TABLE t_node_event ADD COLUMN conclusion_reason VARCHAR(30) DEFAULT NULL COMMENT '状态来路细分原因' AFTER last_recalc_at;
+
 --
 -- 2026-09-10 打分模型三表 + 超短情绪模型种子：上面的 CREATE TABLE IF NOT EXISTS 与 INSERT IGNORE 自覆盖，
 --            重复跑无害；存量库要拿这套新配置，整段重放即可，不会动已改过的权重。
@@ -850,7 +878,7 @@ SET @fid2 := (SELECT id FROM t_scoring_model WHERE model_key = 'five_dim_v2');
 INSERT IGNORE INTO t_scoring_dim (model_id, dim_key, dim_no, label, weight, sort_no, record_column, rule_engine, note) VALUES
     (@fid2,'market',    1,'大盘生态',  0.22, 1,'score_market',    'WEIGHTED_SUM','指数环境35/量能25/广度20/涨跌停20'),
     (@fid2,'theme_main',2,'日内核心',  0.18, 2,'score_theme_main','WEIGHTED_SUM','日内最热行业5要素：涨停聚集度25/高度聚集度25/成交额聚集度20/催化剂硬度15/持续性15；连续3交易日热度≥5才收集为主线龙头；龙头错位只输出信号不扣分(扣分归D5阵眼一致性)'),
-    (@fid2,'board',     3,'连板生态',  0.22, 3,'score_board',     'WEIGHTED_SUM','时间截面T-1→T：晋级30/溢价25/大面20/炸板质量15/数量高度10；低位层=1进2(昨首板种子)；修正：小样本×0.8、空间未打开晋级×0.9、大盘背离溢价×0.8、全局跌停外溢-35/-20/-8；闸门：中位吹哨×0.8、大盘背离×0.85(龙头错位只出信号,扣分归D5)'),
+    (@fid2,'board',     3,'连板生态',  0.22, 3,'score_board',     'WEIGHTED_SUM','时间截面T-1→T：数量高度10/晋级30/溢价25/大面20/炸板15；三层(低=2/中=3-4/高=5板+对齐D5)；低位=1进2；高位层只留接力效率低权重(抱团监管反包归D5)、H<5高位N/A剔除分母；修正：小样本×0.8、H<5空间未打开晋级×0.8、大盘背离溢价×0.8、全局跌停外溢-35/-20/-8；闸门中位吹哨×0.8、大盘背离×0.85'),
     (@fid2,'first',     4,'首板生态',  0.13, 4,'score_first',     'WEIGHTED_SUM','纯T日试错端：首板数量30/首板封板率25/首板炸板率20/封单质量15(均封单0.6+一字占比0.4)/首板题材聚集10；大盘背离时数量×0.85、封板率-10。1进2/首板溢价已迁入连板低位层'),
     (@fid2,'high',      5,'高位生态',  0.25, 5,'score_high',      'WEIGHTED_SUM','D5融合：阵眼个体35(人工阵眼:行为40/高度25/封板20/主线一致15)+抱团资金30(结构60:高位家数占比30/封单集中25/空间唯一25/梯队20;强度40:高位溢价50/高位晋级50)+监管压制20(家数40/高位占比35/扩散25)+监管反馈15');
 
@@ -867,24 +895,27 @@ INSERT IGNORE INTO t_scoring_sub (model_id, dim_key, sub_key, parent_sub_key, la
     (@fid2,'theme_main','catalyst',     '-','催化剂硬度',  0.15,'STRATEGY','catalyst', 4,'STRATEGY:题材硬度1-5→100/80/60/40/20(t_theme维护)；日内核心存在但无匹配题材行=默认50(人工未评)'),
     (@fid2,'theme_main','persistence',  '-','持续性',      0.15,'BAND_LADDER','persistence_days',  5,'主线连续活跃天数(自动，当日≥5家涨停算活跃)');
 INSERT IGNORE INTO t_scoring_sub (model_id, dim_key, sub_key, parent_sub_key, label, weight, scoring_kind, source_key, sort_no, note) VALUES
-    (@fid2,'board','promo',         '-','晋级结构',0.30,'LAYER_WEIGHTED_BAND',NULL,1,'四层晋级率(低位=1进2)各出分再按 0.15/0.25/0.20/0.40 加权'),
-    (@fid2,'board','premium',       '-','溢价结构',0.25,'LAYER_WEIGHTED_BAND',NULL,2,'四层T-1→T溢价(低位=昨首板今均溢价,取tier board=1)'),
-    (@fid2,'board','bigloss',       '-','大面结构',0.20,'LAYER_WEIGHTED_BAND',NULL,3,'四层T-1→T大面家数(低位=1进2大面)'),
-    (@fid2,'board','broken_quality', '-','炸板质量',0.15,'WEIGHTED_SUM',NULL,4,'0.6×封板率分+0.4×回封率分'),
-    (@fid2,'board','count_height',  '-','数量高度',0.10,'BAND_LADDER','max_height',5,'按空间板H给分:H≥7=95/5-6=70/H=4=25/H=3=15/≤2=5');
+    (@fid2,'board','count_height',  '-','数量高度',0.10,'BAND_LADDER','max_height',1,'按空间板H给分:H≥7=95/5-6=70/H=4=25/H=3=15/≤2=5'),
+    (@fid2,'board','promo',         '-','晋级结构',0.30,'LAYER_WEIGHTED_BAND',NULL,2,'三层晋级率(低=1进2/中3-4/高5板+)各出分再按 0.50/0.35/0.15 加权'),
+    (@fid2,'board','premium',       '-','溢价结构',0.25,'LAYER_WEIGHTED_BAND',NULL,3,'三层T-1→T溢价(低位=昨首板今均溢价,取tier board=1)；权重 0.45/0.35/0.20'),
+    (@fid2,'board','bigloss',       '-','大面结构',0.20,'LAYER_WEIGHTED_BAND',NULL,4,'三层T-1→T大面，每层=家数+大面率(大面/该层昨种子)各50%；权重 0.45/0.35/0.20'),
+    (@fid2,'board','broken_quality', '-','炸板质量',0.15,'WEIGHTED_SUM',NULL,5,'0.6×封板率分+0.4×回封率分');
 INSERT IGNORE INTO t_scoring_sub (model_id, dim_key, sub_key, parent_sub_key, label, weight, scoring_kind, source_key, sort_no, note) VALUES
-    (@fid2,'board','promo_low',     'promo','低位晋级',0.15,'BAND_LADDER','jr_low',1,'2板(固定)'),
-    (@fid2,'board','promo_mid',     'promo','中位晋级',0.25,'BAND_LADDER','jr_mid',2,'3-4板 吹哨锚点'),
-    (@fid2,'board','promo_midhigh', 'promo','中高位晋级',0.20,'BAND_LADDER','jr_midhigh',3,'5~⌈H/2⌉'),
-    (@fid2,'board','promo_top',     'promo','极高位晋级',0.40,'BAND_LADDER','jr_top',4,'⌈H/2⌉+1~H'),
-    (@fid2,'board','premium_low',     'premium','低位溢价',0.15,'BAND_LADDER','prem_low',1,''),
-    (@fid2,'board','premium_mid',     'premium','中位溢价',0.25,'BAND_LADDER','prem_mid',2,''),
-    (@fid2,'board','premium_midhigh', 'premium','中高位溢价',0.20,'BAND_LADDER','prem_midhigh',3,''),
-    (@fid2,'board','premium_top',     'premium','极高位溢价',0.40,'BAND_LADDER','prem_top',4,''),
-    (@fid2,'board','bigloss_low',     'bigloss','低位大面',0.15,'BAND_LADDER','big_low',1,''),
-    (@fid2,'board','bigloss_mid',     'bigloss','中位大面',0.25,'BAND_LADDER','big_mid',2,''),
-    (@fid2,'board','bigloss_midhigh', 'bigloss','中高位大面',0.20,'BAND_LADDER','big_midhigh',3,''),
-    (@fid2,'board','bigloss_top',     'bigloss','极高位大面',0.40,'BAND_LADDER','big_top',4,''),
+    (@fid2,'board','promo_low',     'promo','低位晋级',0.50,'BAND_LADDER','jr_low',1,'2板(固定)'),
+    (@fid2,'board','promo_mid',     'promo','中位晋级',0.35,'BAND_LADDER','jr_mid',2,'3-4板 吹哨锚点'),
+    (@fid2,'board','promo_high',    'promo','高位晋级',0.15,'BAND_LADDER','jr_high',3,'5板+ 对齐高位生态D5,只留效率视角'),
+    (@fid2,'board','premium_low',     'premium','低位溢价',0.45,'BAND_LADDER','prem_low',1,''),
+    (@fid2,'board','premium_mid',     'premium','中位溢价',0.35,'BAND_LADDER','prem_mid',2,''),
+    (@fid2,'board','premium_high',    'premium','高位溢价',0.20,'BAND_LADDER','prem_high',3,''),
+    (@fid2,'board','bigloss_low',      'bigloss','低位大面',0.45,'WEIGHTED_SUM',NULL,1,'家数+大面率各50%'),
+    (@fid2,'board','bigloss_mid',      'bigloss','中位大面',0.35,'WEIGHTED_SUM',NULL,2,'家数+大面率各50%'),
+    (@fid2,'board','bigloss_high',     'bigloss','高位大面',0.20,'WEIGHTED_SUM',NULL,3,'家数+大面率各50% 对齐D5'),
+    (@fid2,'board','bigloss_low_cnt',    'bigloss_low','低位大面·家数',0.50,'BAND_LADDER','big_low',1,''),
+    (@fid2,'board','bigloss_low_rate',   'bigloss_low','低位大面·大面率',  0.50,'BAND_LADDER','big_low_rate',2,'大面/该层昨种子'),
+    (@fid2,'board','bigloss_mid_cnt',    'bigloss_mid','中位大面·家数',0.50,'BAND_LADDER','big_mid',1,''),
+    (@fid2,'board','bigloss_mid_rate',   'bigloss_mid','中位大面·大面率',  0.50,'BAND_LADDER','big_mid_rate',2,'大面/该层昨种子'),
+    (@fid2,'board','bigloss_high_cnt',   'bigloss_high','高位大面·家数',0.50,'BAND_LADDER','big_high',1,''),
+    (@fid2,'board','bigloss_high_rate',  'bigloss_high','高位大面·大面率',  0.50,'BAND_LADDER','big_high_rate',2,'大面/该层昨种子'),
     (@fid2,'board','bq_sealed',  'broken_quality','家数封板率',0.60,'BAND_LADDER','sealed_home_rate',1,''),
     (@fid2,'board','bq_reseal',  'broken_quality','回封率',    0.40,'BAND_LADDER','reseal_rate',2,'');
 -- D4 时间截面 PRD v2.0（2026-09-12）：纯 T 日。1进2晋级/首板溢价/1进2大面迁入 D3 低位层（jr_low/prem_low/big_low）。
@@ -970,26 +1001,26 @@ INSERT IGNORE INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator
 INSERT IGNORE INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator, threshold_low, threshold_high, score, formula, note) VALUES
     (@fid2,'board','promo_low',1,'GTE',60,NULL,95,'层晋级率 >=60%',''),(@fid2,'board','promo_low',2,'GTE',40,NULL,80,'>=40',''),(@fid2,'board','promo_low',3,'GTE',25,NULL,65,'>=25',''),(@fid2,'board','promo_low',4,'GTE',15,NULL,45,'>=15',''),(@fid2,'board','promo_low',5,'ELSE',NULL,NULL,20,'<15',''),
     (@fid2,'board','promo_mid',1,'GTE',60,NULL,95,'',''),(@fid2,'board','promo_mid',2,'GTE',40,NULL,80,'',''),(@fid2,'board','promo_mid',3,'GTE',25,NULL,65,'',''),(@fid2,'board','promo_mid',4,'GTE',15,NULL,45,'',''),(@fid2,'board','promo_mid',5,'ELSE',NULL,NULL,20,'',''),
-    (@fid2,'board','promo_midhigh',1,'GTE',60,NULL,95,'',''),(@fid2,'board','promo_midhigh',2,'GTE',40,NULL,80,'',''),(@fid2,'board','promo_midhigh',3,'GTE',25,NULL,65,'',''),(@fid2,'board','promo_midhigh',4,'GTE',15,NULL,45,'',''),(@fid2,'board','promo_midhigh',5,'ELSE',NULL,NULL,20,'',''),
-    (@fid2,'board','promo_top',1,'GTE',60,NULL,95,'',''),(@fid2,'board','promo_top',2,'GTE',40,NULL,80,'',''),(@fid2,'board','promo_top',3,'GTE',25,NULL,65,'',''),(@fid2,'board','promo_top',4,'GTE',15,NULL,45,'',''),(@fid2,'board','promo_top',5,'ELSE',NULL,NULL,20,'',''),
+    (@fid2,'board','promo_high',1,'GTE',60,NULL,95,'',''),(@fid2,'board','promo_high',2,'GTE',40,NULL,80,'',''),(@fid2,'board','promo_high',3,'GTE',25,NULL,65,'',''),(@fid2,'board','promo_high',4,'GTE',15,NULL,45,'',''),(@fid2,'board','promo_high',5,'ELSE',NULL,NULL,20,'',''),
     (@fid2,'board','promo',0,'GUARD',NULL,NULL,NULL,'中位吹哨:JR中<15% 或 (Prem中<0 且 Big中>=3) → 连板总分×0.8','信号表另有结构信号定义');
 INSERT IGNORE INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator, threshold_low, threshold_high, score, formula, note) VALUES
     (@fid2,'board','premium_low',1,'GT',3,NULL,95,'层溢价 >3%',''),(@fid2,'board','premium_low',2,'GTE',1,NULL,80,'1~3',''),(@fid2,'board','premium_low',3,'GTE',0,NULL,65,'0~1',''),(@fid2,'board','premium_low',4,'GTE',-1,NULL,45,'0~-1',''),(@fid2,'board','premium_low',5,'GTE',-3,NULL,25,'-1~-3',''),(@fid2,'board','premium_low',6,'ELSE',NULL,NULL,5,'<-3',''),
     (@fid2,'board','premium_mid',1,'GT',3,NULL,95,'',''),(@fid2,'board','premium_mid',2,'GTE',1,NULL,80,'',''),(@fid2,'board','premium_mid',3,'GTE',0,NULL,65,'',''),(@fid2,'board','premium_mid',4,'GTE',-1,NULL,45,'',''),(@fid2,'board','premium_mid',5,'GTE',-3,NULL,25,'',''),(@fid2,'board','premium_mid',6,'ELSE',NULL,NULL,5,'',''),
-    (@fid2,'board','premium_midhigh',1,'GT',3,NULL,95,'',''),(@fid2,'board','premium_midhigh',2,'GTE',1,NULL,80,'',''),(@fid2,'board','premium_midhigh',3,'GTE',0,NULL,65,'',''),(@fid2,'board','premium_midhigh',4,'GTE',-1,NULL,45,'',''),(@fid2,'board','premium_midhigh',5,'GTE',-3,NULL,25,'',''),(@fid2,'board','premium_midhigh',6,'ELSE',NULL,NULL,5,'',''),
-    (@fid2,'board','premium_top',1,'GT',3,NULL,95,'',''),(@fid2,'board','premium_top',2,'GTE',1,NULL,80,'',''),(@fid2,'board','premium_top',3,'GTE',0,NULL,65,'',''),(@fid2,'board','premium_top',4,'GTE',-1,NULL,45,'',''),(@fid2,'board','premium_top',5,'GTE',-3,NULL,25,'',''),(@fid2,'board','premium_top',6,'ELSE',NULL,NULL,5,'','');
+    (@fid2,'board','premium_high',1,'GT',3,NULL,95,'',''),(@fid2,'board','premium_high',2,'GTE',1,NULL,80,'',''),(@fid2,'board','premium_high',3,'GTE',0,NULL,65,'',''),(@fid2,'board','premium_high',4,'GTE',-1,NULL,45,'',''),(@fid2,'board','premium_high',5,'GTE',-3,NULL,25,'',''),(@fid2,'board','premium_high',6,'ELSE',NULL,NULL,5,'','');
 INSERT IGNORE INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator, threshold_low, threshold_high, score, formula, note) VALUES
-    (@fid2,'board','bigloss_low',1,'EQ',0,NULL,95,'大面家数 =0',''),(@fid2,'board','bigloss_low',2,'LTE',2,NULL,80,'1~2',''),(@fid2,'board','bigloss_low',3,'LTE',5,NULL,60,'3~5',''),(@fid2,'board','bigloss_low',4,'LTE',10,NULL,35,'6~10',''),(@fid2,'board','bigloss_low',5,'ELSE',NULL,NULL,10,'>10',''),
-    (@fid2,'board','bigloss_mid',1,'EQ',0,NULL,95,'',''),(@fid2,'board','bigloss_mid',2,'LTE',2,NULL,80,'',''),(@fid2,'board','bigloss_mid',3,'LTE',5,NULL,60,'',''),(@fid2,'board','bigloss_mid',4,'LTE',10,NULL,35,'',''),(@fid2,'board','bigloss_mid',5,'ELSE',NULL,NULL,10,'',''),
-    (@fid2,'board','bigloss_midhigh',1,'EQ',0,NULL,95,'',''),(@fid2,'board','bigloss_midhigh',2,'LTE',2,NULL,80,'',''),(@fid2,'board','bigloss_midhigh',3,'LTE',5,NULL,60,'',''),(@fid2,'board','bigloss_midhigh',4,'LTE',10,NULL,35,'',''),(@fid2,'board','bigloss_midhigh',5,'ELSE',NULL,NULL,10,'',''),
-    (@fid2,'board','bigloss_top',1,'EQ',0,NULL,95,'',''),(@fid2,'board','bigloss_top',2,'LTE',2,NULL,80,'',''),(@fid2,'board','bigloss_top',3,'LTE',5,NULL,60,'',''),(@fid2,'board','bigloss_top',4,'LTE',10,NULL,35,'',''),(@fid2,'board','bigloss_top',5,'ELSE',NULL,NULL,10,'','');
+    (@fid2,'board','bigloss_low_cnt',1,'EQ',0,NULL,95,'大面家数 =0',''),(@fid2,'board','bigloss_low_cnt',2,'LTE',2,NULL,80,'1~2',''),(@fid2,'board','bigloss_low_cnt',3,'LTE',5,NULL,60,'3~5',''),(@fid2,'board','bigloss_low_cnt',4,'LTE',10,NULL,35,'6~10',''),(@fid2,'board','bigloss_low_cnt',5,'ELSE',NULL,NULL,10,'>10',''),
+    (@fid2,'board','bigloss_mid_cnt',1,'EQ',0,NULL,95,'',''),(@fid2,'board','bigloss_mid_cnt',2,'LTE',2,NULL,80,'',''),(@fid2,'board','bigloss_mid_cnt',3,'LTE',5,NULL,60,'',''),(@fid2,'board','bigloss_mid_cnt',4,'LTE',10,NULL,35,'',''),(@fid2,'board','bigloss_mid_cnt',5,'ELSE',NULL,NULL,10,'',''),
+    (@fid2,'board','bigloss_high_cnt',1,'EQ',0,NULL,95,'',''),(@fid2,'board','bigloss_high_cnt',2,'LTE',2,NULL,80,'',''),(@fid2,'board','bigloss_high_cnt',3,'LTE',5,NULL,60,'',''),(@fid2,'board','bigloss_high_cnt',4,'LTE',10,NULL,35,'',''),(@fid2,'board','bigloss_high_cnt',5,'ELSE',NULL,NULL,10,'',''),
+    (@fid2,'board','bigloss_low_rate',1,'EQ',0,NULL,95,'大面率 =0%',''),(@fid2,'board','bigloss_low_rate',2,'LTE',10,NULL,85,'<=10%',''),(@fid2,'board','bigloss_low_rate',3,'LTE',20,NULL,70,'<=20%',''),(@fid2,'board','bigloss_low_rate',4,'LTE',35,NULL,50,'<=35%',''),(@fid2,'board','bigloss_low_rate',5,'LTE',50,NULL,30,'<=50%',''),(@fid2,'board','bigloss_low_rate',6,'ELSE',NULL,NULL,10,'>50%',''),
+    (@fid2,'board','bigloss_mid_rate',1,'EQ',0,NULL,95,'',''),(@fid2,'board','bigloss_mid_rate',2,'LTE',10,NULL,85,'',''),(@fid2,'board','bigloss_mid_rate',3,'LTE',20,NULL,70,'',''),(@fid2,'board','bigloss_mid_rate',4,'LTE',35,NULL,50,'',''),(@fid2,'board','bigloss_mid_rate',5,'LTE',50,NULL,30,'',''),(@fid2,'board','bigloss_mid_rate',6,'ELSE',NULL,NULL,10,'',''),
+    (@fid2,'board','bigloss_high_rate',1,'EQ',0,NULL,95,'',''),(@fid2,'board','bigloss_high_rate',2,'LTE',10,NULL,85,'',''),(@fid2,'board','bigloss_high_rate',3,'LTE',20,NULL,70,'',''),(@fid2,'board','bigloss_high_rate',4,'LTE',35,NULL,50,'',''),(@fid2,'board','bigloss_high_rate',5,'LTE',50,NULL,30,'',''),(@fid2,'board','bigloss_high_rate',6,'ELSE',NULL,NULL,10,'','');
 INSERT IGNORE INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator, threshold_low, threshold_high, score, formula, note) VALUES
     (@fid2,'board','bq_sealed',1,'GTE',85,NULL,95,'封板率 >=85%','spec锚点85/45；中间占位'),(@fid2,'board','bq_sealed',2,'GTE',70,NULL,80,'>=70',''),(@fid2,'board','bq_sealed',3,'GTE',55,NULL,60,'>=55',''),(@fid2,'board','bq_sealed',4,'GTE',45,NULL,40,'>=45',''),(@fid2,'board','bq_sealed',5,'ELSE',NULL,NULL,15,'<45',''),
     (@fid2,'board','bq_reseal',1,'GTE',75,NULL,95,'回封率 >=75%','档借封板率形态,待定标'),(@fid2,'board','bq_reseal',2,'GTE',60,NULL,80,'>=60',''),(@fid2,'board','bq_reseal',3,'GTE',45,NULL,60,'>=45',''),(@fid2,'board','bq_reseal',4,'GTE',30,NULL,40,'>=30',''),(@fid2,'board','bq_reseal',5,'ELSE',NULL,NULL,15,'<30',''),
     (@fid2,'board','broken_quality',0,'AGG',NULL,NULL,NULL,'0.6×封板率分 + 0.4×回封率分',''),
     (@fid2,'board','count_height',1,'GTE',7,NULL,95,'H>=7 空间打开','2026-09-12 改按空间板H给分'),(@fid2,'board','count_height',2,'GTE',5,NULL,70,'H=5~6',''),(@fid2,'board','count_height',3,'GTE',4,NULL,25,'H=4 空间未打开',''),(@fid2,'board','count_height',4,'GTE',3,NULL,15,'H=3',''),(@fid2,'board','count_height',5,'ELSE',NULL,NULL,5,'H<=2',''),
     (@fid2,'board','promo',1,'GUARD',NULL,NULL,NULL,'小样本:中位晋级昨日基数<5家→中位晋级叶×0.8','引擎BoardScoreCalculator常量'),
-    (@fid2,'board','promo',2,'GUARD',NULL,NULL,NULL,'空间未打开:H<5(无极高层)→晋级结构×0.9',''),
+    (@fid2,'board','promo',2,'GUARD',NULL,NULL,NULL,'空间未打开:H<5(无高位层,5板+)→晋级结构×0.8',''),
     (@fid2,'board','premium',1,'GUARD',NULL,NULL,NULL,'大盘背离:大盘分<40 或 红盘率<20%→溢价结构×0.8',''),
     (@fid2,'board','bigloss',1,'GUARD',NULL,NULL,NULL,'全局跌停外溢:跌停≥20/≥10/≥5 → 大面结构-35/-20/-8',''),
     (@fid2,'board','-',0,'GUARD',NULL,NULL,NULL,'维分闸门:中位吹哨×0.8;大盘背离(大盘分<40/强制退潮/跌停≥10)×0.85。龙头错位2026-09-12起只输出信号不再扣分(扣分归D5阵眼一致性)','引擎统一施加,见连板生态打分表尾');
@@ -1301,10 +1332,70 @@ INSERT INTO t_scoring_rule
   (model_id, dim_key, sub_key, rule_no, operator, threshold_low, threshold_high, score, formula, note)
 VALUES
   (@fid2,'board','promo',1,'GUARD',NULL,NULL,NULL,'小样本:中位晋级昨日基数<5家→中位晋级叶×0.8','引擎BoardScoreCalculator常量'),
-  (@fid2,'board','promo',2,'GUARD',NULL,NULL,NULL,'空间未打开:H<5(无极高层)→晋级结构×0.9',''),
+  (@fid2,'board','promo',2,'GUARD',NULL,NULL,NULL,'空间未打开:H<5(无高位层,5板+)→晋级结构×0.8',''),
   (@fid2,'board','premium',1,'GUARD',NULL,NULL,NULL,'大盘背离:大盘分<40 或 红盘率<20%→溢价结构×0.8',''),
   (@fid2,'board','bigloss',1,'GUARD',NULL,NULL,NULL,'全局跌停外溢:跌停≥20/≥10/≥5 → 大面结构-35/-20/-8',''),
-  (@fid2,'board','-',0,'GUARD',NULL,NULL,NULL,'维分闸门:中位吹哨×0.8;大盘背离(大盘分<40/强制退潮/跌停≥10)×0.85。龙头错位2026-09-12起只输出信号不再扣分(扣分归D5阵眼一致性)','引擎统一施加,见连板生态打分表尾');
+  (@fid2,'board','-',0,'GUARD',NULL,NULL,NULL,'维分闸门:中位吹哨(晋级<15%或中位大面≥3)×0.8;大盘背离(大盘分<40/强制退潮/跌停≥10)×0.85。龙头错位2026-09-12起只输出信号不再扣分(扣分归D5阵眼一致性)','引擎统一施加,见连板生态打分表尾');
+
+-- 4.0.2) 2026-09-13 连板维三层简化 v2.2（存量库，可重复执行）：
+-- 数量高度 10/晋级30/溢价25/大面20/炸板15（和=1.00）；四层→三层(低=2/中=3-4/高=5板+，高对齐 D5)；
+-- 价格层权重：晋级0.50/0.35/0.15、溢价0.45/0.35/0.20、大面0.45/0.35/0.20；删 promo/premium/bigloss 的 midhigh/top 层；
+-- 大面结构每层改为「家数 big_*」+「大面率 big_*_rate（大面/该层昨种子）」各 50% 合成；
+-- 空间未打开晋级系数 0.9→0.8。
+UPDATE t_scoring_dim
+   SET note='时间截面T-1→T：数量高度10/晋级30/溢价25/大面20/炸板15；三层(低=2/中=3-4/高=5板+对齐D5)；低位=1进2；高位层只留接力效率低权重(抱团监管反包归D5)、H<5高位N/A剔除分母；修正：小样本×0.8、H<5空间未打开晋级×0.8、大盘背离溢价×0.8、全局跌停外溢-35/-20/-8；闸门中位吹哨×0.8、大盘背离×0.85'
+ WHERE model_id=@fid2 AND dim_key='board';
+UPDATE t_scoring_sub SET weight=0.10, sort_no=1 WHERE model_id=@fid2 AND dim_key='board' AND sub_key='count_height';
+UPDATE t_scoring_sub SET weight=0.30, sort_no=2 WHERE model_id=@fid2 AND dim_key='board' AND sub_key='promo';
+UPDATE t_scoring_sub SET weight=0.25, sort_no=3 WHERE model_id=@fid2 AND dim_key='board' AND sub_key='premium';
+UPDATE t_scoring_sub SET weight=0.20, sort_no=4 WHERE model_id=@fid2 AND dim_key='board' AND sub_key='bigloss';
+UPDATE t_scoring_sub SET weight=0.15, sort_no=5 WHERE model_id=@fid2 AND dim_key='board' AND sub_key='broken_quality';
+
+-- promo/premium 四层→三层收敛：删 midhigh/top 层与规则，插 high 层，调整 low/mid 权重
+DELETE FROM t_scoring_rule
+ WHERE model_id=@fid2 AND dim_key='board' AND sub_key IN
+  ('promo_midhigh','promo_top','promo_high','premium_midhigh','premium_top','premium_high');
+DELETE FROM t_scoring_sub
+ WHERE model_id=@fid2 AND dim_key='board' AND sub_key IN
+  ('promo_midhigh','promo_top','promo_high','premium_midhigh','premium_top','premium_high');
+UPDATE t_scoring_sub SET weight=0.50, note='2板(固定)'  WHERE model_id=@fid2 AND dim_key='board' AND sub_key='promo_low';
+UPDATE t_scoring_sub SET weight=0.35, note='3-4板 吹哨锚点' WHERE model_id=@fid2 AND dim_key='board' AND sub_key='promo_mid';
+UPDATE t_scoring_sub SET weight=0.45 WHERE model_id=@fid2 AND dim_key='board' AND sub_key='premium_low';
+UPDATE t_scoring_sub SET weight=0.35 WHERE model_id=@fid2 AND dim_key='board' AND sub_key='premium_mid';
+INSERT INTO t_scoring_sub (model_id, dim_key, sub_key, parent_sub_key, label, weight, scoring_kind, source_key, sort_no, note) VALUES
+  (@fid2,'board','promo_high','promo','高位晋级',0.15,'BAND_LADDER','jr_high',3,'5板+ 对齐高位生态D5'),
+  (@fid2,'board','premium_high','premium','高位溢价',0.20,'BAND_LADDER','prem_high',3,'');
+INSERT INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator, threshold_low, threshold_high, score, formula, note) VALUES
+  (@fid2,'board','promo_high',1,'GTE',60,NULL,95,'',''),(@fid2,'board','promo_high',2,'GTE',40,NULL,80,'',''),(@fid2,'board','promo_high',3,'GTE',25,NULL,65,'',''),(@fid2,'board','promo_high',4,'GTE',15,NULL,45,'',''),(@fid2,'board','promo_high',5,'ELSE',NULL,NULL,20,'',''),
+  (@fid2,'board','premium_high',1,'GT',3,NULL,95,'',''),(@fid2,'board','premium_high',2,'GTE',1,NULL,80,'',''),(@fid2,'board','premium_high',3,'GTE',0,NULL,65,'',''),(@fid2,'board','premium_high',4,'GTE',-1,NULL,45,'',''),(@fid2,'board','premium_high',5,'GTE',-3,NULL,25,'',''),(@fid2,'board','premium_high',6,'ELSE',NULL,NULL,5,'','');
+
+-- 大面结构层级重构：删除旧 BAND_LADDER 层，改插层复合(WEIGHTED_SUM) + 家数/率两个叶子
+DELETE FROM t_scoring_sub
+ WHERE model_id=@fid2 AND dim_key='board' AND sub_key LIKE 'bigloss_%';
+DELETE FROM t_scoring_rule
+ WHERE model_id=@fid2 AND dim_key='board' AND sub_key LIKE 'bigloss_%';
+INSERT INTO t_scoring_sub (model_id, dim_key, sub_key, parent_sub_key, label, weight, scoring_kind, source_key, sort_no, note) VALUES
+  (@fid2,'board','bigloss_low',      'bigloss','低位大面',   0.45,'WEIGHTED_SUM',NULL,1,'家数+大面率各50%'),
+  (@fid2,'board','bigloss_mid',      'bigloss','中位大面',   0.35,'WEIGHTED_SUM',NULL,2,'家数+大面率各50%'),
+  (@fid2,'board','bigloss_high',     'bigloss','高位大面',   0.20,'WEIGHTED_SUM',NULL,3,'家数+大面率各50% 对齐D5'),
+  (@fid2,'board','bigloss_low_cnt',    'bigloss_low','低位大面·家数',  0.50,'BAND_LADDER','big_low',1,''),
+  (@fid2,'board','bigloss_low_rate',   'bigloss_low','低位大面·大面率',  0.50,'BAND_LADDER','big_low_rate',2,''),
+  (@fid2,'board','bigloss_mid_cnt',    'bigloss_mid','中位大面·家数',  0.50,'BAND_LADDER','big_mid',1,''),
+  (@fid2,'board','bigloss_mid_rate',   'bigloss_mid','中位大面·大面率',  0.50,'BAND_LADDER','big_mid_rate',2,''),
+  (@fid2,'board','bigloss_high_cnt',   'bigloss_high','高位大面·家数',  0.50,'BAND_LADDER','big_high',1,''),
+  (@fid2,'board','bigloss_high_rate',  'bigloss_high','高位大面·大面率', 0.50,'BAND_LADDER','big_high_rate',2,'');
+INSERT INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator, threshold_low, threshold_high, score, formula, note) VALUES
+  (@fid2,'board','bigloss_low_cnt',1,'EQ',0,NULL,95,'大面家数 =0',''),(@fid2,'board','bigloss_low_cnt',2,'LTE',2,NULL,80,'1~2',''),(@fid2,'board','bigloss_low_cnt',3,'LTE',5,NULL,60,'3~5',''),(@fid2,'board','bigloss_low_cnt',4,'LTE',10,NULL,35,'6~10',''),(@fid2,'board','bigloss_low_cnt',5,'ELSE',NULL,NULL,10,'>10',''),
+  (@fid2,'board','bigloss_mid_cnt',1,'EQ',0,NULL,95,'',''),(@fid2,'board','bigloss_mid_cnt',2,'LTE',2,NULL,80,'',''),(@fid2,'board','bigloss_mid_cnt',3,'LTE',5,NULL,60,'',''),(@fid2,'board','bigloss_mid_cnt',4,'LTE',10,NULL,35,'',''),(@fid2,'board','bigloss_mid_cnt',5,'ELSE',NULL,NULL,10,'',''),
+  (@fid2,'board','bigloss_high_cnt',1,'EQ',0,NULL,95,'',''),(@fid2,'board','bigloss_high_cnt',2,'LTE',2,NULL,80,'',''),(@fid2,'board','bigloss_high_cnt',3,'LTE',5,NULL,60,'',''),(@fid2,'board','bigloss_high_cnt',4,'LTE',10,NULL,35,'',''),(@fid2,'board','bigloss_high_cnt',5,'ELSE',NULL,NULL,10,'',''),
+  (@fid2,'board','bigloss_low_rate',1,'EQ',0,NULL,95,'大面率 =0%',''),(@fid2,'board','bigloss_low_rate',2,'LTE',10,NULL,85,'<=10%',''),(@fid2,'board','bigloss_low_rate',3,'LTE',20,NULL,70,'<=20%',''),(@fid2,'board','bigloss_low_rate',4,'LTE',35,NULL,50,'<=35%',''),(@fid2,'board','bigloss_low_rate',5,'LTE',50,NULL,30,'<=50%',''),(@fid2,'board','bigloss_low_rate',6,'ELSE',NULL,NULL,10,'>50%',''),
+  (@fid2,'board','bigloss_mid_rate',1,'EQ',0,NULL,95,'',''),(@fid2,'board','bigloss_mid_rate',2,'LTE',10,NULL,85,'',''),(@fid2,'board','bigloss_mid_rate',3,'LTE',20,NULL,70,'',''),(@fid2,'board','bigloss_mid_rate',4,'LTE',35,NULL,50,'',''),(@fid2,'board','bigloss_mid_rate',5,'LTE',50,NULL,30,'',''),(@fid2,'board','bigloss_mid_rate',6,'ELSE',NULL,NULL,10,'',''),
+  (@fid2,'board','bigloss_high_rate',1,'EQ',0,NULL,95,'',''),(@fid2,'board','bigloss_high_rate',2,'LTE',10,NULL,85,'',''),(@fid2,'board','bigloss_high_rate',3,'LTE',20,NULL,70,'',''),(@fid2,'board','bigloss_high_rate',4,'LTE',35,NULL,50,'',''),(@fid2,'board','bigloss_high_rate',5,'LTE',50,NULL,30,'',''),(@fid2,'board','bigloss_high_rate',6,'ELSE',NULL,NULL,10,'','');
+
+-- 空间未打开晋级系数 0.9→0.8（GUARD 展示行）
+UPDATE t_scoring_rule
+   SET formula='空间未打开:H<5(无高位层)→晋级结构×0.8'
+ WHERE model_id=@fid2 AND dim_key='board' AND sub_key='promo' AND rule_no=2;
 
 -- 4.1) 2026-09-12 时间截面重构：D4 首板生态改纯 T 日（1进2/首板溢价/1进2大面已迁入 D3 低位层）。
 UPDATE t_scoring_dim
@@ -1506,4 +1597,69 @@ UPDATE t_scoring_rule
  WHERE model_id=@fid2 AND dim_key='board' AND sub_key='-' AND rule_no=0;
 
 -- 重放完成后历史按新口径重算：POST /api/records/recalc-all（旧 score_anchor 列冻结留痕）。
+
+-- ============ 每日复盘 v2.0（2026-09-13）：T1-T8 一键编排所需的两张新表 ============
+-- t_industry_daily_snapshot：行业板块聚合快照，由 t_market_stock 涨停池按 industry 现算（T5），
+--   无外部数据源。封单/一字/大面/覆盖层都是当日公开事实，不绑用户。
+CREATE TABLE IF NOT EXISTS t_industry_daily_snapshot (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    trade_date DATE NOT NULL COMMENT '交易日',
+    industry VARCHAR(20) NOT NULL COMMENT '行业板块(上游 hybk)',
+    zt_count INT NOT NULL DEFAULT 0 COMMENT '板块涨停家数',
+    max_board INT NULL COMMENT '板块最高连板数',
+    seal_sum DECIMAL(18,2) NOT NULL DEFAULT 0 COMMENT '封单总额(元)',
+    yizi_cnt INT NOT NULL DEFAULT 0 COMMENT '一字板家数(首封<=9:30:00且未开板)',
+    big_loss_cnt INT NOT NULL DEFAULT 0 COMMENT '板块大面家数(炸板池 big_loss)',
+    tier_levels VARCHAR(64) DEFAULT '' COMMENT '覆盖层，逗号分隔的最高连板层如 "4,3,2"',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uk_date_industry (trade_date, industry),
+    INDEX idx_date_maxboard (trade_date, max_board)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='行业板块单日聚合快照(公开数据,T5)';
+
+-- t_review_fetch：每日复盘「一键拉取」最近一次编排的状态留档（T1-T8 逐任务结果 + 汇总）。
+--   只记拉取编排的元信息，不存放任何行情/评分数据；行情数据仍在各自的业务表里。
+CREATE TABLE IF NOT EXISTS t_review_fetch (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    trade_date DATE NOT NULL COMMENT '拉取的交易日',
+    overall VARCHAR(12) NOT NULL DEFAULT 'PENDING' COMMENT 'RUNNING/DONE/PARTIAL/FAILED/PENDING',
+    tasks_json VARCHAR(2000) NULL COMMENT 'T1-T8 逐任务 {task,status,rows,msg} 的 JSON 数组',
+    warnings VARCHAR(1000) DEFAULT '' COMMENT '该日编排的汇总提示',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uk_date (trade_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='每日复盘一键拉取状态留档(T1-T8)';
+
+-- ============ 主线双轨 v0.2（2026-09-13）：人工主线标记 ============
+-- t_mainline_mark：雷达区「升级到主线区」的人工标记。命中即算当日有主线（hasMainline=true），
+--   D2 评分对象优先取人工标记行业（高于 ≥3天自动主线）。
+CREATE TABLE IF NOT EXISTS t_mainline_mark (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL COMMENT '归属用户',
+    trade_date DATE NOT NULL COMMENT '交易日',
+    industry VARCHAR(20) NOT NULL COMMENT '人工标记的主线行业',
+    manual TINYINT NOT NULL DEFAULT 1 COMMENT '固定1(人工标记)，保留位',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uk_user_date_industry (user_id, trade_date, industry)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='主线双轨雷达区人工主线标记';
+
+-- ============ D2 题材聚合 v2.3（2026-09-13）：每日主动题材索引 ============
+-- t_stock_concept：全市场「股票代码 → 概念板块」静态索引。东财涨停池只给行业(hybk)不给概念，
+--   题材热度需先建此索引。概念成分（BKxxxx）变化慢，索引低频刷新（POST /api/review/concepts/build）。
+--   建索引为全量重写：DELETE 全表 + 遍历东财全部概念板块拉成分股落库，幂等。
+CREATE TABLE IF NOT EXISTS t_stock_concept (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    code VARCHAR(6) NOT NULL COMMENT '6位股票代码',
+    concept_code VARCHAR(12) NOT NULL DEFAULT '' COMMENT '概念板块代码(东财 BKxxxx)',
+    concept VARCHAR(50) NOT NULL COMMENT '概念板块名称',
+    name VARCHAR(20) DEFAULT '' COMMENT '股票简称(索引构建时带出,便于排查)',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uk_code_concept (code, concept_code),
+    INDEX idx_code (code),
+    INDEX idx_concept (concept)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='股票-概念板块全局索引(D2题材聚合)';
 

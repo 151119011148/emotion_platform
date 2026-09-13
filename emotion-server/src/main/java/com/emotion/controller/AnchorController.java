@@ -50,6 +50,32 @@ public class AnchorController {
         return ApiResponse.ok(metricsService.vo(userId(auth), parse(date, LocalDate.now())));
     }
 
+    /**
+     * 节点页「锚定龙头」下拉的数据源：某日在位的阵眼<b>配置</b>（id/代码/名称/角色/跨度），
+     * 只查库、不打任何行情——选错一只不该被上游一抽风连锁到。
+     * date 不给就按今天。
+     */
+    @GetMapping("/config")
+    public ApiResponse<List<com.emotion.vo.AnchorConfigVO>> config(
+            Authentication auth, @RequestParam(required = false) String date) {
+        List<com.emotion.entity.Anchor> inPos =
+                anchorService.listInPosition(userId(auth), parse(date, LocalDate.now()));
+        List<com.emotion.vo.AnchorConfigVO> out = new java.util.ArrayList<>();
+        for (com.emotion.entity.Anchor a : inPos) {
+            com.emotion.vo.AnchorConfigVO vo = new com.emotion.vo.AnchorConfigVO();
+            vo.setId(a.getId());
+            vo.setStockCode(a.getStockCode());
+            vo.setStockName(a.getStockName());
+            vo.setRole(a.getRole());
+            vo.setRoleLabel(com.emotion.service.AnchorService.roleLabel(a.getRole()));
+            vo.setStartDate(a.getStartDate());
+            vo.setEndDate(a.getEndDate());
+            vo.setCycleTag(a.getCycleTag());
+            out.add(vo);
+        }
+        return ApiResponse.ok(out);
+    }
+
     /** 曲线画跨度区间用：最近 N 天里与窗口有交集的所有跨度。 */
     @GetMapping("/span")
     public ApiResponse<List<AnchorVO.Span>> spans(Authentication auth,

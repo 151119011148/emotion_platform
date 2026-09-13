@@ -83,10 +83,10 @@ class BoardScoreCalculatorTest {
         assertEquals(5, board.getSubs().size());
         SubNode promo = byKey(board.getSubs(), "promo");
         assertEquals("LAYER_WEIGHTED_BAND", promo.getScoringKind());
-        assertEquals(4, promo.getChildren().size());
+        assertEquals(3, promo.getChildren().size());
         assertEquals(1.0, weightSum(promo.getChildren()), 1e-9);
         assertEquals("jr_low", promo.getChildren().get(0).getSourceKey());
-        assertEquals("jr_top", promo.getChildren().get(3).getSourceKey());
+        assertEquals("jr_high", promo.getChildren().get(2).getSourceKey());
 
         // D5（2026-09-12 融合版）：高位生态 = 阵眼个体35 + 抱团资金30 + 监管压制20 + 监管反馈15
         DimNode high = dim(t, "high");
@@ -280,32 +280,33 @@ class BoardScoreCalculatorTest {
     void boardWhistle_appliesMultiplier() {
         Map<String, BigDecimal> metrics = boardBase("10"); // 中位晋级 10% → 中位吹哨 → 连板维 ×0.8
         Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
-        // promo = 0.15*95 + 0.25*20(jr_mid=10→ELSE) + 0.20*95 + 0.40*95 = 76.25
-        // 时间截面 PRD 子权 .30/.25/.20/.15/.10：raw=.30*76.25+.70*95=89.375；×0.8(吹哨)=71.50
-        assertAmount("71.50", r.getDimScores().get("board"));
-        assertAmount("71.50", r.getTotal());
+        // 三层子权（2026-09-13）：count.10/promo.30(低.5/中.35/高.15)/premium.25(低.45/中.35/高.2)/bigloss.20/broken.15：
+        //   promo=.5*95+.35*20+.15*95=68.75；premium=bigloss=broken=count=95
+        //   raw=.30*68.75+.25*95+.20*95+.15*95+.10*95=87.125；×0.8(吹哨)=69.70
+        assertAmount("69.70", r.getDimScores().get("board"));
+        assertAmount("69.70", r.getTotal());
         assertTrue(r.getSignalFlags().contains(BoardScoreCalculator.SIG_WHISTLE));
         assertEquals(BoardScoreCalculator.STAGE_FERMENT, r.getStage());
         assertFalse(r.isForcedEbb());
     }
 
-    /** 连板五子全给分（其余四维留空 → 总分=连板维）。promoMid 决定中位晋级率读数。 */
+    /** 连板五子全给分（其余四维留空 → 总分=连板维）。promoMid 决定中位晋级率读数。三层简化为低/中/高。 */
     private static Map<String, BigDecimal> boardBase(String promoMid) {
         return m(
-                "jr_low", 70, "jr_mid", promoMid, "jr_midhigh", 70, "jr_top", 70,
-                "prem_low", 5, "prem_mid", 5, "prem_midhigh", 5, "prem_top", 5,
-                "big_low", 0, "big_mid", 0, "big_midhigh", 0, "big_top", 0,
+                "jr_low", 70, "jr_mid", promoMid, "jr_high", 70,
+                "prem_low", 5, "prem_mid", 5, "prem_high", 5,
+                "big_low", 0, "big_mid", 0, "big_high", 0,
                 "sealed_home_rate", 90, "reseal_rate", 80,
                 "max_height", 30);
     }
 
     // ---------------------------------------------------------------- D3 口径修正（2026-09-12）
 
-    /** H=4：中高位/极高层叶子标 N/A（applicable=false、score 清空），不进分母；空间未打开 promo ×0.9。 */
+    /** H=4：高位(5板+)层叶子标 N/A（applicable=false、score 清空），不进分母；空间未打开 promo ×0.8。 */
     @Test
     void boardCalibration_h4_marksHighLayersNotApplicableAndSpacePenalty() {
         Map<String, BigDecimal> metrics = m(
-                "jr_low", 15, "jr_mid", 37.5,   // 低/中位晋级，无高两层
+                "jr_low", 15, "jr_mid", 37.5,   // 低/中位晋级，无高一层
                 "prem_low", -0.6, "prem_mid", 2.37,
                 "big_low", 0, "big_mid", 1,
                 "sealed_home_rate", 69, "reseal_rate", 54,
@@ -313,14 +314,14 @@ class BoardScoreCalculatorTest {
         Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
         NodeEval board = r.getDimEvals().get(2);
         NodeEval promo = subEval(board.getChildren(), "promo");
-        NodeEval promoTop = subEval(promo.getChildren(), "promo_top");
-        assertEquals(Boolean.FALSE, promoTop.getApplicable(), "H=4 极高位晋级应标 N/A");
-        assertNull(promoTop.getScore(), "N/A 叶子必须剔出分母");
+        NodeEval promoHigh = subEval(promo.getChildren(), "promo_high");
+        assertEquals(Boolean.FALSE, promoHigh.getApplicable(), "H=4 高位晋级应标 N/A");
+        assertNull(promoHigh.getScore(), "N/A 叶子必须剔出分母");
         NodeEval promoMid = subEval(promo.getChildren(), "promo_mid");
         assertNull(promoMid.getAdjustment(), "无小样本基数键时不打折");
         assertNotNull(promo.getAdjustment(), "H<5 晋级结构应有空间未打开修正");
-        // promo 裸合成=(.15*45+.25*65)/.40=57.5 → ×0.9=51.75
-        assertAmount("51.75", promo.getScore());
+        // promo 裸合成=(.50*45+.35*65)/.85=53.24 → ×0.8(空间未打开)=42.59
+        assertAmount("42.59", promo.getScore());
     }
 
     /** 小样本：中位晋级昨日基数<5 → 中位晋级叶子 ×0.8 并留修正说明。 */
@@ -363,8 +364,9 @@ class BoardScoreCalculatorTest {
         }
         assertTrue(gates.get("divergence").isTriggered(), "跌停21+大盘<40 应触发大盘背离");
         assertFalse(gates.containsKey("dragon_misalign"), "龙头错位闸门应已下线，实际 gates=" + gates.keySet());
-        // promo95；premium95×0.8(大盘背离)=76；bigloss=95-35=60；broken95；count95（H=30）
-        //   raw=.30*95+.25*76+.20*60+.15*95+.10*95=83.25；闸门仅 ×.85(背离)=70.76
+        // promo=95；premium=95×0.8(大盘背离)=76；bigloss=95-35=60；broken=95；count=95（H=30）
+        //   三层子权(2026-09-13)count.10/promo.30/premium.25/bigloss.20/broken.15：
+        //   raw=.30*95+.25*76+.20*60+.15*95+.10*95=83.25；闸门 ×.85(背离)=70.76
         assertAmount("70.76", r.getDimScores().get("board"));
         // 错位不再乘维分，但信号仍在
         assertTrue(r.getSignalFlags().contains(BoardScoreCalculator.SIG_ANCHOR_MISMATCH));
@@ -515,6 +517,27 @@ class BoardScoreCalculatorTest {
         assertFalse(BoardScoreCalculator.detectForcedEbb(m("d5f_nuke", 1)).forced);
     }
 
+    @Test
+    void highGuard_nukeVetoHeadlessForceCap() {
+        // 温和基线(压制100/反馈70/抱团95.9/阵眼95)叠加强信号：核按钮+龙头失效+死亡结构
+        Map<String, BigDecimal> metrics = d5Metrics();
+        metrics.putAll(m("d5f_nuke", 1, "d5_sig_handover", 3, "d5_force_death", 1));
+        Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
+        // 否决权压制 100→50、无头折扣抱团 95.9→81.52，均被重加权，但强制风控直接封顶到崩塌顶
+        assertAmount("20", r.getDimScores().get("high"));
+    }
+
+    @Test
+    void highGuard_vetoOnlyWhenNoForce_keepWeighted() {
+        // 触发否决权+无头折扣，且核按钮使反馈落到 0（无强制风控 flag，不被封顶）：
+        //   anchor95/coalition95.9→81.52(×0.85)/pressure100→50(×0.5)/feedback0(nuke≥1)
+        //   = .35×95+.30×81.52+.20×50+.15×0 = 67.71
+        Map<String, BigDecimal> metrics = d5Metrics();
+        metrics.putAll(m("d5f_nuke", 1, "d5_sig_handover", 3));
+        Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
+        assertAmount("67.71", r.getDimScores().get("high"));
+    }
+
     /** v2.1.1 量能系数收紧：普跌日量能贡献(0.25×量能分)必须严格低于指数贡献(0.35×指数分)。
      *  以 -1% 普跌口径重演：三指均值-1% → 指数分20贡献7.0；平量基础70×0.35=24.5 贡献6.125<7.0。 */
     @Test
@@ -540,13 +563,14 @@ class BoardScoreCalculatorTest {
     @Test
     void signals() {
         assertTrue(BoardScoreCalculator.detectSignals(m("prem_mid", -1, "big_mid", 4)).contains(BoardScoreCalculator.SIG_WHISTLE));
-        assertTrue(BoardScoreCalculator.detectSignals(m("jr_top", 60, "jr_mid", 20, "jr_low", 20)).contains(BoardScoreCalculator.SIG_TOP_CROWD));
-        assertTrue(BoardScoreCalculator.detectSignals(m("jr_top", 60, "jr_midhigh", 10)).contains(BoardScoreCalculator.SIG_CROWD_COLLAPSE));
-        assertTrue(BoardScoreCalculator.detectSignals(m("jr_low", 50, "jr_top", 10)).contains(BoardScoreCalculator.SIG_HIGH_LOW_SWITCH));
-        List<String> ebb = BoardScoreCalculator.detectSignals(m("jr_low", 10, "jr_mid", 10, "jr_top", 10));
+        assertTrue(BoardScoreCalculator.detectSignals(m("jr_high", 60, "jr_mid", 20, "jr_low", 20)).contains(BoardScoreCalculator.SIG_TOP_CROWD));
+        // 中高/极高断层信号已随四层→三层取消；SIG_CROWD_COLLAPSE 改由 D5 高位生态 coalition_risk 交叉触发。
+        assertTrue(BoardScoreCalculator.detectSignals(m("d5_sig_coalition_risk", 1)).contains(BoardScoreCalculator.SIG_CROWD_COLLAPSE));
+        assertTrue(BoardScoreCalculator.detectSignals(m("jr_low", 50, "jr_high", 10)).contains(BoardScoreCalculator.SIG_HIGH_LOW_SWITCH));
+        List<String> ebb = BoardScoreCalculator.detectSignals(m("jr_low", 10, "jr_mid", 10, "jr_high", 10));
         assertTrue(ebb.contains(BoardScoreCalculator.SIG_FULL_EBB));
         assertTrue(ebb.contains(BoardScoreCalculator.SIG_WHISTLE));
-        assertTrue(BoardScoreCalculator.detectSignals(m("jr_low", 50, "jr_mid", 50, "jr_top", 50)).isEmpty());
+        assertTrue(BoardScoreCalculator.detectSignals(m("jr_low", 50, "jr_mid", 50, "jr_high", 50)).isEmpty());
     }
 
     // ---------------------------------------------------------------- 强制退潮 4 条
@@ -601,10 +625,10 @@ class BoardScoreCalculatorTest {
         assertEquals(5, board.getChildren().size());
         NodeEval promo = subEval(board.getChildren(), "promo");
         assertEquals("LAYER_WEIGHTED_BAND", promo.getScoringKind());
-        assertEquals(4, promo.getChildren().size());
+        assertEquals(3, promo.getChildren().size());
         assertEquals("promo_low", promo.getChildren().get(0).getKey());
         assertEquals("jr_low", promo.getChildren().get(0).getSourceKey());
-        assertEquals("promo_top", promo.getChildren().get(3).getKey());
+        assertEquals("promo_high", promo.getChildren().get(2).getKey());
 
         // 数值路径与 dimScores 严格一致：dimEvals[i].score == dimScores[dimKey]
         for (NodeEval de : r.getDimEvals()) {

@@ -1,58 +1,23 @@
 <template>
   <div class="shouban-page">
     <div class="page-header">
-      <h2>首板生态</h2>
+      <h2>首板生态
+        <DimIntroTip title="纯 T 日试错端：只看今天新诞生的首板——资金还愿不愿意打新板、封不封得住、钱往哪个新方向试"
+          body="1进2晋级率 / 首板溢价 / 1进2大面是 T-1→T 的兑现口径，已归入连板生态低位层（连板页 2 板层）。封住/未封住名单默认收起，点击展开。" />
+      </h2>
       <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" :clearable="false"
         :disabled-date="notBeforeToday" style="width: 168px" />
     </div>
-    <el-alert class="intro" type="info" :closable="false" show-icon>
-      <template #title>纯 T 日试错端：只看今天新诞生的首板——资金还愿不愿意打新板、封不封得住、钱往哪个新方向试</template>
-      <div class="intro-body">
-        <p>1进2晋级率 / 首板溢价 / 1进2大面是 T-1→T 的<b>兑现</b>口径，已归入连板生态低位层（连板页 2 板层）。封住/未封住名单默认收起，点击展开。</p>
-      </div>
-    </el-alert>
 
-    <div class="stat-grid" v-loading="loading">
-      <div class="stat">
-        <span class="stat-label">首板封住</span>
-        <span class="stat-value">{{ summary ? nz(summary.sealedCount) : '—' }}</span>
-        <span class="stat-sub">涨停池 1 板</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">首板炸板</span>
-        <span class="stat-value">{{ summary ? nz(summary.bombedCount) : '—' }}</span>
-        <span class="stat-sub">{{ prevReady ? '首板尝试未封住' : '昨日明细缺失，不可判定' }}</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">首板封板率</span>
-        <span class="stat-value">{{ pctText(summary?.sealedRate) }}</span>
-        <span class="stat-sub">封住 ÷（封住 + 首板炸板）</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">一字首板</span>
-        <span class="stat-value">{{ summary ? nz(summary.yiziCount) : '—' }}</span>
-        <span class="stat-sub">占比 {{ pctText(summary?.yiziRatio) }}</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">首板均封单</span>
-        <span class="stat-value">{{ summary?.avgSealAmount != null ? moneyText(summary.avgSealAmount) : '—' }}</span>
-        <span class="stat-sub">封住首板封单均值</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">首板题材聚集</span>
-        <span class="stat-value">{{ pctText(summary?.themeGatherPct) }}</span>
-        <span class="stat-sub">{{ summary?.topIndustry ? `最热：${summary.topIndustry} ${nz(summary.topIndustryCount)} 只` : '资金分散' }}</span>
-      </div>
-    </div>
-
-    <!-- 首板生态打分明细（score-detail first 维 eval 树，纯 T 日） -->
-    <section class="block score-block" v-loading="scoring.detailLoading">
-      <div class="block-head">
-        <h3>首板生态打分</h3>
+    <!-- 首板生态打分明细（score-detail first 维 eval 树，纯 T 日），默认折叠 -->
+    <section class="block score-block" :class="{ 'score-collapsed': !scoreOpen }" v-loading="scoring.detailLoading">
+      <div class="block-head score-head" @click="scoreOpen = !scoreOpen">
+        <h3>首板生态打分 <span class="fold-tag">{{ scoreOpen ? '收起 ▲' : '展开 ▼' }}</span></h3>
         <span class="dim-score" :class="bandClass(firstDim?.score)">
           {{ firstDim?.score == null ? '未评' : Number(firstDim.score).toFixed(2) + ' 分' }}
         </span>
       </div>
+      <div v-show="scoreOpen">
       <el-empty v-if="!firstDim" :description="'当日读数未取到，首板生态未评（不计入分母）'" :image-size="60" />
       <template v-else>
         <ol class="formula">
@@ -106,7 +71,44 @@
           <b class="whistle-note">{{ firstDim.note }}</b>
         </p>
       </template>
+      </div>
     </section>
+
+    <!-- D4 分走势：点任意一天切日期 -->
+    <DimScoreCurve :rows="curveRows" :selected="date" name="首板生态" @select="date = $event" />
+
+    <div class="stat-grid" v-loading="loading">
+      <div class="stat">
+        <span class="stat-label">首板封住</span>
+        <span class="stat-value">{{ summary ? nz(summary.sealedCount) : '—' }}</span>
+        <span class="stat-sub">涨停池 1 板</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">首板炸板</span>
+        <span class="stat-value">{{ summary ? nz(summary.bombedCount) : '—' }}</span>
+        <span class="stat-sub">{{ prevReady ? '首板尝试未封住' : '昨日明细缺失，不可判定' }}</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">首板封板率</span>
+        <span class="stat-value">{{ pctText(summary?.sealedRate) }}</span>
+        <span class="stat-sub">封住 ÷（封住 + 首板炸板）</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">一字首板</span>
+        <span class="stat-value">{{ summary ? nz(summary.yiziCount) : '—' }}</span>
+        <span class="stat-sub">占比 {{ pctText(summary?.yiziRatio) }}</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">首板均封单</span>
+        <span class="stat-value">{{ summary?.avgSealAmount != null ? moneyText(summary.avgSealAmount) : '—' }}</span>
+        <span class="stat-sub">封住首板封单均值</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">首板题材聚集</span>
+        <span class="stat-value">{{ pctText(summary?.themeGatherPct) }}</span>
+        <span class="stat-sub">{{ summary?.topIndustry ? `最热：${summary.topIndustry} ${nz(summary.topIndustryCount)} 只` : '资金分散' }}</span>
+      </div>
+    </div>
 
     <!-- 试错-兑现背离信号 -->
     <section class="block signal-block">
@@ -121,71 +123,51 @@
       <p v-else class="signal-empty">两维都出分后计算背离度……</p>
     </section>
 
-    <!-- 封住 / 未封住：默认折叠 -->
-    <el-collapse v-model="activeLists" class="list-collapse">
-      <el-collapse-item name="sealed">
-        <template #title>
-          <span class="collapse-title ok-text">封住名单（{{ sealedRows.length }}）</span>
-        </template>
-        <el-table :data="sealedRows" size="small">
-          <el-table-column prop="code" label="代码" width="90" />
-          <el-table-column prop="name" label="名称" width="110" show-overflow-tooltip />
-          <el-table-column label="行业" min-width="120" show-overflow-tooltip>
-            <template #default="{ row }">
-              <span :class="{ 'in-main': row.inMain }">{{ row.industry || '—' }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="形态" width="72">
-            <template #default="{ row }">
-              <el-tag size="small" :type="PATTERN_TYPE[row.pattern] || 'info'" effect="plain">{{ PATTERN_LABEL[row.pattern] || '—' }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="封单额" width="100">
-            <template #default="{ row }">{{ row.sealAmount != null ? moneyText(row.sealAmount) : '—' }}</template>
-          </el-table-column>
-          <el-table-column label="开板" width="64" align="center">
-            <template #default="{ row }">{{ row.breakCount == null ? '—' : row.breakCount + ' 次' }}</template>
-          </el-table-column>
-          <el-table-column label="涨幅" width="90" align="right">
-            <template #default="{ row }">
-              <span :class="pctClass(row.changePct)">{{ row.changePct == null ? '—' : signed(row.changePct) + '%' }}</span>
-            </template>
-          </el-table-column>
-          <template #empty>当日没有封住的首板（或行情明细未回补，点每日复盘拉行情）</template>
-        </el-table>
-      </el-collapse-item>
+    <!-- 封住 / 未封住：默认折叠，点击展开；chip 样式与连板天梯一致 -->
+    <section class="block list-block">
+      <div class="block-head list-head" @click="sealedOpen = !sealedOpen">
+        <h3>封住名单 <span class="fold-tag ok-tag">{{ sealedOpen ? '收起 ▲' : '展开 ▼' }}</span></h3>
+        <span class="list-count ok-text">{{ sealedRows.length }} 只</span>
+      </div>
+      <div v-show="sealedOpen" class="list-body">
+        <div v-if="!sealedRows.length" class="list-empty">当日没有封住的首板（或行情明细未回补，点每日复盘拉行情）</div>
+        <div v-else class="chips">
+          <div v-for="r in sealedRows" :key="r.code" class="chip">
+            <span class="chip-name">{{ r.name }}</span>
+            <span class="chip-code">{{ r.code }}</span>
+            <span class="chip-industry" :class="{ 'in-main': r.inMain }">{{ r.industry || '—' }}</span>
+            <el-tag v-if="r.pattern" size="small" :type="PATTERN_TYPE[r.pattern] || 'info'" effect="plain">
+              {{ PATTERN_LABEL[r.pattern] || '—' }}
+            </el-tag>
+            <span v-if="r.sealAmount != null" class="chip-seal">封单 {{ moneyText(r.sealAmount) }}</span>
+            <span v-if="r.breakCount != null && r.breakCount > 0" class="chip-reseal">开板{{ r.breakCount }}次↩回封</span>
+            <span :class="pctClass(r.changePct)" class="chip-pct">{{ r.changePct == null ? '—' : signed(r.changePct) + '%' }}</span>
+          </div>
+        </div>
+      </div>
+    </section>
 
-      <el-collapse-item name="bombed">
-        <template #title>
-          <span class="collapse-title bad-text">未封住名单（{{ bombedRows.length }}）</span>
-        </template>
+    <section class="block list-block">
+      <div class="block-head list-head" @click="bombedOpen = !bombedOpen">
+        <h3>未封住名单 <span class="fold-tag bad-tag">{{ bombedOpen ? '收起 ▲' : '展开 ▼' }}</span></h3>
+        <span class="list-count bad-text">{{ bombedRows.length }} 只</span>
+      </div>
+      <div v-show="bombedOpen" class="list-body">
         <el-alert v-if="!prevReady" type="warning" :closable="false" show-icon
           title="昨日明细未回补，无法判定哪些炸板属于「首板尝试」，本表暂不可算" style="margin: 8px 0" />
-        <el-table v-else :data="bombedRows" size="small">
-          <el-table-column prop="code" label="代码" width="90" />
-          <el-table-column prop="name" label="名称" width="110" show-overflow-tooltip />
-          <el-table-column label="行业" min-width="120" show-overflow-tooltip>
-            <template #default="{ row }">
-              <span :class="{ 'in-main': row.inMain }">{{ row.industry || '—' }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="今日涨跌" width="110" align="right">
-            <template #default="{ row }">
-              <span :class="pctClass(row.changePct)">{{ row.changePct == null ? '—' : signed(row.changePct) + '%' }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="自涨停回撤" width="120" align="right">
-            <template #default="{ row }">
-              <span class="pullback">{{ row.pullbackPct == null ? '—' : '-' + Number(row.pullbackPct).toFixed(2) + '%' }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="开板" width="80" align="center">
-            <template #default="{ row }">{{ row.breakCount == null ? '—' : row.breakCount + ' 次' }}</template>
-          </el-table-column>
-          <template #empty>当日没有首板炸板（或昨日明细未回补）</template>
-        </el-table>
-      </el-collapse-item>
-    </el-collapse>
+        <div v-else-if="!bombedRows.length" class="list-empty">当日没有首板炸板（或昨日明细未回补）</div>
+        <div v-else class="chips">
+          <div v-for="r in bombedRows" :key="r.code" class="chip chip-fail">
+            <span class="chip-name">{{ r.name }}</span>
+            <span class="chip-code">{{ r.code }}</span>
+            <span class="chip-industry" :class="{ 'in-main': r.inMain }">{{ r.industry || '—' }}</span>
+            <span :class="pctClass(r.changePct)" class="chip-pct">{{ r.changePct == null ? '—' : signed(r.changePct) + '%' }}</span>
+            <span v-if="r.pullbackPct != null" class="chip-pullback">回撤 -{{ Number(r.pullbackPct).toFixed(2) }}%</span>
+            <span v-if="r.breakCount != null && r.breakCount > 0" class="chip-break">开板{{ r.breakCount }}次</span>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -195,6 +177,8 @@ import { useRoute } from 'vue-router'
 import { prdApi, recordApi } from '../api/modules'
 import { signed, fiveDimBandClassOf } from '../utils/scores'
 import { useScoringStore } from '../stores/scoring'
+import DimScoreCurve from '../components/DimScoreCurve.vue'
+import DimIntroTip from '../components/DimIntroTip.vue'
 
 const route = useRoute()
 const scoring = useScoringStore()
@@ -206,7 +190,14 @@ const todayStr = new Date().toLocaleDateString('en-CA')
 const date = ref(route.query.date || todayStr)
 const loading = ref(false)
 const vo = ref(null)
-const activeLists = ref([])
+/** 曲线往回取多少个日历日去凑最近 30 个交易日：留足长假，取 90 天。 */
+const LOOKBACK_DAYS = 90
+const CURVE_ROWS = 30
+const curveRows = ref([])
+// 打分明细 / 封住名单 / 未封住名单：默认折叠，点头部展开
+const scoreOpen = ref(false)
+const sealedOpen = ref(false)
+const bombedOpen = ref(false)
 
 const summary = computed(() => vo.value?.summary || null)
 const sealedRows = computed(() => vo.value?.sealed || [])
@@ -310,6 +301,13 @@ function moneyText(v) {
   return n.toFixed(0) + ' 元'
 }
 
+/** 补 T00:00:00 按本地时区解析，否则 new Date('2026-09-04') 走 UTC 会少一天。 */
+function shiftDays(iso, days) {
+  const d = new Date(iso + 'T00:00:00')
+  d.setDate(d.getDate() - days)
+  return d.toLocaleDateString('en-CA')
+}
+
 async function load() {
   loading.value = true
   try {
@@ -318,6 +316,12 @@ async function load() {
       scoring.loadDetail(date.value, true).catch(() => null)
     ])
     vo.value = res?.data || null
+    // 曲线与异动监管页同一取数口：range 返回按日升序，切出最近一段直接喂图
+    const rangeRes = await recordApi.getRange(shiftDays(date.value, LOOKBACK_DAYS), date.value).catch(() => null)
+    curveRows.value = ((rangeRes && rangeRes.data) || []).slice(-CURVE_ROWS).map((r) => ({
+      date: r.tradeDate,
+      score: r.scoreFirst
+    }))
   } finally {
     loading.value = false
   }
@@ -394,12 +398,57 @@ watch(date, load)
 .divergence-num { margin-left: auto; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; font-weight: 400; opacity: .85; }
 .signal-empty { color: #6b7c8c; font-size: 12px; margin: 0; }
 .block-head .sub { color: #6b7c8c; font-size: 12px; }
-.collapse-title { font-size: 14px; font-weight: 600; }
+
+/* 折叠头（与连板页同一套：整块可点，折叠态收窄底距） */
+.score-head, .list-head { cursor: pointer; user-select: none; border-radius: 8px; transition: background .15s; }
+.score-head:hover, .list-head:hover { background: rgba(255, 255, 255, .025); }
+.score-head:hover h3, .list-head:hover h3 { color: #fff; }
+.fold-tag {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  color: #9fb2c6;
+  background: #22303f;
+  border: 1px solid #3a4d63;
+  border-radius: 999px;
+  line-height: 1.7;
+  transition: color .18s, border-color .18s, background .18s, transform .12s;
+  vertical-align: middle;
+}
+.score-head:hover .fold-tag, .list-head:hover .fold-tag { color: #ffd166; border-color: #ffd166; background: #2b3d52; }
+.score-head:active .fold-tag, .list-head:active .fold-tag { transform: translateY(1px); background: #2f4258; }
+.score-block.score-collapsed .block-head { margin-bottom: 0; border-bottom: 1px dashed #33455a; }
+
+/* 封住 / 未封住名单：区块头常驻分隔线，身体可折叠 */
+.list-block .block-head { margin-bottom: 0; border-bottom: 1px dashed #33455a; }
+.list-body { padding-top: 12px; }
+.list-count { font-size: 12px; font-weight: 600; }
+.list-empty { color: #6b7c8c; font-size: 12px; padding: 4px 0; }
+
+/* chip 名单：与连板天梯同款 */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #0f1419; border: 1px solid #2d3748; border-radius: 999px;
+  padding: 4px 10px; font-size: 12px;
+}
+.chip-name { color: #e1e8ed; font-weight: 600; }
+.chip-code { color: #6b7c8c; font-size: 11px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.chip-industry { color: #a8b7c4; font-size: 11px; }
+.chip-industry.in-main { color: #fbbf24; }
+.chip-seal { color: #a8b7c4; font-size: 11px; }
+.chip-reseal { color: #7dd3fc; font-size: 11px; background: rgba(56, 189, 248, .12); border-radius: 6px; padding: 1px 6px; }
+.chip-break { color: #7c8794; font-size: 11px; }
+.chip-pct { font-weight: 600; font-size: 11px; }
+.chip.chip-fail { opacity: .55; background: #0d1117; border-color: #3a4450; border-style: dashed; }
+.chip-fail .chip-name { color: #94a3b8; font-weight: 500; }
+.chip-pullback { color: #fca5a5; font-size: 11px; }
 .ok-text { color: #6ee7b7; }
 .bad-text { color: #fca5a5; }
-.pullback { color: #fca5a5; }
 .in-main { color: #fbbf24; }
 .up { color: #ef4444; }
 .down { color: #3b82f6; }
-.list-collapse { background: #1a2332; border-radius: 12px; padding: 4px 20px; }
 </style>

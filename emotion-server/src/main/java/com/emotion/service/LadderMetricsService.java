@@ -212,11 +212,12 @@ public class LadderMetricsService {
                                       List<MarketStock> prevZT, Set<String> todayZtCodes,
                                       Map<String, BigDecimal> perf) {
         String[] keyPrefix = {"jr", "prem", "big"};
-        String[] layerSuffix = {"low", "mid", "midhigh", "top"};
+        // 三层（2026-09-13 简化，对齐高位生态 D5 边界）：low=2板 / mid=3-4板 / high=5板+
+        String[] layerSuffix = {"low", "mid", "high"};
         for (String p : keyPrefix) {
-            int[] num = new int[4];
-            int[] den = new int[4];
-            int[] count = new int[4];
+            int[] num = new int[3];
+            int[] den = new int[3];
+            int[] count = new int[3];
             switch (p) {
                 case "jr":
                     for (int b = 2; b <= h; b++) {
@@ -224,7 +225,7 @@ public class LadderMetricsService {
                         num[li] += nz(todayByBoard.get(b));
                         den[li] += nz(prevByBoard.get(b - 1));
                     }
-                    for (int li = 0; li < 4; li++) {
+                    for (int li = 0; li < 3; li++) {
                         putRate(out, keyPrefix[0] + "_" + layerSuffix[li], num[li], den[li]);
                         // 昨日基数家数：引擎用它判"小样本×0.8"；只在当日真实存在的层出键，
                         // 且 den=0 不出（没有基数既不是 0 家也不是小样本，而是该晋级率未评）。
@@ -237,7 +238,7 @@ public class LadderMetricsService {
                     if (prevCodeBoard.isEmpty()) {
                         break; // no yesterday pool: cannot attribute big-loss to layers; keys stay absent
                     }
-                    int[] seedBase = new int[4];
+                    int[] seedBase = new int[3];
                     for (MarketStock prev : prevZT) {
                         Integer b = prev.getConsecutive() == null ? 1 : prev.getConsecutive();
                         String code = prev.getCode();
@@ -260,7 +261,7 @@ public class LadderMetricsService {
                             count[li]++;
                         }
                     }
-                    for (int li = 0; li < 4; li++) {
+                    for (int li = 0; li < 3; li++) {
                         // 本日无此板高层 → 键缺席（引擎标 N/A），不能用 0 命中"EQ 0→95"给不存在的层发满分
                         if (!BoardScoreCalculator.layerActive(li, h)) {
                             continue;
@@ -291,7 +292,7 @@ public class LadderMetricsService {
                         out.merge("prem_" + layerSuffix[li] + "__num", t.getAvgPct().multiply(w), BigDecimal::add);
                         out.merge("prem_" + layerSuffix[li] + "__den", w, BigDecimal::add);
                     }
-                    for (int li = 0; li < 4; li++) {
+                    for (int li = 0; li < 3; li++) {
                         BigDecimal n = out.remove("prem_" + layerSuffix[li] + "__num");
                         BigDecimal d = out.remove("prem_" + layerSuffix[li] + "__den");
                         if (n != null && d != null && d.signum() > 0) {
@@ -330,14 +331,9 @@ public class LadderMetricsService {
         }
     }
 
-    // ---------------- 四层划界（当日最高板 H 动态）：低=2；中=3-4；中高=5..hsplit；极高=hsplit+1..H ----------------
+    // ---------------- 三层划界（2026-09-13）：低=2 板；中=3-4 板；高=5 板+，与高位生态 D5 同界 -----------------
 
-    /** {@code hsplit = max(4, ⌈H/2⌉)}；H<9 时中高段自然为空 → 退化成三层（低/中/高位），对齐 spec 的边界说明。 */
-    static int hsplit(int h) {
-        return Math.max(4, (h + 1) / 2);
-    }
-
-    /** 返回 0=低/1=中/2=中高/3=极高。 */
+    /** 返回 0=低/1=中/2=高。不再按 H 细分中高位/极高位（与高位生态重复且 H<9 时中高位为空）。 */
     static int layerIndex(int board, int h) {
         if (board <= 2) {
             return 0;
@@ -345,7 +341,7 @@ public class LadderMetricsService {
         if (board <= 4) {
             return 1;
         }
-        return board <= hsplit(h) ? 2 : 3;
+        return 2;
     }
 
     // ---------------- 小工具 ----------------

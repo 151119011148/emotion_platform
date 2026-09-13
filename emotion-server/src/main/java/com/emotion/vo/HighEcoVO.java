@@ -33,6 +33,17 @@ public class HighEcoVO {
     private List<Signal> signals = new ArrayList<>();
     /** 取数口径与未评原因（无事件窗/无阵眼/缺价等），卡片直接展示。 */
     private List<String> notes = new ArrayList<>();
+    /** 强制风控（引擎 force flag 触发的红条）；未触发为 null。 */
+    private ForceRisk forceRisk;
+
+    /** D5 强信号守卫触发的强制风控红条。 */
+    @Data
+    public static class ForceRisk {
+        private boolean triggered;
+        private String reason;
+        /** 封顶后的 D5 总分（崩塌顶，≤{@code 20}）。 */
+        private Integer capScore;
+    }
 
     /** 子项1：阵眼个体（人工 t_anchor，起止区间内恒定，断板日仍跟踪）。 */
     @Data
@@ -107,6 +118,8 @@ public class HighEcoVO {
         private Integer structureScore;
         private Integer strengthScore;
         private Integer score;
+        /** 强信号守卫（无头抱团折扣等）的人话说明；未触发为 null。 */
+        private String adjust;
     }
 
     /** 子项3：监管压制。 */
@@ -121,6 +134,8 @@ public class HighEcoVO {
         private int maxSectorSurv;
         private String maxSectorName;
         private Integer score;
+        /** 强信号守卫（监管反馈否决权）的人话说明；未触发为 null。 */
+        private String adjust;
     }
 
     /** 子项4：监管反馈。 */

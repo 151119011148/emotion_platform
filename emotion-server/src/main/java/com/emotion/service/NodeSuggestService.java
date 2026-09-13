@@ -3,6 +3,7 @@ package com.emotion.service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -140,6 +141,8 @@ public class NodeSuggestService {
         node.setNodeStock(fresh.getNodeStock());
         node.setNodeStockMaxBoard(fresh.getNodeStockMaxBoard());
         node.setStatusNote(cut(fresh.getReason(), STATUS_NOTE_MAX));
+        node.setConclusionReason(fresh.getConclusionReason());
+        node.setLastRecalcAt(LocalDateTime.now());
         nodeEventMapper.updateById(node);
         return node;
     }
@@ -416,6 +419,7 @@ public class NodeSuggestService {
         vo.setSuggestedStatus(status);
         vo.setStatus(status);
         vo.setNodeValid(STATUS_VALID.equals(status) ? 1 : 0);
+        vo.setConclusionReason(conclusionReason(systemB, repack != null && repack == 1, count, rate, status));
 
         NodeSuggestVO.Candidate leader = strongest(cands);
         if (leader != null) {
@@ -453,6 +457,23 @@ public class NodeSuggestService {
         }
         boolean enough = count >= A_STRONG_PROMOTION && rate != null && rate.compareTo(A_MIN_RATE) >= 0;
         return enough ? STATUS_VALID : STATUS_PENDING;
+    }
+
+    /**
+     * 细分原因（写出即权威）：失效优先按「老龙反包作废」，否则按「晋级清零」；
+     * 有效按判据档位标强/中。与 {@link #verdict} 一一对应，不能出现判定之外的理由。
+     */
+    static String conclusionReason(boolean systemB, boolean repack, int count, BigDecimal rate, String status) {
+        if (STATUS_INVALID.equals(status)) {
+            return !systemB && repack ? "反包失效" : "晋级清零失效";
+        }
+        if (STATUS_VALID.equals(status)) {
+            if (systemB) {
+                return "有效·板块达标";
+            }
+            return count > A_STRONG_PROMOTION ? "有效·强" : "有效·中等";
+        }
+        return null;
     }
 
     /** 最强节点票：D0 之后最高板数最大的那只；并列取代码小的，纯为让结论可复现。 */

@@ -66,6 +66,35 @@ public class MainlineVO {
     // ---- 轮动 ----
     private List<String> rotationSignals;
 
+    // ---- 双轨 v0.2：雷达区（候选池）+ 主线打标 ----
+    private List<RadarRow> radar;
+    /** 雷达区题材表：radar 按题材归并后的行（只含用户已登记题材的行业）。 */
+    private List<RadarRow> radarThemes;
+    /** 当日涨停聚集度最高行业（候选榜首，雷达区第 0 行）；与 {@link #mainIndustry} 错位时即"候选 vs 晋级"的典型。 */
+    private String radarTopIndustry;
+    /** 当日是否已有主线：radar 任一 ≥3天 或存在人工 t_mainline_mark。 */
+    private Boolean hasMainline;
+    /** D2 评分对象是否由人工主线标记产生（前端标 🏷人工）。 */
+    private Boolean manuallyMarked;
+    /** 无主线打标：如 "⚠️无主线，仅日内核心炒作（最强板块仅 1 天）"；有主线=null。 */
+    private String mainlineSignal;
+
+    /** 雷达区单行：当日一个行业板块（候选池，不打 D2 分）。 */
+    @Data
+    public static class RadarRow {
+        private String industry;
+        /** 该行业名匹配到的用户题材（t_theme.name==industry）；null=未登记题材。 */
+        private String theme;
+        private Integer zt;
+        private Double ztGatherPct;
+        private Integer maxBoard;
+        private Integer persistenceDays;
+        /** NEW(1天🆕)/WATCH(2天)/MAIN(≥3天⭐)。 */
+        private String flag;
+        private Boolean isMainline;
+        private Member leader;
+    }
+
     /** 总龙头卡：action=PROMOTE/HOLD/BREAK/ABSENT。 */
     @Data
     public static class Dragon {

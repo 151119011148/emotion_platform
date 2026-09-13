@@ -214,13 +214,58 @@ public class HighEcoMetricsService {
         buildSignalsAndForce(h, threshold, anchorResult, realTop, metrics, vo, p, todayByBoard);
 
         // ---------- 维分（引擎口径同构：35/30/20/15，未评子项剔除） ----------
-        Integer score = dimScore(anchorResult.block.getScore(), vo.getCoalition() == null ? null : vo.getCoalition().getScore(),
-                p.pressure == null ? null : p.pressure.getScore(),
-                p.feedback == null ? null : p.feedback.getScore());
+        Integer anchorSc = anchorResult.block.getScore();
+        Integer coalitionSc = vo.getCoalition() == null ? null : vo.getCoalition().getScore();
+        Integer pressureSc = p.pressure == null ? null : p.pressure.getScore();
+        Integer feedbackSc = p.feedback == null ? null : p.feedback.getScore();
+
+        // 守卫① 监管反馈否决权：监管股核按钮(跌停/大面)≥1 → 压制分减半。
+        //   否则"票少压制轻(88)"会把"被监管股集体崩盘(反馈0)"这支队最硬的信号盖住。
+        int nuke = p.nuke;
+        Integer vetoed = HighEcoMetrics.pressureAfterNukeVeto(pressureSc, nuke);
+        if (pressureSc != null && !pressureSc.equals(vetoed)) {
+            pressureSc = vetoed;
+            vo.getPressure().setScore(pressureSc);
+            vo.getPressure().setAdjust("监管股核按钮 " + nuke + " 只，" + plain(HighEcoMetrics.GUARD_NUKE_VETO_MULT) + " 计");
+            notes.add("守卫·否决权：监管股核按钮 " + nuke + " 只，监管压制 " + plain(HighEcoMetrics.GUARD_NUKE_VETO_MULT));
+        }
+        // 守卫② 无头抱团折扣：总龙头失效(龙头易主 level≥3) → 抱团分 ×0.85。
+        BigDecimal handover = metrics.get(M_SIG_HANDOVER);
+        int handoverLevel = handover == null ? 0 : handover.intValue();
+        Integer discounted = HighEcoMetrics.coalitionAfterHeadless(coalitionSc, handoverLevel);
+        if (coalitionSc != null && !coalitionSc.equals(discounted)) {
+            coalitionSc = discounted;
+            vo.getCoalition().setScore(coalitionSc);
+            vo.getCoalition().setAdjust("总龙头失效，无头抱团 " + plain(HighEcoMetrics.GUARD_HEADLESS_MULT) + " 计");
+            notes.add("守卫·无头折扣：总龙头失效，抱团 " + plain(HighEcoMetrics.GUARD_HEADLESS_MULT));
+        }
+        Integer score = dimScore(anchorSc, coalitionSc, pressureSc, feedbackSc);
+
+        // 守卫③ 强制风控封顶：引擎 force flag（死亡结构/监管龙头断板）触发 → 总分封到崩塌顶 + 红条。
+        boolean force = metrics.containsKey(M_FORCE_DEATH) || metrics.containsKey(M_FORCE_TOP_BREAK);
+        if (force) {
+            if (score != null) {
+                Integer capped = HighEcoMetrics.cappedByForce(score, true);
+                if (!capped.equals(score)) {
+                    score = capped;
+                    notes.add("守卫·封顶：强制风控触发，D5 总分封至崩塌级 ≤" + HighEcoMetrics.GUARD_FORCE_CAP);
+                }
+            }
+            vo.setForceRisk(forceRisk(score));
+        }
         vo.setScore(score);
         vo.setLevel(levelOf(score));
         vo.setNotes(notes);
         return new Build(vo, metrics);
+    }
+
+    private static HighEcoVO.ForceRisk forceRisk(Integer cappedScore) {
+        HighEcoVO.ForceRisk fr = new HighEcoVO.ForceRisk();
+        fr.setTriggered(true);
+        fr.setReason("死亡结构强制空仓 / 监管龙头断板强制退潮：强信号触发，D5 总分封至崩塌级 "
+                + (cappedScore == null ? "" : "≤" + HighEcoMetrics.GUARD_FORCE_CAP));
+        fr.setCapScore(cappedScore);
+        return fr;
     }
 
     private Integer dimScore(Integer anchor, Integer coalition, Integer pressure, Integer feedback) {
@@ -662,8 +707,14 @@ public class HighEcoMetricsService {
             MarketStock zb = zbByCode.get(m.getCode());
             MarketStock dt = dtByCode.get(m.getCode());
             MarketStock prev = prevZtByCode.get(m.getCode());
-            Integer board = zt != null ? nz(zt.getConsecutive())
-                    : prev != null ? nz(prev.getConsecutive()) : null;
+            // 断板/出池的监管股今日可能不在任何池里：zt/prev 都无板数→null（用 if/else 而非三元，
+            // 因为「nz() 返回 int 拼接 : null」会让 javac 走 intValue() 对 null 拆箱 → NPE
+            Integer board = null;
+            if (zt != null) {
+                board = nz(zt.getConsecutive());
+            } else if (prev != null) {
+                board = nz(prev.getConsecutive());
+            }
             boolean high = board != null && board >= threshold;
             if (high) {
                 highCount++;

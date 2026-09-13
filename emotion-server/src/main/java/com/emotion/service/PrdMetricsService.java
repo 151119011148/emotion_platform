@@ -7,17 +7,21 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.emotion.entity.MainlineMark;
 import com.emotion.entity.MarketStock;
 import com.emotion.entity.Theme;
+import com.emotion.mapper.MainlineMarkMapper;
 import com.emotion.mapper.MarketStockMapper;
 import com.emotion.mapper.ThemeMapper;
 
@@ -85,10 +89,13 @@ public class PrdMetricsService {
 
     private final MarketStockMapper marketStockMapper;
     private final ThemeMapper themeMapper;
+    private final MainlineMarkMapper mainlineMarkMapper;
 
-    public PrdMetricsService(MarketStockMapper marketStockMapper, ThemeMapper themeMapper) {
+    public PrdMetricsService(MarketStockMapper marketStockMapper, ThemeMapper themeMapper,
+                             MainlineMarkMapper mainlineMarkMapper) {
         this.marketStockMapper = marketStockMapper;
         this.themeMapper = themeMapper;
+        this.mainlineMarkMapper = mainlineMarkMapper;
     }
 
     /** 一次快照：metrics 喂打分引擎，其余字段喂天梯/首板/主线详情页。 */
@@ -113,8 +120,18 @@ public class PrdMetricsService {
         public String zongLongAction;          // PROMOTE/HOLD/BREAK/ABSENT
         /** 总龙头判定依据（人话）：选取规则 + 同板高 tie-break + 今日状态证据。 */
         public String dragonReason;
-        /** 日内核心连续热度天数（今日≥5 家起算）；不足 {@link #MAINLINE_CONFIRM_DAYS} 不收集为主线龙头。 */
+        /** 主线是否成立（评分对象已确认）：人工标记或自动主线（连续≥3 热度日）。连续天数口径见 {@link #consecutiveDays}，今天 3–4 仍活跃不算断。 */
         public boolean mainlineConfirmed;
+        /** D2 评分对象是否由人工主线标记（t_mainline_mark）产生。 */
+        public boolean manuallyMarked;
+        /** 当日涨停聚集度最高行业（候选榜首，雷达区第0行）；无涨停=null。 */
+        public String radarTopIndustry;
+        /** 自动主线行业（radar 中连续≥3天最强者）；无=null。 */
+        public String autoMainlineIndustry;
+        /** 雷达区板块表（候选池）：当日所有有涨停的行业，按 zt 降序 → 持续天数降序。 */
+        public List<RadarRow> radar = new ArrayList<>();
+        /** 雷达区题材表：把 radar 按题材归并（共享同一 t_theme 的行业合并成一行），只含用户已登记题材的行业。 */
+        public List<RadarRow> radarThemes = new ArrayList<>();
         public List<MarketStock> zhongJun = new ArrayList<>();  // 主线内其余连板≥2（中军候选）
         public int genFengCount;               // 主线内跟风涨停家数（扣掉总龙/中军）
         public MarketStock kaWei;              // 他题材最高标（封住）/昨日他题材高标今炸
@@ -122,6 +139,20 @@ public class PrdMetricsService {
         public List<MarketStock> fanBao = new ArrayList<>();    // 昨炸板今回封
         public Map<String, BigDecimal> metrics = new LinkedHashMap<>();
         public List<String> rotationSignals = new ArrayList<>();
+    }
+
+    /** 雷达区单行（候选池）：当日一个行业板块的快照，不打 D2 分，只标连续天数与强度。 */
+    public static class RadarRow {
+        public String industry;
+        /** 该行业名匹配到的用户题材（t_theme.name==industry，可能 null=未登记题材）。 */
+        public String theme;
+        public int zt;                 // 当日涨停家数
+        public int maxBoard;           // 板块内最高连板
+        public int persistenceDays;    // 连续热度天数（当日该行业 ZT≥5 往前数）
+        public String flag;            // NEW(1天🆕)/WATCH(2天)/MAIN(≥3天⭐)
+        public boolean isMainline;     // persistenceDays >= MAINLINE_CONFIRM_DAYS
+        public MarketStock leader;     // 板块内最高板（可 null）
+        public double ztGatherPct;     // 板块涨停聚集度 %（本行业/全市场）
     }
 
     /** 读当天+前一交易日的池明细、主线活跃历史与题材行，产出快照。DB 异常向上抛，调用方决定降级方式。 */
@@ -159,16 +190,25 @@ public class PrdMetricsService {
         // 题材行（用户自维护）：名称与行业一致才算对上；同账号当天只可能有一行命中（重名取最新）。
         // userId 为 null（理论不该发生）时跳过，硬度=未评。
         Theme mainTheme = null;
+        Map<String, Theme> industryTheme = new HashMap<String, Theme>();
         try {
             List<Theme> themes = themeMapper.selectList(new LambdaQueryWrapper<Theme>()
                     .eq(userId != null, Theme::getUserId, userId)
                     .orderByDesc(Theme::getCreatedAt));
             for (Theme t : themes) {
-                if (t.getName() != null && !t.getName().trim().isEmpty()) {
-                    if (mainTheme == null || t.getCreatedAt() == null || mainTheme.getCreatedAt() == null
-                            || t.getCreatedAt().isAfter(mainTheme.getCreatedAt())) {
-                        mainTheme = t; // 先记最新一行，aggregate 里按行业名匹配后使用
-                    }
+                if (t.getName() == null || t.getName().trim().isEmpty()) {
+                    continue;
+                }
+                String name = t.getName().trim();
+                // 雷达区题材关联表：行业名 → 题材行（同名取最新）。
+                Theme existing = industryTheme.get(name);
+                if (existing == null || (t.getCreatedAt() != null && (existing.getCreatedAt() == null
+                        || t.getCreatedAt().isAfter(existing.getCreatedAt())))) {
+                    industryTheme.put(name, t);
+                }
+                if (mainTheme == null || t.getCreatedAt() == null || mainTheme.getCreatedAt() == null
+                        || t.getCreatedAt().isAfter(mainTheme.getCreatedAt())) {
+                    mainTheme = t; // 先记最新一行，aggregate 里按主线行业名匹配后使用
                 }
             }
             // 上面拿的是"最新题材"，但主线可能对不上它；精确匹配交给 aggregate（需要主线名）。
@@ -177,24 +217,67 @@ public class PrdMetricsService {
             log.warn("题材行读取失败 user={} date={} 原因={}（催化剂硬度未评）", userId, date, e.toString());
         }
 
-        return aggregate(date, todayZT, todayZB, prevZT, prevZB, dailyIndustryZt, userId, mainTheme);
+        // 人工主线标记（t_mainline_mark）：当日命中则作为 D2 评分对象的最高优先（高于 ≥3天 自动主线）。
+        String manualMainline = null;
+        if (mainlineMarkMapper != null && userId != null) {
+            try {
+                List<MainlineMark> marks = mainlineMarkMapper.selectList(new LambdaQueryWrapper<MainlineMark>()
+                        .eq(MainlineMark::getUserId, userId)
+                        .eq(MainlineMark::getTradeDate, date)
+                        .orderByDesc(MainlineMark::getUpdatedAt));
+                if (!marks.isEmpty()) {
+                    manualMainline = marks.get(0).getIndustry();
+                }
+            } catch (RuntimeException e) {
+                log.warn("人工主线标记读取失败 user={} date={} 原因={}（按无人工标记处理）", userId, date, e.toString());
+            }
+        }
+
+        return aggregate(date, todayZT, todayZB, prevZT, prevZB, dailyIndustryZt, userId, mainTheme,
+                manualMainline, industryTheme);
     }
 
     /**
-     * 纯聚合（不碰 DB）。dailyIndustryZt：日期→(行业→涨停家数)，须含 date 当天；mainTheme：调用方挑选出的题材行
-     * （aggregate 内部再按主线行业名精确匹配，匹配不上只作展示兜底，不影响 metrics）。
+     * 7 参纯聚合（不碰 DB），保留给既有单测与无人工标记场景；委托 8 参核心（manualMainlineIndustry=null）。
      */
     Snapshot aggregate(LocalDate date,
                        List<MarketStock> todayZT, List<MarketStock> todayZB,
                        List<MarketStock> prevZT, List<MarketStock> prevZB,
                        Map<LocalDate, Map<String, Integer>> dailyIndustryZt,
                        Long userId, Theme mainTheme) {
+        return aggregate(date, todayZT, todayZB, prevZT, prevZB, dailyIndustryZt, userId, mainTheme,
+                null, Collections.<String, Theme>emptyMap());
+    }
+
+    /** 9 参纯聚合：人工主线标记场景（无题材关联表）；委托 10 参核心。 */
+    Snapshot aggregate(LocalDate date,
+                       List<MarketStock> todayZT, List<MarketStock> todayZB,
+                       List<MarketStock> prevZT, List<MarketStock> prevZB,
+                       Map<LocalDate, Map<String, Integer>> dailyIndustryZt,
+                       Long userId, Theme mainTheme, String manualMainlineIndustry) {
+        return aggregate(date, todayZT, todayZB, prevZT, prevZB, dailyIndustryZt, userId, mainTheme,
+                manualMainlineIndustry, Collections.<String, Theme>emptyMap());
+    }
+
+    /**
+     * 纯聚合（不碰 DB）。dailyIndustryZt：日期→(行业→涨停家数)，须含 date 当天；mainTheme：调用方挑选出的题材行
+     * （aggregate 内部再按主线行业名精确匹配，匹配不上只作展示兜底，不影响 metrics）。
+     * manualMainlineIndustry：人工主线标记行业（null=无人工标记）。
+     * industryTheme：行业名→用户题材行，用于给雷达区每行附题材关联（可空 map）。
+     */
+    Snapshot aggregate(LocalDate date,
+                       List<MarketStock> todayZT, List<MarketStock> todayZB,
+                       List<MarketStock> prevZT, List<MarketStock> prevZB,
+                       Map<LocalDate, Map<String, Integer>> dailyIndustryZt,
+                       Long userId, Theme mainTheme, String manualMainlineIndustry,
+                       Map<String, Theme> industryTheme) {
         Snapshot s = new Snapshot();
         s.ztTotal = todayZT.size();
         s.zbTotal = todayZB.size();
 
-        // ---------- 主线行业（涨停聚集度最高） ----------
+        // ---------- 雷达近端 + 评分对象选择（人工标记 > 自动主线≥3天 > 当日候选榜首） ----------
         Map<String, Integer> industryZt = new LinkedHashMap<String, Integer>();
+        List<RadarRow> radar = new ArrayList<RadarRow>();
         for (MarketStock row : todayZT) {
             String ind = row.getIndustry();
             if (ind == null || ind.trim().isEmpty()) {
@@ -203,16 +286,138 @@ public class PrdMetricsService {
             Integer n = industryZt.get(ind);
             industryZt.put(ind, n == null ? 1 : n + 1);
         }
-        String main = null;
-        int mainZt = 0;
         for (Map.Entry<String, Integer> e : industryZt.entrySet()) {
-            if (e.getValue() > mainZt) {
-                mainZt = e.getValue();
-                main = e.getKey();
+            RadarRow r = new RadarRow();
+            r.industry = e.getKey();
+            Theme th = industryTheme == null ? null : industryTheme.get(e.getKey());
+            r.theme = th == null || th.getName() == null ? null : th.getName().trim();
+            r.zt = e.getValue();
+            int mb = 0;
+            MarketStock lead = null;
+            for (MarketStock row : todayZT) {
+                if (!e.getKey().equals(row.getIndustry())) {
+                    continue;
+                }
+                int nb = row.getConsecutive() == null ? 1 : row.getConsecutive();
+                if (nb > mb) {
+                    mb = nb;
+                    lead = row;
+                } else if (nb == mb && lead != null) {
+                    BigDecimal ca = row.getChangePct();
+                    BigDecimal cb = lead.getChangePct();
+                    if (ca != null && (cb == null || ca.compareTo(cb) > 0
+                            || (ca.compareTo(cb) == 0 && row.getCode() != null
+                                && row.getCode().compareTo(lead.getCode() == null ? "" : lead.getCode()) < 0))) {
+                        lead = row;
+                    }
+                }
+            }
+            r.maxBoard = mb;
+            r.leader = lead;
+            r.persistenceDays = consecutiveDays(dailyIndustryZt, date, e.getKey());
+            r.isMainline = r.persistenceDays >= MAINLINE_CONFIRM_DAYS;
+            r.flag = r.isMainline ? "MAIN" : (r.persistenceDays == 2 ? "WATCH" : "NEW");
+            r.ztGatherPct = s.ztTotal == 0 ? 0 : round2(r.zt * 100.0 / s.ztTotal);
+            radar.add(r);
+        }
+        // 排序：zt 降序 → 持续天数降序 → 行业名升序（确定性）
+        radar.sort(new Comparator<RadarRow>() {
+            @Override
+            public int compare(RadarRow a, RadarRow b) {
+                int c = Integer.compare(b.zt, a.zt);
+                if (c != 0) return c;
+                int d = Integer.compare(b.persistenceDays, a.persistenceDays);
+                if (d != 0) return d;
+                return a.industry.compareTo(b.industry);
+            }
+        });
+        s.radar = radar;
+        s.radarTopIndustry = radar.isEmpty() ? null : radar.get(0).industry;
+
+        // ---------- 题材表：把板块表按题材归并（共享同一 t_theme 的行业合并成一行）----------
+        // 只收"今日有涨停且已登记题材"的行业；未登记题材不进题材表（板块表已全量覆盖）。
+        // 合并规则：涨停家数相加、最高板取最大、持续天数取成员里最久的（题材持续=最强成员行业），龙头取该成员。
+        Map<String, RadarRow> themeMap = new LinkedHashMap<String, RadarRow>();
+        for (RadarRow r : radar) {
+            if (r.theme == null || r.theme.isEmpty()) {
+                continue;
+            }
+            RadarRow g = themeMap.get(r.theme);
+            if (g == null) {
+                RadarRow n = new RadarRow();
+                n.industry = r.theme;          // 题材表主键=题材名（1:1 时即行业名，升级动作线可直接用）
+                n.theme = r.theme;
+                n.zt = r.zt;
+                n.maxBoard = r.maxBoard;
+                n.leader = r.leader;
+                n.persistenceDays = r.persistenceDays;
+                n.ztGatherPct = r.ztGatherPct;
+                themeMap.put(r.theme, n);
+            } else {
+                g.zt += r.zt;
+                if (r.maxBoard > g.maxBoard) {
+                    g.maxBoard = r.maxBoard;
+                }
+                if (r.persistenceDays > g.persistenceDays) {
+                    g.persistenceDays = r.persistenceDays;
+                    g.leader = r.leader;       // 持续更久的成员，其龙头更能代表题材
+                }
             }
         }
+        List<RadarRow> radarThemes = new ArrayList<RadarRow>(themeMap.values());
+        for (RadarRow r : radarThemes) {
+            if (s.ztTotal > 0) {
+                r.ztGatherPct = round2(r.zt * 100.0 / s.ztTotal);
+            }
+            r.isMainline = r.persistenceDays >= MAINLINE_CONFIRM_DAYS;
+            r.flag = r.isMainline ? "MAIN" : (r.persistenceDays == 2 ? "WATCH" : "NEW");
+        }
+        radarThemes.sort(new Comparator<RadarRow>() {
+            @Override
+            public int compare(RadarRow a, RadarRow b) {
+                int c = Integer.compare(b.zt, a.zt);
+                if (c != 0) return c;
+                int d = Integer.compare(b.persistenceDays, a.persistenceDays);
+                if (d != 0) return d;
+                return a.industry.compareTo(b.industry);
+            }
+        });
+        s.radarThemes = radarThemes;
+
+        // 自动主线：radar 中 ≥3天 者，取最强者（今日涨停最多；平局按天数多）
+        RadarRow auto = null;
+        for (RadarRow r : radar) {
+            if (!r.isMainline) {
+                continue;
+            }
+            if (auto == null || r.zt > auto.zt || (r.zt == auto.zt && r.persistenceDays > auto.persistenceDays)) {
+                auto = r;
+            }
+        }
+        s.autoMainlineIndustry = auto == null ? null : auto.industry;
+
+        // 评分对象选择：人工标记 > 自动主线(≥3天) > 当日候选榜首
+        boolean hasManualInToday = manualMainlineIndustry != null && industryZt.containsKey(manualMainlineIndustry);
+        String main;
+        boolean lineConfirmed;
+        if (hasManualInToday) {
+            main = manualMainlineIndustry;
+            lineConfirmed = true;
+            s.manuallyMarked = true;
+        } else if (auto != null) {
+            main = auto.industry;
+            lineConfirmed = true;
+            s.manuallyMarked = false;
+        } else {
+            main = s.radarTopIndustry;
+            lineConfirmed = false;
+            s.manuallyMarked = false;
+        }
         s.mainIndustry = main;
+        s.mainlineConfirmed = main != null && lineConfirmed;
+        int mainZt = main == null ? 0 : (industryZt.get(main) == null ? 0 : industryZt.get(main));
         s.mainZt = mainZt;
+        s.persistenceDays = main == null ? null : consecutiveDays(dailyIndustryZt, date, main);
 
         // ---------- 高度（总龙头=最高连板；同板高取涨幅最大，同涨幅取代码保证确定性） ----------
         int maxBoard = 0;
@@ -305,23 +510,9 @@ public class PrdMetricsService {
                 s.metrics.put("amount_gather_pct", bd(p));
             }
         }
-        // 持续性：日内核心行业从 date 往回数连续"热度交易日"（当日该行业 ZT≥5）。
+        // 持续性：已在评分对象选择处经 consecutiveDays 算好（同一阈值 HOT_ZT_THRESHOLD），这里只落 metrics 键。
         if (main != null) {
-            int days = 0;
-            LocalDate cursor = date;
-            for (int i = 0; i < PERSISTENCE_WINDOW; i++) {
-                Map<String, Integer> byIndustry = dailyIndustryZt.get(cursor);
-                Integer n = byIndustry == null ? null : byIndustry.get(main);
-                if (n == null || n < HOT_ZT_THRESHOLD) {
-                    break;
-                }
-                days++;
-                cursor = cursor.minusDays(1);
-            }
-            // 当日活跃但窗口内一个活跃日都没有的边界由 days=0 覆盖；cursor 走出窗口自然停。
-            s.persistenceDays = days;
-            s.mainlineConfirmed = days >= MAINLINE_CONFIRM_DAYS;
-            s.metrics.put("persistence_days", BigDecimal.valueOf(days));
+            s.metrics.put("persistence_days", BigDecimal.valueOf(s.persistenceDays == null ? 0 : s.persistenceDays));
         }
         // 催化剂硬度：题材名与主线行业完全一致才认（industry≠题材的已知口径差，宁缺勿错）。
         Theme matched = matchTheme(mainTheme, main, userId, date);
@@ -448,8 +639,24 @@ public class PrdMetricsService {
             }
         }
         // 反包：昨炸板池 → 今涨停池（仅登记事实供主线/天梯页展示，D5 阵眼分改由人工 t_anchor 体系出）
+        // §3 一只票全页只允许一个角色：反包过滤掉已占 总龙头/中军/卡位 的票，避免与主线区重复。
         if (!prevZB.isEmpty()) {
+            Set<String> used = new HashSet<String>();
+            if (zongLong != null && zongLong.getCode() != null) {
+                used.add(zongLong.getCode());
+            }
+            for (MarketStock zj : s.zhongJun) {
+                if (zj.getCode() != null) {
+                    used.add(zj.getCode());
+                }
+            }
+            if (s.kaWei != null && s.kaWei.getCode() != null) {
+                used.add(s.kaWei.getCode());
+            }
             for (MarketStock bomb : prevZB) {
+                if (bomb.getCode() != null && used.contains(bomb.getCode())) {
+                    continue;
+                }
                 MarketStock today = findByCode(todayZT, bomb.getCode());
                 if (today != null) {
                     s.fanBao.add(today);
@@ -634,6 +841,34 @@ public class PrdMetricsService {
             }
         }
         return n;
+    }
+
+    /**
+     * 任意行业的连续持续天数（走 PERSISTENCE_WINDOW），主线持续性与雷达区共用这一个口径，杜绝双标。
+     *
+     * <p><b>活跃口径（2026-09-13 定稿）</b>：数的是"连续活跃"而不是"过热"。只要该行业当日涨停家数
+     * 达到 {@link #SEED_ZT_THRESHOLD}（3 家，区别于"过热日" ≥ {@link #HOT_ZT_THRESHOLD}5），这一天就算
+     * 在持续，逐日 +1。例：10 号 5 家=持续第 1 天，11 号 4 家（仍 ≥3 活跃）=持续第 2 天；
+     * 12 号若掉到 3 家以下或当天无涨停（真正走弱）才归零。过热与否交给 cluster/对象过热打分，不掺进天数。
+     */
+    static int consecutiveDays(Map<LocalDate, Map<String, Integer>> dailyIndustryZt,
+                               LocalDate date, String industry) {
+        if (date == null || industry == null || dailyIndustryZt == null
+                || !dailyIndustryZt.containsKey(date)) {
+            return 0;
+        }
+        int days = 0;
+        LocalDate cursor = date;
+        for (int i = 0; i < PERSISTENCE_WINDOW; i++) {
+            Map<String, Integer> byIndustry = dailyIndustryZt.get(cursor);
+            Integer n = byIndustry == null ? null : byIndustry.get(industry);
+            if (n == null || n < SEED_ZT_THRESHOLD) {
+                break;
+            }
+            days++;
+            cursor = cursor.minusDays(1);
+        }
+        return days;
     }
 
     private static MarketStock findByCode(List<MarketStock> rows, String code) {

@@ -2,6 +2,7 @@ package com.emotion.service;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -9,7 +10,10 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.emotion.entity.MainlineMark;
 import com.emotion.entity.MarketStock;
+import com.emotion.mapper.MainlineMarkMapper;
 import com.emotion.vo.MainlineVO;
 
 /**
@@ -34,9 +38,11 @@ public class MainlineService {
     static final List<String> LIFECYCLE = Arrays.asList("萌芽", "确认", "扩散", "亢奋", "退潮");
 
     private final PrdMetricsService prdMetrics;
+    private final MainlineMarkMapper mainlineMarkMapper;
 
-    public MainlineService(PrdMetricsService prdMetrics) {
+    public MainlineService(PrdMetricsService prdMetrics, MainlineMarkMapper mainlineMarkMapper) {
         this.prdMetrics = prdMetrics;
+        this.mainlineMarkMapper = mainlineMarkMapper;
     }
 
     public MainlineVO vo(Long userId, LocalDate requested) {
@@ -48,6 +54,12 @@ public class MainlineService {
         vo.setLifecycle(LIFECYCLE);
         vo.setMainIndustry(snap.mainIndustry);
         vo.setMainlineConfirmed(snap.mainlineConfirmed);
+        vo.setRadarTopIndustry(snap.radarTopIndustry);
+        vo.setManuallyMarked(snap.manuallyMarked);
+        // hasMainline：radar 任一 ≥3天 或 人工标记（snapshot 的 mainlineConfirmed 已覆盖两者）
+        boolean hasMainline = snap.mainlineConfirmed;
+        vo.setHasMainline(hasMainline);
+        vo.setMainlineSignal(mainlineSignal(snap));
         vo.setZtGatherPct(snap.ztGatherPct);
         vo.setHeightGatherPct(snap.heightGatherPct);
         vo.setPersistenceDays(snap.persistenceDays);
@@ -67,7 +79,80 @@ public class MainlineService {
         vo.setFanBao(members(snap.fanBao));
         vo.setRotationSignals(snap.rotationSignals);
         vo.setLifecycleStage(snap.lifecycleStage);
+        vo.setRadar(radar(snap));
+        vo.setRadarThemes(radarThemes(snap));
         return vo;
+    }
+
+    /**
+     * 升级到主线区：落人工主线标记（t_mainline_mark）。当日已有人工标记则覆盖为本次行业；
+     * 写库后重取该日双轨数据。DELETE before INSERT 保证幂等。
+     */
+    public MainlineVO promote(Long userId, LocalDate date, String industry) {
+        if (industry == null || industry.trim().isEmpty()) {
+            throw new IllegalArgumentException("人工主线标记行业不能为空");
+        }
+        LocalDate d = date != null ? date : LocalDate.now(CN);
+        mainlineMarkMapper.delete(new LambdaQueryWrapper<MainlineMark>()
+                .eq(MainlineMark::getUserId, userId)
+                .eq(MainlineMark::getTradeDate, d));
+        MainlineMark m = new MainlineMark();
+        m.setUserId(userId);
+        m.setTradeDate(d);
+        m.setIndustry(industry.trim());
+        m.setManual(1);
+        m.setCreatedAt(LocalDateTime.now());
+        mainlineMarkMapper.insert(m);
+        return vo(userId, d);
+    }
+
+    /** 取消升级：删除该日该行业的人工主线标记，重取双轨数据。 */
+    public MainlineVO cancel(Long userId, LocalDate date, String industry) {
+        LocalDate d = date != null ? date : LocalDate.now(CN);
+        mainlineMarkMapper.delete(new LambdaQueryWrapper<MainlineMark>()
+                .eq(MainlineMark::getUserId, userId)
+                .eq(MainlineMark::getTradeDate, d)
+                .eq(MainlineMark::getIndustry, industry));
+        return vo(userId, d);
+    }
+
+    /** 无主线打标：未确认主线时提示"仅日内核心炒作"，N 取雷达榜首持续天数。 */
+    private String mainlineSignal(PrdMetricsService.Snapshot snap) {
+        if (snap.mainlineConfirmed || snap.mainIndustry == null) {
+            return null;
+        }
+        int n = snap.radar.isEmpty() ? 0 : snap.radar.get(0).persistenceDays;
+        return "⚠️无主线，仅日内核心炒作（最强板块仅 " + n + " 天）";
+    }
+
+    private List<MainlineVO.RadarRow> radar(PrdMetricsService.Snapshot snap) {
+        return mapRadarRows(snap == null ? null : snap.radar);
+    }
+
+    /** 题材表：与板块表同一行结构（题材行 industry=题材名），直接复用 mapper。 */
+    private List<MainlineVO.RadarRow> radarThemes(PrdMetricsService.Snapshot snap) {
+        return mapRadarRows(snap == null ? null : snap.radarThemes);
+    }
+
+    private List<MainlineVO.RadarRow> mapRadarRows(List<PrdMetricsService.RadarRow> rows) {
+        List<MainlineVO.RadarRow> out = new ArrayList<>();
+        if (rows == null) {
+            return out;
+        }
+        for (PrdMetricsService.RadarRow r : rows) {
+            MainlineVO.RadarRow vo = new MainlineVO.RadarRow();
+            vo.setIndustry(r.industry);
+            vo.setTheme(r.theme);
+            vo.setZt(r.zt);
+            vo.setZtGatherPct(r.ztGatherPct);
+            vo.setMaxBoard(r.maxBoard);
+            vo.setPersistenceDays(r.persistenceDays);
+            vo.setFlag(r.flag);
+            vo.setIsMainline(r.isMainline);
+            vo.setLeader(r.leader == null ? null : member(r.leader));
+            out.add(vo);
+        }
+        return out;
     }
 
     private Integer hardness(PrdMetricsService.Snapshot snap) {

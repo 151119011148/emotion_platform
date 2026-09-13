@@ -17,15 +17,15 @@
 
 /** 五维一级维：dimNo / label / weight（维权和=1.00）。 */
 export const FIVE_DIM_DIMS = {
-  market: { dim: 1, label: '大盘生态', weight: 0.25, recordColumn: 'scoreMarket' },
-  theme_main: { dim: 2, label: '日内核心', weight: 0.20, recordColumn: 'scoreThemeMain' },
-  board: { dim: 3, label: '连板生态', weight: 0.25, recordColumn: 'scoreBoard' },
-  first: { dim: 4, label: '首板生态', weight: 0.15, recordColumn: 'scoreFirst' },
-  anchor: { dim: 5, label: '阵眼', weight: 0.15, recordColumn: 'scoreAnchor' }
+  market: { dim: 1, label: '大盘生态', weight: 0.22, recordColumn: 'scoreMarket' },
+  theme_main: { dim: 2, label: '日内核心', weight: 0.18, recordColumn: 'scoreThemeMain' },
+  board: { dim: 3, label: '连板生态', weight: 0.22, recordColumn: 'scoreBoard' },
+  first: { dim: 4, label: '首板生态', weight: 0.13, recordColumn: 'scoreFirst' },
+  high: { dim: 5, label: '高位生态', weight: 0.25, recordColumn: 'scoreHigh' }
 }
 
 /** 仪表盘卡片摆放序：与后端 dim_no 一致。 */
-export const FIVE_DIM_ORDER = ['market', 'theme_main', 'board', 'first', 'anchor']
+export const FIVE_DIM_ORDER = ['market', 'theme_main', 'board', 'first', 'high']
 
 /** 总分满分——五维模型直加权，0-100，不再 (x+M)/2M 映射。 */
 export const FIVE_DIM_MAX = 100

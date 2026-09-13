@@ -20,8 +20,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.emotion.entity.MarketStock;
 import com.emotion.mapper.MarketStockMapper;
 import com.emotion.market.StockPatterns;
-import com.emotion.market.TencentClient;
-import com.emotion.market.TencentClient.StockQuote;
 import com.emotion.vo.TiantiVO;
 
 /**
@@ -30,9 +28,9 @@ import com.emotion.vo.TiantiVO;
  * 3 板及以上层把晋级失败个股并入同层（前端灰色标注），失败去向依次查涨停/炸板/跌停池，
  * 最新交易日再用腾讯批量报价兜底"未触板"个股的当日涨跌幅。
  *
- * <p>四层动态归属（低=2/中=3-4/中高=5..hsplit/极高=hsplit+1..H）仍按
- * {@link LadderMetricsService#hsplit}/{@link LadderMetricsService#layerIndex} 打在每层上，
- * 保证天梯的层名与打分四层对得上。龙头标签与判定依据全部取自 {@link PrdMetricsService} 同一份快照。
+ * <p>三层动态归属（低=2/中=3-4/高=5板+）按
+ * {@link LadderMetricsService#layerIndex} 打在每层上，
+ * 保证天梯的层名与打分三层对得上。龙头标签与判定依据全部取自 {@link PrdMetricsService} 同一份快照。
  */
 @Service
 public class TiantiService {
@@ -40,19 +38,25 @@ public class TiantiService {
     private static final Logger log = LoggerFactory.getLogger(TiantiService.class);
 
     private static final ZoneId CN = ZoneId.of("Asia/Shanghai");
-    private static final String[] LAYER_LABELS = {"低位", "中位", "中高位", "极高位"};
-    /** 失败明细只在 n≥3 层展示；腾讯报价补全也只补这些层（昨连板≥2，样本量小）。 */
-    private static final int QUOTE_FALLBACK_MIN_BOARD = 3;
+    // 三层（2026-09-13 简化，对齐高位生态 D5）：低位=2板 / 中位=3-4板 / 高位=5板+
+    private static final String[] LAYER_LABELS = {"低位", "中位", "高位"};
+    /** 失败明细从 n≥3 层下探到 n≥2 层（1进2=昨首板今兑现），是低位溢价全样本的关键来源。 */
+    private static final int QUOTE_FALLBACK_MIN_BOARD = 2;
 
     private final PrdMetricsService prdMetrics;
     private final MarketStockMapper marketStockMapper;
-    private final TencentClient tencent;
+    private final CrossDayQuoteAugmentor crossDayQuote;
+    private final ZtPerfStore ztPerfStore;
+    private final ManualLeaderService manualLeaderService;
 
     public TiantiService(PrdMetricsService prdMetrics, MarketStockMapper marketStockMapper,
-                         TencentClient tencent) {
+                         CrossDayQuoteAugmentor crossDayQuote, ZtPerfStore ztPerfStore,
+                         ManualLeaderService manualLeaderService) {
         this.prdMetrics = prdMetrics;
         this.marketStockMapper = marketStockMapper;
-        this.tencent = tencent;
+        this.crossDayQuote = crossDayQuote;
+        this.ztPerfStore = ztPerfStore;
+        this.manualLeaderService = manualLeaderService;
     }
 
     public TiantiVO vo(Long userId, LocalDate requested) {
@@ -102,12 +106,14 @@ public class TiantiService {
         String kaWeiCode = snap.kaWei == null ? null : snap.kaWei.getCode();
 
         int h = Math.max(snap.maxBoard, 2);
+        // 人工总龙头：某日用户手动指定的身份（与自动"空间板"并列，可同可异）
+        String manualLeader = manualLeaderService.codeOf(userId, date);
 
         // 天梯：n 从 H 往下到 2，每层独立判晋级
         List<TiantiVO.Level> levels = new ArrayList<>();
         for (int n = h; n >= 2; n--) {
             levels.add(level(n, h, zt, prevZT, prevBoard, todayZtByCode, todayZbByCode, todayDtByCode, snap,
-                    zong, zhongJun, kaWeiCode, fanBao));
+                    zong, zhongJun, kaWeiCode, fanBao, manualLeader));
         }
         // 最新交易日：三池都没覆盖到的失败股，用腾讯实时报价兜底当日涨跌幅（历史日快照回溯不了）
         fillGoneQuotes(date, levels);
@@ -126,7 +132,8 @@ public class TiantiService {
                                  Map<String, MarketStock> todayZbByCode,
                                  Map<String, MarketStock> todayDtByCode,
                                  PrdMetricsService.Snapshot snap,
-                                 Set<String> zong, Set<String> zhongJun, String kaWeiCode, Set<String> fanBao) {
+                                 Set<String> zong, Set<String> zhongJun, String kaWeiCode, Set<String> fanBao,
+                                 String manualLeader) {
         TiantiVO.Level lvl = new TiantiVO.Level();
         lvl.setBoard(n);
         lvl.setLayerLabel(LAYER_LABELS[LadderMetricsService.layerIndex(n, h)]);
@@ -156,7 +163,7 @@ public class TiantiService {
         List<TiantiVO.Row> rows = new ArrayList<>();
         Set<String> successCodes = new HashSet<>();
         for (MarketStock row : onBoard) {
-            TiantiVO.Row r = rowOf(row, n, snap, zong, zhongJun, kaWeiCode, fanBao);
+            TiantiVO.Row r = rowOf(row, n, snap, zong, zhongJun, kaWeiCode, fanBao, manualLeader);
             Integer prevN = prevBoard.get(row.getCode());
             r.setPromoted(prevN == null ? null : prevN == n - 1);
             rows.add(r);
@@ -182,7 +189,8 @@ public class TiantiService {
     }
 
     private TiantiVO.Row rowOf(MarketStock row, int n, PrdMetricsService.Snapshot snap,
-                                Set<String> zong, Set<String> zhongJun, String kaWeiCode, Set<String> fanBao) {
+                                Set<String> zong, Set<String> zhongJun, String kaWeiCode, Set<String> fanBao,
+                                String manualLeader) {
         TiantiVO.Row r = new TiantiVO.Row();
         r.setCode(row.getCode());
         r.setName(row.getName());
@@ -193,7 +201,9 @@ public class TiantiService {
         r.setSealAmount(row.getSealAmount());
         r.setFirstSealTime(row.getFirstSealTime());
         r.setPattern(StockPatterns.of(row));
-        r.setRole(roleOf(row, snap, zong, zhongJun, kaWeiCode, fanBao));
+        r.setRole(roleOf(row, snap.mainIndustry, zong, zhongJun, kaWeiCode, fanBao));
+        // 人工总龙头与自动"空间板"并列：同只可同时持有两个标签，不同只则分开标
+        r.setManualLeader(manualLeader != null && manualLeader.equals(row.getCode()));
         return r;
     }
 
@@ -225,12 +235,24 @@ public class TiantiService {
     }
 
     /**
-     * 最新交易日（库里没有更晚的明细日）才补：腾讯快照只给最新一天，历史日回溯不了。
-     * 只补 n≥3 层的 GONE 股（昨连板≥2，通常个位数，一次批量请求足够）；
-     * 报价日戳必须正好等于请求日，防止周末/停牌拿到错位数据。
+     * 最新交易日才补腾讯（库里没有更晚明细日）；先落与打分同源的当日三池 ∪ t_zt_perf（快照日批量采集），
+     * 历史日只能靠这两级，最新交易日再把腾讯报价兜到底。现在 1进2（n=2 层，昨首板今未触板）也覆盖，
+     * 不再出现"打分引擎有低位大面、天梯名单却标明细未覆盖"的口径分裂。
      */
     private void fillGoneQuotes(LocalDate date, List<TiantiVO.Level> levels) {
+        LocalDate next;
+        try {
+            next = marketStockMapper.nextDetailDate(date);
+        } catch (RuntimeException e) {
+            next = null;
+        }
+        // 与打分引擎同源：当日三池（ZT/ZB/DT） ∪ t_zt_perf（T-1 涨停种子今表现全样本）
+        Map<String, BigDecimal> resolved = new HashMap<>(crossDayQuote.todayPoolPct(date));
+        for (Map.Entry<String, BigDecimal> e : ztPerfStore.readPctByCode(date).entrySet()) {
+            resolved.putIfAbsent(e.getKey(), e.getValue());
+        }
         List<TiantiVO.FailedRow> gone = new ArrayList<>();
+        Set<String> codes = new HashSet<>();
         for (TiantiVO.Level lvl : levels) {
             if (lvl.getBoard() < QUOTE_FALLBACK_MIN_BOARD) {
                 continue;
@@ -238,44 +260,33 @@ public class TiantiService {
             for (TiantiVO.FailedRow f : lvl.getFailed()) {
                 if ("GONE".equals(f.getTodayStatus()) && f.getChangePct() == null && f.getCode() != null) {
                     gone.add(f);
+                    codes.add(f.getCode());
                 }
             }
         }
         if (gone.isEmpty()) {
             return;
         }
-        LocalDate next;
-        try {
-            next = marketStockMapper.nextDetailDate(date);
-        } catch (RuntimeException e) {
-            return;
-        }
-        if (next != null) {
-            return; // 还有更晚明细日 → 不是最新交易日，腾讯快照给的不是这天
-        }
-        List<String> symbols = new ArrayList<>();
+        // 先落两库级的价格；历史交易日到此为止
         for (TiantiVO.FailedRow f : gone) {
-            String symbol = TencentClient.symbolOf(f.getCode());
-            if (symbol != null) {
-                symbols.add(symbol);
+            BigDecimal p = resolved.get(f.getCode());
+            if (p != null) {
+                f.setChangePct(p);
             }
         }
-        if (symbols.isEmpty()) {
-            return;
+        if (next != null) {
+            return; // 还有更晚明细日 → 腾讯快照给的不是这一天
         }
-        Map<String, StockQuote> quotes;
-        try {
-            quotes = tencent.quotes(symbols);
-        } catch (RuntimeException e) {
-            log.info("天梯失败股报价兜底失败 date={} 原因={}", date, e.toString());
-            return;
-        }
+        // 最新交易日才用腾讯兜底仍未覆盖的缺口（复用打分同一条 augmentGone 路径）
+        Map<String, BigDecimal> aug = crossDayQuote.augmentGone(date, codes, resolved);
         int filled = 0;
         for (TiantiVO.FailedRow f : gone) {
-            StockQuote q = quotes.get(TencentClient.symbolOf(f.getCode()));
-            if (q != null && date.equals(q.getQuoteDate()) && q.getChangePct() != null) {
-                f.setChangePct(q.getChangePct());
-                filled++;
+            if (f.getChangePct() == null) {
+                BigDecimal p = aug.get(f.getCode());
+                if (p != null) {
+                    f.setChangePct(p);
+                    filled++;
+                }
             }
         }
         if (filled > 0) {
@@ -298,12 +309,13 @@ public class TiantiService {
         });
     }
 
-    /** 标签优先级：总龙头 > 中军 > 卡位 > 反包 > 跟风（日内核心内其余） > 无标签。 */
-    private static String roleOf(MarketStock row, PrdMetricsService.Snapshot snap,
-                                 Set<String> zong, Set<String> zhongJun, String kaWeiCode, Set<String> fanBao) {
+    /** 标签优先级：空间板(自动最高板) > 中军 > 卡位 > 反包 > 跟风；"总龙头"走人工 {@code manualLeader} 另标。 */
+    private static String roleOf(MarketStock row, String mainIndustry, Set<String> zong, Set<String> zhongJun,
+                                 String kaWeiCode, Set<String> fanBao) {
         String code = row.getCode();
         if (code != null && zong.contains(code)) {
-            return "总龙头";
+            // zong=全市场最高连板（PrdMetricsService.zongLong）；自动标"空间板"
+            return "空间板";
         }
         if (code != null && zhongJun.contains(code)) {
             return "中军";
@@ -314,7 +326,7 @@ public class TiantiService {
         if (code != null && fanBao.contains(code)) {
             return "反包";
         }
-        if (snap.mainIndustry != null && snap.mainIndustry.equals(row.getIndustry())) {
+        if (mainIndustry != null && mainIndustry.equals(row.getIndustry())) {
             return "跟风";
         }
         return null;

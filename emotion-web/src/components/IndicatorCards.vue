@@ -66,6 +66,10 @@
           <div v-if="c.forcedEbb" class="card-forced">强制退潮</div>
         </div>
       </el-tooltip>
+      <!-- 维度卡扩展区：仪表盘按卡 key 注入（日内核心=五要素+轮动、连板生态=空间板） -->
+      <div class="card-extra">
+        <slot :name="c.key"></slot>
+      </div>
     </div>
   </div>
 </template>
@@ -83,7 +87,7 @@ const props = defineProps({
 
 /**
  * 五维卡 → 同名导航页（菜单名与维度名保持一致）：
- * 大盘生态→/market，主线生态→/mainline，连板生态→/tianti，首板生态→/shouban，阵眼→/themes（周期阵眼面板）。
+ * 大盘生态→/market，日内核心→/mainline，连板生态→/tianti，首板生态→/shouban，高位生态→/higheco（D5 高位生态融合页）。
  * 带上当天日期，目标页直接停在同一天，不用再回落一次。
  */
 const router = useRouter()
@@ -92,7 +96,7 @@ const DIM_ROUTES = {
   theme_main: '/mainline',
   board: '/tianti',
   first: '/shouban',
-  anchor: '/themes'
+  high: '/higheco'
 }
 
 function goDim(key) {
@@ -117,7 +121,7 @@ const FIVE_TO_RECORD = {
   theme_main: 'scoreThemeMain',
   board: 'scoreBoard',
   first: 'scoreFirst',
-  anchor: 'scoreAnchor'
+  high: 'scoreHigh'
 }
 
 function fmt(v) {
@@ -260,6 +264,11 @@ const cards = computed(() => {
   font-size: 11px;
   color: #8899a6;
   text-align: left;
+}
+.card-extra {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #2d3748;
 }
 .card-forced {
   position: absolute;

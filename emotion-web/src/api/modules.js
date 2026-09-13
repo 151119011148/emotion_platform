@@ -16,8 +16,6 @@ export const recordApi = {
   getCurve: (days = 20) => api.get('/records/curve', { params: { days } }),
   // 只重算那一天。行情字段有改动后想立刻看分数落点时用得上
   recalc: (date) => api.post('/records/recalc', null, { params: { date }, timeout: 25000 }),
-  // 阵眼一改，跨度里每一天的第 8 维都变，只能整体重跑（逐日要拉行情，慢但必须一致）
-  recalcAll: () => api.post('/records/recalc-all', null, { timeout: 180000 }),
   // 只读复盘文档：把那天系统取数按手写版式排成 md（【一】…【九】），供下载补判断
   reviewDoc: (date) => api.get('/records/review-doc', { params: { date }, timeout: 30000 }),
   /**
@@ -33,14 +31,6 @@ export const recordApi = {
   savePositions: (date, rows) => api.put('/records/positions', rows, { params: { date } })
 }
 
-export const themeApi = {
-  list: () => api.get('/themes'),
-  create: (data) => api.post('/themes', data),
-  update: (id, data) => api.put(`/themes/${id}`, data),
-  listStocks: (themeId) => api.get(`/themes/${themeId}/stocks`),
-  addStock: (themeId, data) => api.post(`/themes/${themeId}/stocks`, data)
-}
-
 export const nodeApi = {
   list: () => api.get('/nodes'),
   getCurrent: () => api.get('/nodes/current'),
@@ -49,7 +39,9 @@ export const nodeApi = {
   // 复算建议：只读，不写库。判据不齐时它自己会说"缺哪一样"
   suggest: (id) => api.get(`/nodes/${id}/suggest`),
   // 采纳只回传指纹，那八个值由服务端重算并逐字段比对后落库
-  adopt: (id, fingerprint) => api.post(`/nodes/${id}/adopt`, { fingerprint })
+  adopt: (id, fingerprint) => api.post(`/nodes/${id}/adopt`, { fingerprint }),
+  // 「从今日天梯新增节点」的轻量预填：D0日期/涨停跌停家数/最高板/今日龙头候选。只读本地表
+  ladderIntel: (date) => api.get('/nodes/ladder-intel', { params: { date }, skipErrorToast: true })
 }
 
 /**
@@ -60,7 +52,29 @@ export const nodeApi = {
 export const prdApi = {
   tianti: (date) => api.get('/tianti', { params: { date }, timeout: 25000, skipErrorToast: true }),
   shouban: (date) => api.get('/shouban', { params: { date }, timeout: 25000, skipErrorToast: true }),
-  mainline: (date) => api.get('/mainline', { params: { date }, timeout: 25000, skipErrorToast: true })
+  mainline: (date) => api.get('/mainline', { params: { date }, timeout: 25000, skipErrorToast: true }),
+  // 双轨 v0.2：雷达区「升级到主线区」写接口（落 t_mainline_mark）
+  promote: (tradeDate, industry) => api.post('/mainline/promote', { tradeDate, industry }, { timeout: 25000 }),
+  cancelPromote: (tradeDate, industry) => api.delete('/mainline/promote', { data: { tradeDate, industry }, timeout: 25000 })
+}
+
+/**
+ * D5 高位生态（阵眼·抱团·监管）融合页：/api/d5/high。
+ * 阵眼是你账号人工配置的 t_anchor（带起止区间）；抱团与监管名单是公开事实。
+ * 服务端现场装配、可能顺带现推监管期，放宽到与 snapshot 同档 25s；取不到时页面印空态不弹红条。
+ */
+export const d5Api = {
+  high: (date) => api.get('/d5/high', { params: { date }, timeout: 25000, skipErrorToast: true })
+}
+
+/**
+ * 连板天梯人工总龙头：/api/leader。写侧只落库（不联网），GET 返回当前设定或 null。
+ * 天梯自动最高板标"空间板"，"总龙头"是账号各自手动指定的身份。
+ */
+export const leaderApi = {
+  get: (date) => api.get('/leader', { params: { date }, skipErrorToast: true }),
+  save: (date, code) => api.put('/leader', { tradeDate: date, code }, { skipErrorToast: true }),
+  clear: (date) => api.delete('/leader', { params: { date }, skipErrorToast: true })
 }
 
 export const marketApi = {
@@ -79,30 +93,76 @@ export const marketApi = {
    * 阵眼与监管名单逐只打日 K，最坏几十次上游，混进去就是"只要七个数却被上游拖成一整屏红"。
    * 所以它自己加载、自己降级，超时放宽到 60s（和导入预览同一档）。
    */
-  scoreContext: (date) => api.get('/market/score-context', { params: { date }, timeout: 60000 }),
-  // 名单本地推，但可能顺带补拉公告，所以和 snapshot 一样放宽
-  surveillance: (date) => api.get('/market/surveillance', { params: { date }, timeout: 25000 })
-}
-
-export const anchorApi = {
-  list: (date) => api.get('/anchors', { params: { date }, timeout: 25000 }),
-  spans: (days = 120) => api.get('/anchors/span', { params: { days } }),
-  series: (days = 120) => api.get('/anchors/series', { params: { days }, timeout: 25000 }),
-  create: (data) => api.post('/anchors', data),
-  update: (id, data) => api.put(`/anchors/${id}`, data),
-  remove: (id) => api.delete(`/anchors/${id}`)
-}
-
-export const stockApi = {
-  // 全量名单要翻 60 页上游
-  refresh: () => api.post('/stocks/refresh', null, { timeout: 120000 }),
-  search: (q) => api.get('/stocks/search', { params: { q } })
+  scoreContext: (date) => api.get('/market/score-context', { params: { date }, timeout: 60000 })
 }
 
 export const importApi = {
   // 复盘页底部那块只读明细。md 导入本身还有四个端点（POST /records/import、
   // /import/template、/import/export），页面撤了但契约没撤，要用走 curl。
   detail: (date) => api.get('/records/import/detail', { params: { date } })
+}
+
+/**
+ * 每日复盘 v2.0 的一键拉取编排 + D1-D5 分块数据 + 人工补录/导出。
+ *
+ * <p>{@code fetch} 是唯一不走 axios 的：{@code /api/review/fetch} 返回 SSE 事件流，
+ * {@code EventSource} 只认 GET 且带不了 Authorization，所以用 {@code fetch}+流式 reader
+ * 自己解析 {@code data:} 行，把每个任务的进度片推给回调。token 从 localStorage 取，
+ * 与 axios 拦截器读写的是同一个 key。
+ */
+export const reviewApi = {
+  // SSE 一键拉取：date 为该日，onEvent({task,status,rows,msg})，完成时 resolve(true)
+  fetch: (date, onEvent) =>
+    fetch(`/api/review/fetch?date=${encodeURIComponent(date)}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem('token') || ''}`,
+        Accept: 'text/event-stream'
+      },
+      body: null
+    }).then(async (resp) => {
+      if (!resp.ok || !resp.body) throw new Error(`拉取失败 HTTP ${resp.status}`)
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        let i
+        while ((i = buf.indexOf('\n\n')) !== -1) {
+          const block = buf.slice(0, i)
+          buf = buf.slice(i + 2)
+          for (const line of block.split('\n')) {
+            if (line.startsWith('data:')) {
+              const raw = line.slice(5).trim()
+              if (raw) {
+                try { onEvent(JSON.parse(raw)) } catch (e) { /* 忽略非 JSON 行 */ }
+              }
+            }
+          }
+        }
+      }
+      return true
+    }),
+  status: (date) => api.get('/review/fetch/status', { params: { date }, skipErrorToast: true }),
+  detail: (date) => api.get('/review/detail', { params: { date }, timeout: 25000, skipErrorToast: true }),
+  exportDoc: (date) => api.get('/review/export', { params: { date }, timeout: 30000 }),
+  save: (data) => api.post('/review/save', data, { timeout: 25000 }),
+  // T7 无自动源时人工补录监管：{code, name, kind, title, date}
+  manualSurveillance: (data) => api.post('/surveillance/manual', data),
+  // D2 题材索引：低频全量重建（约 500 板块，耗时长）/ 查当前索引规模
+  buildConcepts: () => api.post('/review/concepts/build', null, { timeout: 600000 }),
+  conceptsStatus: () => api.get('/review/concepts/status', { skipErrorToast: true })
+}
+
+/**
+ * 阵眼配置（t_anchor，绑用户）。config 是「某日在位阵眼」的轻量列表：id/名称/角色/跨度，
+ * 供节点页的新建弹框选「锚定龙头」；只查库不打行情，静默降级。
+ */
+export const anchorsApi = {
+  config: (date) => api.get('/anchors/config', { params: { date }, skipErrorToast: true }),
+  add: (data) => api.post('/anchors', data)
 }
 
 /**

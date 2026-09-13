@@ -62,8 +62,10 @@ public class TiantiVO {
         private BigDecimal changePct;
         /** 日内开板次数。 */
         private Integer breakCount;
-        /** 龙头分工标签：总龙头/中军/跟风/卡位/反包；普通股=null。 */
+        /** 龙头分工标签：空间板(自动最高板)/中军/跟风/卡位/反包；普通股=null。 */
         private String role;
+        /** 用户手动指定的"总龙头"身份（可与空间板同只=两个标签同现）。 */
+        private Boolean manualLeader;
         /** 昨日同代码连板数=今日-1 即 true；昨日无明细=null。 */
         private Boolean promoted;
         /** 封单额（元）。 */

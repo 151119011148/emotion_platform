@@ -64,14 +64,14 @@ class NodeServiceTest {
 
     private static Wrapper<NodeEvent> historyWrapper() {
         CAUGHT.clear();
-        new NodeService(capturingMapper()).listByUser(USER);
+        new NodeService(capturingMapper(), null, null, null, null, null, null).listByUser(USER);
         assertEquals(1, CAUGHT.size(), "listByUser 应该只发一次查询");
         return CAUGHT.get(0);
     }
 
     private static Wrapper<NodeEvent> currentWrapper() {
         CAUGHT.clear();
-        new NodeService(capturingMapper()).getCurrent(USER);
+        new NodeService(capturingMapper(), null, null, null, null, null, null).getCurrent(USER);
         assertEquals(1, CAUGHT.size(), "getCurrent 应该只发一次查询");
         return CAUGHT.get(0);
     }

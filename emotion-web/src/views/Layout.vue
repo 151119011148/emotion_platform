@@ -18,6 +18,10 @@
           <el-icon><DataLine /></el-icon>
           <span>大盘生态</span>
         </el-menu-item>
+        <el-menu-item index="/mainline">
+          <el-icon><Aim /></el-icon>
+          <span>日内核心</span>
+        </el-menu-item>
         <el-menu-item index="/tianti">
           <el-icon><Histogram /></el-icon>
           <span>连板生态</span>
@@ -26,25 +30,13 @@
           <el-icon><Wallet /></el-icon>
           <span>首板生态</span>
         </el-menu-item>
-        <el-menu-item index="/mainline">
-          <el-icon><Aim /></el-icon>
-          <span>日内核心</span>
-        </el-menu-item>
-        <el-menu-item index="/surveillance">
-          <el-icon><Warning /></el-icon>
-          <span>异动监管</span>
+        <el-menu-item index="/higheco">
+          <el-icon><Odometer /></el-icon>
+          <span>高位生态</span>
         </el-menu-item>
         <el-menu-item index="/nodes">
           <el-icon><Connection /></el-icon>
-          <span>节点理论</span>
-        </el-menu-item>
-        <el-menu-item index="/history">
-          <el-icon><Calendar /></el-icon>
-          <span>历史回看</span>
-        </el-menu-item>
-        <el-menu-item index="/themes">
-          <el-icon><TrendCharts /></el-icon>
-          <span>主线龙头</span>
+          <span>节点追踪</span>
         </el-menu-item>
         <el-menu-item index="/scoring">
           <el-icon><SetUp /></el-icon>

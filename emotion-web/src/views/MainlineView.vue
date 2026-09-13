@@ -1,33 +1,35 @@
 <template>
   <div class="mainline-page">
     <div class="page-header">
-      <h2>日内核心</h2>
+      <h2>主线与日内核心
+        <DimIntroTip title="主线区（已确认·打D2分）+ 雷达区（候选池·不打D2分）双轨，与打分引擎同源"
+          body="雷达区=当日所有有涨停的行业扫描（只标连续天数与强度）；连续 3 个交易日（含今天）该行业涨停≥5 家，才晋级主线区打 D2 分。雷达区可点击「升级到主线区」落人工标记。" />
+      </h2>
       <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" :clearable="false"
         :disabled-date="notBeforeToday" style="width: 168px" />
     </div>
-    <el-alert class="intro" type="info" :closable="false" show-icon>
-      <template #title>日内核心五要素 + 生命周期 + 龙头分工 + 轮动信号，与打分引擎同源</template>
-      <div class="intro-body">
-        <p>日内核心=当日涨停聚集度最高的行业；只有连续 3 个交易日（含今天）该行业涨停≥5 家，才被收集为主线龙头。成交额聚集度是人工口径。</p>
-      </div>
-    </el-alert>
+
+    <DimScoreBlock :date="date" dim-key="theme_main" title="D2 · 主线明确度" />
+
+    <!-- D2 分走势：点任意一天切日期 -->
+    <DimScoreCurve :rows="curveRows" :selected="date" name="D2主线明确度" @select="date = $event" />
 
     <el-empty v-if="!loading && !vo" description="当日无日内核心：行情明细未回补，或当日没有涨停股" />
 
     <template v-if="vo">
       <!-- 主线收集状态 -->
       <el-alert v-if="vo.mainIndustry"
-        :type="vo.mainlineConfirmed ? 'success' : 'warning'"
+        :type="vo.hasMainline ? 'success' : 'warning'"
         :closable="false" show-icon class="confirm-bar"
-        :title="vo.mainlineConfirmed
-          ? `「${vo.mainIndustry}」已连续 ${vo.persistenceDays} 个交易日有热度（≥5 家涨停），已收集为主线龙头`
-          : `「${vo.mainIndustry}」今日最热但热度未满连续 3 个交易日（当前 ${vo.persistenceDays ?? 0} 天），暂为日内核心，未收集为主线龙头`" />
+        :title="(vo.manuallyMarked ? '🏷人工主线：' : '') + mainlineTitle()" />
+
+      <el-alert v-if="!vo.hasMainline && vo.mainlineSignal" type="warning" :closable="false" show-icon
+        class="confirm-bar" :title="vo.mainlineSignal"
+        style="margin-top: -6px" />
 
       <el-alert v-if="vo.mainThemeMatched === false" type="warning" :closable="false" show-icon
-        title="题材行与日内核心行业没有对上：催化剂硬度取的是默认值，可信度打折（去主线龙头页登记该行业题材可修正）"
+        title="题材行与日内核心行业没有对上：催化剂硬度取的是默认值，可信度打折（登记入口已下线，可用 /api/themes 接口登记该行业题材修正）"
         style="margin: 16px 0" />
-
-      <DimScoreBlock :date="date" dim-key="theme_main" title="D2 · 主线明确度" />
 
       <!-- 生命周期轨道 -->
       <section class="block" v-loading="loading">
@@ -52,8 +54,13 @@
       <!-- 五要素 -->
       <section class="block" v-loading="loading">
         <div class="block-head">
-          <h3>日内核心五要素 <span class="sub">{{ vo.mainIndustry || '—' }}</span></h3>
-          <span class="scale">核心涨停 {{ nz(vo.mainZt) }}/{{ nz(vo.ztTotal) }} · 核心最高板 {{ nz(vo.mainMaxBoard) }}/{{ nz(vo.maxBoard) }}</span>
+          <h3>主线五要素 <span class="sub">{{ vo.mainIndustry || '—' }}</span></h3>
+          <span class="scale">
+            <template v-if="vo.radarTopIndustry && vo.radarTopIndustry !== vo.mainIndustry">
+              今日候选榜首「{{ vo.radarTopIndustry }}」≠ 主线「{{ vo.mainIndustry }}」 ·
+            </template>
+            核心涨停 {{ nz(vo.mainZt) }}/{{ nz(vo.ztTotal) }} · 核心最高板 {{ nz(vo.mainMaxBoard) }}/{{ nz(vo.maxBoard) }}
+          </span>
         </div>
         <div class="elem-grid">
           <div class="elem">
@@ -161,6 +168,109 @@
         </div>
       </section>
 
+      <!-- 雷达区（候选池，当日有涨停的行业，不打 D2 分）→ 板块表 + 题材表 -->
+      <section class="block" v-loading="loading">
+        <div class="block-head">
+          <h3>雷达区 · 日内核心 <span class="sub">候选池扫描，连续≥3天晋级主线</span></h3>
+        </div>
+
+        <h4 class="radar-sub">板块表 <span class="sub">全量行业 · {{ vo.radar?.length || 0 }} 个</span></h4>
+        <el-empty v-if="!vo.radar?.length" description="当日无涨停行业" :image-size="60" />
+        <template v-else>
+          <el-table :data="radarView" size="small" class="radar-table">
+            <el-table-column type="index" label="排名" width="56" align="center" :index="rankIndex" />
+            <el-table-column prop="industry" label="行业" min-width="110" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span :class="{ 'main-row': row.industry === vo.mainIndustry }">{{ row.industry }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="涨停" width="64" align="center">
+              <template #default="{ row }">{{ row.zt }}</template>
+            </el-table-column>
+            <el-table-column label="聚集%" width="72" align="right">
+              <template #default="{ row }">{{ row.ztGatherPct != null ? Number(row.ztGatherPct).toFixed(1) : '—' }}</template>
+            </el-table-column>
+            <el-table-column label="最高板" width="64" align="center">
+              <template #default="{ row }">{{ nz(row.maxBoard) }}</template>
+            </el-table-column>
+            <el-table-column label="连续" width="80" align="center">
+              <template #default="{ row }">
+                <el-tag :type="FLAG_TYPE[row.flag] || 'info'" size="small" effect="plain">
+                  {{ row.persistenceDays }} 天{{ row.flag === 'NEW' ? ' 🆕' : row.flag === 'MAIN' ? ' ⭐主线' : '' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="板块龙头" min-width="120">
+              <template #default="{ row }">
+                <template v-if="row.leader">
+                  {{ row.leader.name }}（{{ row.leader.code }} · {{ nz(row.leader.board) }}板）
+                </template>
+                <span v-else class="missing">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="96" align="center">
+              <template #default="{ row }">
+                <el-button v-if="isCurrentManual(row)" size="small" type="danger" plain :loading="busy" @click="cancelPromote(row.industry)">取消升级</el-button>
+                <el-button v-else size="small" type="primary" plain :loading="busy" @click="promote(row.industry)">升级</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-if="(vo.radar || []).length > 5" class="radar-more">
+            <el-button link type="primary" :icon="showAll ? ArrowUp : ArrowDown" @click="showAll = !showAll">
+              共 {{ vo.radar.length }} 个板块，{{ showAll ? '收起只看前 5' : '展开全部' }}
+            </el-button>
+          </div>
+        </template>
+
+        <h4 class="radar-sub radar-sub-theme">题材表 <span class="sub">已登记题材归并 · {{ vo.radarThemes?.length || 0 }} 个</span></h4>
+        <el-empty v-if="!vo.radarThemes?.length" description="当日没有已登记题材的行业（题材需在 题材管理 里登记，板块表已全量覆盖）" :image-size="60" />
+        <template v-else>
+          <el-table :data="radarThemeView" size="small" class="radar-table">
+            <el-table-column type="index" label="排名" width="56" align="center" :index="rankIndex" />
+            <el-table-column prop="industry" label="题材" min-width="110" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-tag size="small" :type="row.industry === vo.mainIndustry ? 'success' : 'primary'" effect="plain">{{ row.industry }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="涨停" width="64" align="center">
+              <template #default="{ row }">{{ row.zt }}</template>
+            </el-table-column>
+            <el-table-column label="聚集%" width="72" align="right">
+              <template #default="{ row }">{{ row.ztGatherPct != null ? Number(row.ztGatherPct).toFixed(1) : '—' }}</template>
+            </el-table-column>
+            <el-table-column label="最高板" width="64" align="center">
+              <template #default="{ row }">{{ nz(row.maxBoard) }}</template>
+            </el-table-column>
+            <el-table-column label="连续" width="80" align="center">
+              <template #default="{ row }">
+                <el-tag :type="FLAG_TYPE[row.flag] || 'info'" size="small" effect="plain">
+                  {{ row.persistenceDays }} 天{{ row.flag === 'NEW' ? ' 🆕' : row.flag === 'MAIN' ? ' ⭐主线' : '' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="题材龙头" min-width="120">
+              <template #default="{ row }">
+                <template v-if="row.leader">
+                  {{ row.leader.name }}（{{ row.leader.code }} · {{ nz(row.leader.board) }}板）
+                </template>
+                <span v-else class="missing">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="96" align="center">
+              <template #default="{ row }">
+                <el-button v-if="isCurrentManual(row)" size="small" type="danger" plain :loading="busy" @click="cancelPromote(row.industry)">取消升级</el-button>
+                <el-button v-else size="small" type="primary" plain :loading="busy" @click="promote(row.industry)">升级</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-if="(vo.radarThemes || []).length > 5" class="radar-more">
+            <el-button link type="primary" :icon="showAllTheme ? ArrowUp : ArrowDown" @click="showAllTheme = !showAllTheme">
+              共 {{ vo.radarThemes.length }} 个题材，{{ showAllTheme ? '收起只看前 5' : '展开全部' }}
+            </el-button>
+          </div>
+        </template>
+      </section>
+
       <!-- 轮动信号 -->
       <section class="block" v-loading="loading">
         <div class="block-head"><h3>轮动信号</h3></div>
@@ -176,17 +286,20 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { ArrowUp, ArrowDown } from '@element-plus/icons-vue'
 import { prdApi, recordApi } from '../api/modules'
 import { signed } from '../utils/scores'
 import DimScoreBlock from '../components/DimScoreBlock.vue'
+import DimScoreCurve from '../components/DimScoreCurve.vue'
 
 const route = useRoute()
 
 const ACTION_LABEL = { PROMOTE: '晋级', HOLD: '在位', BREAK: '断板', ABSENT: '缺席' }
 const ACTION_TYPE = { PROMOTE: 'success', HOLD: 'primary', BREAK: 'danger', ABSENT: 'info' }
 const STAGE_TYPE = { 萌芽: 'info', 确认: 'primary', 扩散: 'warning', 亢奋: 'danger', 退潮: 'info' }
+const FLAG_TYPE = { NEW: 'info', WATCH: 'warning', MAIN: 'success', MANUAL: 'primary' }
 const STAGE_NOTE = {
   萌芽: '主线刚冒头，持续性不足两天，试错仓为主',
   确认: '持续性 ≥2 天，主线结构初步成立，可加试错仓',
@@ -198,7 +311,63 @@ const STAGE_NOTE = {
 const todayStr = new Date().toLocaleDateString('en-CA')
 const date = ref(route.query.date || todayStr)
 const loading = ref(false)
+const busy = ref(false)
 const vo = ref(null)
+/** 雷达区板块表默认只看前 5，可展开全部。 */
+const showAll = ref(false)
+const radarView = computed(() => {
+  const all = vo.value?.radar || []
+  return showAll.value ? all : all.slice(0, 5)
+})
+/** 雷达区题材表同样默认前 5。 */
+const showAllTheme = ref(false)
+const radarThemeView = computed(() => {
+  const all = vo.value?.radarThemes || []
+  return showAllTheme.value ? all : all.slice(0, 5)
+})
+/** el-table 默认 index 从 1 起但只在当前页内排：展开全部时仍按全局排名显示。 */
+function rankIndex(i) {
+  return i + 1
+}
+
+/** 主线收集状态标题（区分人工标记 / 自动晋级 / 未晋级）。 */
+function mainlineTitle() {
+  const v = vo.value
+  if (v?.mainlineConfirmed) {
+    return `「${v.mainIndustry}」已连续 ${v.persistenceDays ?? 0} 个交易日有热度（≥5 家涨停），已晋级为主线`
+  }
+  return `「${v.mainIndustry}」今日最热但热度未满连续 3 个交易日（当前 ${v.persistenceDays ?? 0} 天），暂为日内核心，未晋级主线`
+}
+
+/** 该雷达行是否是当前人工标记的主线（显示「取消升级」）。 */
+function isCurrentManual(row) {
+  return !!(vo.value?.manuallyMarked && row.industry === vo.value.mainIndustry)
+}
+
+async function promote(industry) {
+  busy.value = true
+  try {
+    const res = await prdApi.promote(date.value, industry)
+    vo.value = res?.data || vo.value
+  } finally {
+    busy.value = false
+  }
+}
+
+async function cancelPromote(industry) {
+  busy.value = true
+  try {
+    const res = await prdApi.cancelPromote(date.value, industry)
+    vo.value = res?.data || vo.value
+  } finally {
+    busy.value = false
+  }
+}
+
+/** 曲线往回取多少个日历日去凑最近 30 个交易日：留足长假，取 90 天。 */
+const LOOKBACK_DAYS = 90
+const CURVE_ROWS = 30
+const curveRows = ref([])
 
 function nz(v) {
   return v == null ? '—' : v
@@ -217,11 +386,24 @@ function notBeforeToday(d) {
   return d.getTime() > Date.now()
 }
 
+/** 补 T00:00:00 按本地时区解析，否则 new Date('2026-09-04') 走 UTC 会少一天。 */
+function shiftDays(iso, days) {
+  const d = new Date(iso + 'T00:00:00')
+  d.setDate(d.getDate() - days)
+  return d.toLocaleDateString('en-CA')
+}
+
 async function load() {
   loading.value = true
   try {
     const res = await prdApi.mainline(date.value).catch(() => null)
     vo.value = res?.data || null
+    // 曲线与异动监管页同一取数口：range 返回按日升序，切出最近一段直接喂图
+    const rangeRes = await recordApi.getRange(shiftDays(date.value, LOOKBACK_DAYS), date.value).catch(() => null)
+    curveRows.value = ((rangeRes && rangeRes.data) || []).slice(-CURVE_ROWS).map((r) => ({
+      date: r.tradeDate,
+      score: r.scoreThemeMain
+    }))
   } finally {
     loading.value = false
   }
@@ -460,6 +642,33 @@ watch(date, load)
   margin: 0;
   padding: 0;
   list-style: none;
+}
+.main-row {
+  color: #fbbf24;
+  font-weight: 700;
+}
+.radar-sub {
+  margin: 16px 0 8px;
+  font-size: 13px;
+  color: #e1e8ed;
+}
+.radar-sub .sub {
+  color: #9fb2c6;
+}
+.radar-sub-theme {
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px dashed #2d3748;
+}
+.radar-table :deep(.el-table__row) {
+  color: #cbd5e1;
+}
+.radar-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #2d3748;
 }
 .rotation-list li {
   display: flex;

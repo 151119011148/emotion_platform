@@ -25,6 +25,12 @@ public class NodeEvent {
     private Integer nodeValid;
     private String nodeStock;
     private Integer nodeStockMaxBoard;
+    private Long anchorId;
+    private String theme;
+    private BigDecimal d0Score;
+    private String d0Cycle;
+    private LocalDateTime lastRecalcAt;
+    private String conclusionReason;
     private Integer filterPassed;
     private String filterDetail;
     private String status;

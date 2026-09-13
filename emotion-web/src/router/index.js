@@ -49,24 +49,14 @@ const routes = [
         component: () => import('../views/MainlineView.vue')
       },
       {
-        path: 'themes',
-        name: 'Themes',
-        component: () => import('../views/ThemeView.vue')
-      },
-      {
-        path: 'surveillance',
-        name: 'Surveillance',
-        component: () => import('../views/SurveillanceView.vue')
+        path: 'higheco',
+        name: 'HighEco',
+        component: () => import('../views/HighEcoView.vue')
       },
       {
         path: 'nodes',
         name: 'Nodes',
         component: () => import('../views/NodeView.vue')
-      },
-      {
-        path: 'history',
-        name: 'History',
-        component: () => import('../views/HistoryView.vue')
       },
       {
         path: 'scoring',

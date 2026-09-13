@@ -57,8 +57,7 @@
         </template>
         <el-table :data="detail.dims" highlight-current-row @current-change="onDimRowClick" style="width: 100%">
           <el-table-column prop="dimNo" label="第N维" width="80" />
-          <el-table-column prop="dimKey" label="维键" width="110" />
-          <el-table-column prop="label" label="卡面名" width="120" />
+          <el-table-column prop="label" label="卡面名" width="140" />
           <el-table-column label="权重" width="170">
             <template #default="{ row }">
               <el-input-number v-model="row.weight" :min="0" :max="10" :step="0.5" :precision="2"
@@ -66,12 +65,7 @@
               <el-button size="small" text type="primary" @click="saveDimWeight(row)">保存</el-button>
             </template>
           </el-table-column>
-          <el-table-column prop="sortNo" label="卡序" width="80" />
-          <el-table-column label="合成方式" width="180">
-            <template #default="{ row }"><el-tag size="small" type="warning">{{ row.ruleEngine }}</el-tag></template>
-          </el-table-column>
-          <el-table-column prop="recordColumn" label="分列" width="130" />
-          <el-table-column prop="note" label="备注" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="note" label="备注" min-width="200" show-overflow-tooltip />
           <el-table-column label="操作" width="180" fixed="right">
             <template #default="{ row }">
               <el-button size="small" text type="primary" @click="showRules(row)">规则</el-button>
@@ -80,8 +74,7 @@
             </template>
           </el-table-column>
         </el-table>
-        <el-button size="small" style="margin-top: 12px" @click="openCreateDim">新增维度</el-button>
-      </el-card>
+        </el-card>
 
       <!-- 五维模型：中间层子指标 / 四层。旧 ultra_short 模型没有 subs，这一卡片只在 five_dim 下出现 -->
       <el-card shadow="never" class="block" v-if="isFiveDim && selectedDimKey">

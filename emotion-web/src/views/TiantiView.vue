@@ -1,44 +1,29 @@
 <template>
   <div class="tianti-page">
     <div class="page-header">
-      <h2>连板生态</h2>
+      <h2>连板生态
+        <DimIntroTip title="连板天梯：按板高 H→2 逐层、左对齐排布；3 板及以上层级把晋级失败个股并入同层（灰色半透明标注）"
+          body="一字=开盘前封死且全天 0 炸板；T字=开盘封死但盘中开过又回封；其余为换手板。同层个股按封单金额从大到小排序。" />
+      </h2>
       <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" :clearable="false"
         :disabled-date="notBeforeToday" style="width: 168px" />
     </div>
-    <el-alert class="intro" type="info" :closable="false" show-icon>
-      <template #title>连板天梯：按板高 H→2 逐层、左对齐排布；3 板及以上层级把晋级失败个股并入同层（灰色半透明标注）</template>
-      <div class="intro-body">
-        <p>一字=开盘前封死且全天 0 炸板；T字=开盘封死但盘中开过又回封；其余为换手板。同层个股按封单金额从大到小排序。</p>
-      </div>
-    </el-alert>
 
-    <div class="stat-grid" v-loading="loading">
-      <div class="stat">
-        <span class="stat-label">最高连板 H</span>
-        <span class="stat-value">{{ nz(vo?.maxBoard) }}</span>
-        <span class="stat-sub">全市场</span>
-      </div>
-      <div class="stat">
-        <span class="stat-label">涨停数 / 连板数</span>
-        <span class="stat-value">{{ nz(vo?.ztTotal) }} / {{ nz(vo?.lbTotal) }}</span>
-        <span class="stat-sub">连板=≥2 板家数</span>
-      </div>
-    </div>
-
-    <!-- 连板生态打分：完整 eval 树（读数→命中阶梯→层/子加权→维分） -->
-    <section class="block score-block" v-loading="scoring.detailLoading">
-      <div class="block-head">
-        <h3>连板生态打分</h3>
+    <!-- 连板生态打分：完整 eval 树（读数→命中阶梯→层/子加权→维分），可折叠 -->
+    <section class="block score-block" :class="{ 'score-collapsed': !scoreOpen }" v-loading="scoring.detailLoading">
+      <div class="block-head score-head" @click="scoreOpen = !scoreOpen">
+        <h3>连板生态打分 <span class="fold-tag">{{ scoreOpen ? '收起 ▲' : '展开 ▼' }}</span></h3>
         <span v-if="boardDim" class="dim-score" :class="bandClass(boardDim.score)">
           {{ boardDim.score == null ? '未评' : Number(boardDim.score).toFixed(2) + ' 分' }}
         </span>
       </div>
+      <div v-show="scoreOpen">
       <el-empty v-if="!boardDim" :description="'当日读数未取到，连板生态未评（不计入分母）'" :image-size="60" />
       <template v-else>
         <ol class="formula">
-          <li>叶子得分（四层晋级率 / 溢价 / 大面家数、家数封板率、回封率、空间板 H）：今日读数命中阈值阶梯 → 0-100 分；按当日 H 本日不存在的层标 <b>N/A</b>（如 H=4 时中高位/极高位），不进分母，与"有此层但没采到数据（未评）"区分。</li>
+          <li>叶子得分（三层晋级率 / 溢价 / 大面家数、家数封板率、回封率、空间板 H）：今日读数命中阈值阶梯 → 0-100 分；按当日 H 本日不存在的层标 <b>N/A</b>（如 H&lt;5 时无高位 5板+ 层），不进分母，与"有此层但没采到数据（未评）"区分。</li>
           <li>结构子分＝Σ(层权重 × 层得分) ÷ Σ已评层权重；未评/N/A 叶子剔出分母，不按 0 计。</li>
-          <li>口径修正：中位晋级昨日基数&lt;5 家→该叶 ×0.8；H&lt;5 空间未打开→晋级结构 ×0.9；大盘背离（大盘分&lt;40 或红盘率&lt;20%）→溢价结构 ×0.8；全局跌停≥20/≥10/≥5 家→大面结构 −35/−20/−8。</li>
+          <li>口径修正：中位晋级昨日基数&lt;5 家→该叶 ×0.8；H&lt;5 空间未打开→晋级结构 ×0.8；大盘背离（大盘分&lt;40 或红盘率&lt;20%）→溢价结构 ×0.8；全局跌停≥20/≥10/≥5 家→大面结构 −35/−20/−8。</li>
           <li>维分＝Σ(子项权重 × 修正后子项分) ÷ Σ已评子项权重，再过表尾三个闸门（中位吹哨 ×0.8、大盘背离 ×0.85、龙头错位 ×0.9，可连乘）。</li>
         </ol>
         <table class="score-table">
@@ -119,15 +104,60 @@
           维分＝Σ(子项权重 × 修正后子项分) ÷ Σ已评子项权重，再过上方闸门
           <template v-if="boardDim.note">；<b class="whistle-note">{{ boardDim.note }}</b></template>
         </p>
+        <p class="high-handoff">
+          高位(5板+)只计"接力效率"低权重；其<b>抱团结构、异动监管、绕异动抱团、断板反包</b>详见
+          <router-link :to="`/higheco?date=${date}`" class="high-jump">高位生态 →</router-link>
+        </p>
       </template>
+      </div>
     </section>
+
+    <!-- D3 分走势：点任意一天切日期 -->
+    <DimScoreCurve :rows="curveRows" :selected="date" name="连板生态" @select="date = $event" />
+
+    <div class="stat-grid" v-loading="loading">
+      <div class="stat">
+        <span class="stat-label">最高连板 H</span>
+        <span class="stat-value">{{ nz(vo?.maxBoard) }}</span>
+        <span class="stat-sub">全市场</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">涨停数 / 连板数</span>
+        <span class="stat-value">{{ nz(vo?.ztTotal) }} / {{ nz(vo?.lbTotal) }}</span>
+        <span class="stat-sub">连板=≥2 板家数</span>
+      </div>
+    </div>
 
     <!-- 天梯 -->
     <section class="block" v-loading="loading">
       <div class="block-head">
         <h3>连板天梯</h3>
-        <span class="sub">从高板到 2 板左对齐；空层=断档；灰色半透明=昨日该板个股今日晋级失败（3 板及以上）</span>
+        <span class="sub">从高板到 2 板左对齐；空层=断档；灰色半透明=昨日该板个股今日晋级失败（含 1进2 的 2 板层）</span>
+        <div class="leader-pill" :class="{ set: !!leader.code }">
+          <span class="leader-label">总龙头</span>
+          <template v-if="leader.code">
+            <span class="leader-name">{{ leader.name }}·{{ leader.code }}</span>
+            <el-button size="small" link @click="leaderOpen = true">改</el-button>
+            <el-button size="small" link type="danger" @click="clearLeader">✕</el-button>
+          </template>
+          <el-button v-else size="small" @click="leaderOpen = true">手动指定</el-button>
+        </div>
       </div>
+
+      <!-- 人工总龙头：只从当日天梯在板个股里选 -->
+      <el-popover v-model:visible="leaderOpen" trigger="click" placement="bottom-end" width="320">
+        <div class="leader-editor">
+          <div class="leader-editor-title">把谁标为今日总龙头？</div>
+          <el-select v-model="leaderPick" filterable placeholder="从当日天梯在板个股里选一只" style="width:100%">
+            <el-option v-for="r in leaderCandidates" :key="r.code"
+              :label="`${r.name}（${r.board}板）`" :value="r.code" />
+          </el-select>
+          <div class="leader-editor-actions">
+            <el-button size="small" type="primary" @click="saveLeader">保存</el-button>
+            <el-button size="small" @click="leaderOpen = false">取消</el-button>
+          </div>
+        </div>
+      </el-popover>
       <div v-if="!vo?.levels?.length && !loading" class="none-hint">当日无 ≥2 板个股</div>
       <div class="ladder">
         <div v-for="lvl in vo?.levels || []" :key="lvl.board" class="lad-band" :class="{ empty: !lvl.rows.length }">
@@ -140,6 +170,7 @@
             <div v-for="r in lvl.rows" :key="r.code" class="chip" :class="roleChipClass(r.role)">
               <span class="chip-name">{{ r.name }}</span>
               <el-tag v-if="r.role" size="small" :type="ROLE_TYPE[r.role] || 'info'" effect="dark">{{ r.role }}</el-tag>
+              <el-tag v-if="r.manualLeader" size="small" type="warning" effect="dark">总龙头</el-tag>
               <el-tag v-if="r.pattern" size="small" :type="PATTERN_TYPE[r.pattern] || 'info'" effect="plain">
                 {{ PATTERN_LABEL[r.pattern] }}
               </el-tag>
@@ -206,7 +237,7 @@
 
       <div v-if="whistle" class="whistle-banner">
         <span class="whistle-dot"></span>
-        🔴 中位吹哨：中位晋级过弱或中位负溢价叠加大面，<b>连板生态本维 ×0.8</b>
+        🔴 中位吹哨：中位晋级率&lt;15% 或 中位大面≥3家，<b>连板生态本维 ×0.8</b>
       </div>
 
       <div v-if="forcedEbb" class="ebb-banner">
@@ -223,7 +254,7 @@
         <div class="readout">
           <span class="readout-label">中位溢价 Prem_中</span>
           <span class="readout-value" :class="numClass(midMetrics.prem_mid)">{{ signedNum(midMetrics.prem_mid) }}%</span>
-          <span class="readout-rule">吹哨需 &lt; 0</span>
+          <span class="readout-rule">负=亏钱效应（不单触发吹哨）</span>
         </div>
         <div class="readout">
           <span class="readout-label">中位大面 Big_中</span>
@@ -239,14 +270,16 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { prdApi, recordApi } from '../api/modules'
+import { prdApi, leaderApi, recordApi } from '../api/modules'
 import { signed, fiveDimBandClassOf } from '../utils/scores'
 import { useScoringStore } from '../stores/scoring'
+import DimScoreCurve from '../components/DimScoreCurve.vue'
+import DimIntroTip from '../components/DimIntroTip.vue'
 
 const route = useRoute()
 const scoring = useScoringStore()
 
-const ROLE_TYPE = { 总龙头: 'danger', 中军: 'primary', 跟风: 'success', 卡位: 'warning', 反包: 'info' }
+const ROLE_TYPE = { 空间板: 'danger', 中军: 'primary', 跟风: 'success', 卡位: 'warning', 反包: 'info' }
 const PATTERN_LABEL = { ONE_LINE: '一字', T_SHAPE: 'T字', TURNOVER: '换手' }
 const PATTERN_TYPE = { ONE_LINE: 'danger', T_SHAPE: 'warning', TURNOVER: 'info' }
 const FAIL_LABEL = { ZT: '仍封停(低板)', ZB: '炸板', DT: '跌停', GONE: '未触板' }
@@ -256,10 +289,62 @@ const todayStr = new Date().toLocaleDateString('en-CA')
 const date = ref(route.query.date || todayStr)
 const loading = ref(false)
 const vo = ref(null)
+/** 曲线往回取多少个日历日去凑最近 30 个交易日：留足长假，取 90 天。 */
+const LOOKBACK_DAYS = 90
+const CURVE_ROWS = 30
+const curveRows = ref([])
+// 连板生态打分明细块默认折叠（与其他维度一致），可展开
+const scoreOpen = ref(false)
+// 人工总龙头：当前设定 + 选择弹层的暂存
+const leader = ref({ code: null, name: null })
+const leaderOpen = ref(false)
+const leaderPick = ref(null)
 // 2 板层 1进2 失败名单默认折叠（退潮日可能 20+ 只）
 const lowFailExpanded = ref(false)
 function toggleLowFail() {
   lowFailExpanded.value = !lowFailExpanded.value
+}
+
+/* ---- 人工总龙头：手动指定（只从当日天梯在板个股里选）---- */
+const leaderCandidates = computed(() => {
+  const out = []
+  for (const lvl of vo.value?.levels || []) {
+    for (const r of lvl.rows || []) {
+      if (r.code) out.push({ code: r.code, name: r.name, board: r.board })
+    }
+  }
+  return out
+})
+async function loadLeader() {
+  try {
+    const res = await leaderApi.get(date.value).catch(() => null)
+    const d = res?.data
+    if (!d || !d.code) {
+      leader.value = { code: null, name: null }
+      return
+    }
+    const hit = leaderCandidates.value.find((c) => c.code === d.code)
+    leader.value = { code: d.code, name: hit ? hit.name : d.name }
+  } catch (e) { /* 取不到保持空 */ }
+}
+async function saveLeader() {
+  if (!leaderPick.value) return
+  try {
+    const res = await leaderApi.save(date.value, leaderPick.value).catch(() => null)
+    const d = res?.data
+    if (d?.code) {
+      const hit = leaderCandidates.value.find((c) => c.code === d.code)
+      leader.value = { code: d.code, name: hit ? hit.name : d.name }
+    }
+    await load()
+  } catch (e) { }
+  leaderOpen.value = false
+  leaderPick.value = null
+}
+async function clearLeader() {
+  try { await leaderApi.clear(date.value).catch(() => null) } catch (e) { }
+  leader.value = { code: null, name: null }
+  await load()
 }
 
 /* ---- 连板生态打分明细：直接铺 score-detail 里 board 维的完整 eval 树 ---- */
@@ -269,7 +354,7 @@ const metrics = computed(() => scoring.detail?.metrics || {})
 
 /** 闸门触发条件（人话，与引擎 BoardScoreCalculator 常量一致）。 */
 function gateCondition(key) {
-  if (key === 'whistle') return '中位晋级率<15% 或（中位溢价<0 且中位大面≥3家）'
+  if (key === 'whistle') return '中位晋级率<15% 或 中位大面≥3家'
   if (key === 'divergence') return '大盘分<40 或 强制退潮 或 跌停≥10家'
   if (key === 'dragon_misalign') return '总龙头行业 ≠ 日内核心行业'
   return '—'
@@ -318,8 +403,8 @@ function bgText(subKey, sourceKey) {
 
 /**
  * 把两层 eval 树压成表格行：
- * - group：晋级/溢价/大面结构、炸板质量（其下还有四层/两个叶子）
- * - leaf： group 下的叶子（四层指标等）
+ * - group：晋级/溢价/大面结构、炸板质量（其下还有三层/两个叶子）
+ * - leaf： group 下的叶子（三层指标等）
  * - solo：直属维的叶子（数量高度）
  * - adjust：组级口径修正（空间/背离/外溢），渲染为组下方的说明行
  */
@@ -333,9 +418,22 @@ const scoreRows = computed(() => {
       rows.push({ kind: 'group', key: 'g-' + sub.key, label: sub.label, weight: sub.weight,
         score: sub.score, note: sub.note, adjustment: sub.adjustment, bg: bgText(sub.key) })
       for (const k of kids) {
-        rows.push({ kind: 'leaf', key: 'l-' + sub.key + '-' + k.key, label: k.label, weight: k.weight,
-          raw: k.raw, bandHit: k.bandHit, note: k.note, score: k.score, sourceKey: k.sourceKey,
-          applicable: k.applicable, adjustment: k.adjustment, bg: bgText(sub.key, k.sourceKey) })
+        const gkids = k.children || []
+        if (gkids.length) {
+          // 三层维度下还有复合层（如 大面结构→低位大面，其下再分 家数/大面率 叶子）：
+          // 复合层本身无直接读数，读数是再下一级叶子的，故钻到第三层铺开「家数/率」。
+          rows.push({ kind: 'group', key: 'g-' + sub.key + '-' + k.key, label: k.label, weight: k.weight,
+            score: k.score, note: k.note || '家数+大面率各50%合成', adjustment: k.adjustment, bg: '' })
+          for (const g of gkids) {
+            rows.push({ kind: 'leaf', key: 'l-' + sub.key + '-' + k.key + '-' + g.key, label: g.label, weight: g.weight,
+              raw: g.raw, bandHit: g.bandHit, note: g.note, score: g.score, sourceKey: g.sourceKey,
+              applicable: g.applicable, adjustment: g.adjustment, bg: bgText(sub.key, g.sourceKey) })
+          }
+        } else {
+          rows.push({ kind: 'leaf', key: 'l-' + sub.key + '-' + k.key, label: k.label, weight: k.weight,
+            raw: k.raw, bandHit: k.bandHit, note: k.note, score: k.score, sourceKey: k.sourceKey,
+            applicable: k.applicable, adjustment: k.adjustment, bg: bgText(sub.key, k.sourceKey) })
+        }
       }
     } else {
       rows.push({ kind: 'solo', key: 's-' + sub.key, label: sub.label, weight: sub.weight,
@@ -425,6 +523,13 @@ function failTitle(f) {
   return `昨日 ${f.prevBoard} 板，今日${FAIL_LABEL[f.todayStatus] || '未触板'}`
 }
 
+/** 补 T00:00:00 按本地时区解析，否则 new Date('2026-09-04') 走 UTC 会少一天。 */
+function shiftDays(iso, days) {
+  const d = new Date(iso + 'T00:00:00')
+  d.setDate(d.getDate() - days)
+  return d.toLocaleDateString('en-CA')
+}
+
 async function load() {
   loading.value = true
   lowFailExpanded.value = false
@@ -435,6 +540,12 @@ async function load() {
       scoring.loadDetail(date.value, true).catch(() => null)
     ])
     vo.value = tiantiRes?.data || null
+    // 曲线与异动监管页同一取数口：range 返回按日升序，切出最近一段直接喂图
+    const rangeRes = await recordApi.getRange(shiftDays(date.value, LOOKBACK_DAYS), date.value).catch(() => null)
+    curveRows.value = ((rangeRes && rangeRes.data) || []).slice(-CURVE_ROWS).map((r) => ({
+      date: r.tradeDate,
+      score: r.scoreBoard
+    }))
   } finally {
     loading.value = false
   }
@@ -470,6 +581,28 @@ watch(date, load)
 .sub { font-size: 12px; color: #8899a6; }
 
 /* 打分明细 */
+/* 折叠头：整块可点，折叠态收窄底部间距，让"收起/展开"有明确可点反馈 */
+.score-head { cursor: pointer; user-select: none; border-radius: 8px; transition: background .15s; }
+.score-head:hover { background: rgba(255, 255, 255, .025); }
+.score-head:hover h3 { color: #fff; }
+.fold-tag {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  color: #9fb2c6;
+  background: #22303f;
+  border: 1px solid #3a4d63;
+  border-radius: 999px;
+  line-height: 1.7;
+  transition: color .18s, border-color .18s, background .18s, transform .12s;
+  vertical-align: middle;
+}
+.score-head:hover .fold-tag { color: #ffd166; border-color: #ffd166; background: #2b3d52; }
+.score-head:active .fold-tag { transform: translateY(1px); background: #2f4258; }
+.score-block.score-collapsed .block-head { margin-bottom: 0; border-bottom: 1px dashed #33455a; }
 .dim-score {
   font-size: 16px; font-weight: 700; color: #e1e8ed;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -519,6 +652,9 @@ watch(date, load)
 .gate-reason { margin-left: 8px; color: #8899a6; font-size: 11px; }
 .gate-table tr.triggered .gate-reason { color: #fca5a5; }
 .score-foot { margin: 10px 0 0; font-size: 12px; color: #8899a6; line-height: 1.7; }
+.high-handoff { margin: 6px 0 0; font-size: 12px; color: #8899a6; line-height: 1.7; }
+.high-jump { color: #7dd3fc; font-weight: 600; text-decoration: none; }
+.high-jump:hover { color: #38bdf8; }
 .whistle-note { color: #fca5a5; }
 .b-ebb { color: #94a3b8; }
 .b-chaos { color: #60a5fa; }

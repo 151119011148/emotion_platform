@@ -61,11 +61,12 @@ class HighEcoMetricsServiceTest {
     }
 
     @Test
-    void highThresholdDynamic() {
+    void highThresholdFixedAtFive() {
+        // 高位固定 ≥5 板，与中位(3-4)/低位(2)互斥；即便 H<5 也不回落叠加中位
         assertEquals(5, HighEcoMetrics.highThreshold(7));
         assertEquals(5, HighEcoMetrics.highThreshold(5));
-        assertEquals(3, HighEcoMetrics.highThreshold(4)); // max(3, H-1=3)
-        assertEquals(3, HighEcoMetrics.highThreshold(3)); // max(3,2)=3
+        assertEquals(5, HighEcoMetrics.highThreshold(4));
+        assertEquals(5, HighEcoMetrics.highThreshold(3));
     }
 
     @Test
@@ -217,6 +218,63 @@ class HighEcoMetricsServiceTest {
         assertEquals(0.1, AnchorService.roleWeight(AnchorService.ROLE_FANBAO), 1e-9);
         assertEquals(0.5, AnchorService.roleWeight(AnchorService.ROLE_CYCLE), 1e-9, "旧角色兼容为总龙");
         assertEquals(0.5, AnchorService.roleWeight(AnchorService.ROLE_LEADER), 1e-9);
+    }
+
+    // ---------------- D5 强信号守卫（否决权/无头折扣/强制封顶） ----------------
+
+    @Test
+    void guard_pureFunctions() {
+        // 监管反馈否决权：核按钮≥1 → 压制分减半；未命中/未评原样
+        assertNull(HighEcoMetrics.pressureAfterNukeVeto(null, 1));
+        assertEquals(Integer.valueOf(44), HighEcoMetrics.pressureAfterNukeVeto(88, 1), "88×0.5=44");
+        assertEquals(Integer.valueOf(88), HighEcoMetrics.pressureAfterNukeVeto(88, 0));
+        // 无头抱团折扣：level≥3 → 抱团 ×0.85；否则原样
+        assertNull(HighEcoMetrics.coalitionAfterHeadless(null, 3));
+        assertEquals(Integer.valueOf(61), HighEcoMetrics.coalitionAfterHeadless(72, 3), "72×0.85≈61");
+        assertEquals(Integer.valueOf(72), HighEcoMetrics.coalitionAfterHeadless(72, 2));
+        // 强制风控封顶：force → 封到崩塌顶
+        assertEquals(Integer.valueOf(20), HighEcoMetrics.cappedByForce(35, true));
+        assertEquals(Integer.valueOf(35), HighEcoMetrics.cappedByForce(35, false));
+        assertNull(HighEcoMetrics.cappedByForce(null, true));
+    }
+
+    /** 总龙断板+易主+监管核按钮 → 三守卫齐触发：否决权压制减半、无头折扣抱团、强制风控封顶崩塌。 */
+    @Test
+    void guard_vetoHeadlessAndForceCapOnAggregate() {
+        Anchor dragon = anchor("600001", "金健米业", "农业", AnchorService.ROLE_ZONG);
+        MarketStock prevDragon = zt("600001", "金健米业", "农业", 5, 9.9, 0, 92500);
+        MarketStock topToday = zt("600002", "新空间板", "元件", 5, 10.0, 0, 92500);
+        MarketStock low = zt("600004", "跟风", "元件", 2, 10.0, 0, 92500);
+        List<MarketStock> todayZt = new ArrayList<>(Arrays.asList(topToday, low));
+        List<MarketStock> prevZt = new ArrayList<>(Arrays.asList(prevDragon));
+        List<MarketStock> todayDt = new ArrayList<>(Arrays.asList(ztDt("600003")));
+        SurvivalMember severe = member("600003", "深中华", "元件", 2, SurveillanceKind.SEVERE,
+                D.minusDays(2), new BigDecimal("-9.96"));
+
+        PrdMetricsService.Snapshot snap = new PrdMetricsService.Snapshot();
+        snap.mainIndustry = "元件";
+        snap.maxBoard = 5;
+        snap.zongLong = topToday;
+
+        HighEcoMetricsService svc = new HighEcoMetricsService(null, null);
+        HighEcoMetricsService.Build b = svc.aggregate(D, 5, "元件",
+                todayZt, Collections.<MarketStock>emptyList(), todayDt, prevZt, todayZt,
+                null, Arrays.asList(dragon), Arrays.asList(severe), true, topToday);
+
+        HighEcoVO vo = b.getVo();
+        // 三条守卫都命中
+        assertNotNull(vo.getPressure().getAdjust(), "应有否决权说明");
+        assertNotNull(vo.getCoalition().getAdjust(), "应有无头折扣说明");
+        assertTrue(b.getMetrics().containsKey("d5_force_death"));
+        assertNotNull(vo.getForceRisk());
+        assertTrue(vo.getForceRisk().isTriggered());
+        // 强制风控封顶到崩塌顶（≥20→危险），并有封顶 note
+        assertNotNull(vo.getScore());
+        assertTrue(vo.getScore() <= HighEcoMetrics.GUARD_FORCE_CAP,
+                "force 触发应封顶，实际 " + vo.getScore());
+        assertEquals("危险", vo.getLevel());
+        assertTrue(vo.getNotes().stream().anyMatch(n -> n.contains("封顶")),
+                "note 应含封顶说明，实际 " + vo.getNotes());
     }
 
     // ---------------- fixture helpers ----------------

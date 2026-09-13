@@ -149,6 +149,49 @@ class EastmoneyClientTest {
         assertTrue(page.getRows().isEmpty());
     }
 
+    // ---------- 概念板块（D2 题材索引） ----------
+
+    /** 概念板块清单：读 total 与每个板块的 BK 代码 + 名称。 */
+    @Test
+    void readsConceptBoardListWithCodeAndName() {
+        ConceptBoardsPage page = client.parseConceptBoards(Fixtures.text("concept_boards.json"));
+
+        assertTrue(page.isOk());
+        assertEquals(504, page.getTotal());
+        assertEquals(3, page.getRows().size());
+        assertEquals("BK0976", page.getRows().get(0).getCode());
+        assertEquals("被动元件概念", page.getRows().get(0).getName());
+    }
+
+    /** 概念板块成分股：读股票代码 + 简称，纯度比行业池高，不用白名单过滤。 */
+    @Test
+    void readsConceptMembersAsStockRows() {
+        ConceptMembers members = client.parseConceptMembers(Fixtures.text("concept_members.json"));
+
+        assertTrue(members.isOk());
+        assertEquals(30, members.getTotal());
+        assertEquals(3, members.getRows().size());
+        assertEquals("002848", members.getRows().get(0).getCode());
+        assertEquals("高斯贝尔", members.getRows().get(0).getName());
+    }
+
+    @Test
+    void treatsNullConceptBoardBodyAsFailure() {
+        ConceptBoardsPage page = client.parseConceptBoards(null);
+
+        assertFalse(page.isOk());
+        assertEquals("行情源无响应", page.getReason());
+        assertTrue(page.getRows().isEmpty());
+    }
+
+    @Test
+    void treatsNullConceptMemberBodyAsFailure() {
+        ConceptMembers members = client.parseConceptMembers(null);
+
+        assertFalse(members.isOk());
+        assertTrue(members.getRows().isEmpty());
+    }
+
     // ---------- 异动监管公告 ----------
 
     /**

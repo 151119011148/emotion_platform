@@ -9,6 +9,8 @@ import java.util.Map;
 
 import lombok.Data;
 
+import com.emotion.market.HighEcoMetrics;
+
 /**
  * 五维双层 0-100 情绪打分引擎（纯函数，不碰 DB）。
  *
@@ -262,6 +264,23 @@ public final class BoardScoreCalculator {
             }
         }
 
+        // D5 高位维强信号守卫（否决权/无头折扣/强制封顶），须在子项分定盘后
+        NodeEval highEval = null;
+        for (NodeEval de : r.dimEvals) {
+            if ("high".equals(de.getKey())) {
+                highEval = de;
+                break;
+            }
+        }
+        if (highEval != null) {
+            applyHighEcoGuards(highEval, m);
+            if (highEval.getScore() != null) {
+                r.dimScores.put("high", highEval.getScore());
+            } else {
+                r.dimScores.remove("high");
+            }
+        }
+
         // 试错(D4)-兑现(D3)背离度
         BigDecimal boardScore = r.dimScores.get("board");
         BigDecimal firstScore = r.dimScores.get("first");
@@ -329,8 +348,8 @@ public final class BoardScoreCalculator {
      * <ol>
      *   <li>按当日 H 标注四层叶子适用性：本日无此层 → applicable=false（N/A，剔出分母），区别于"有层但缺读数"；</li>
      *   <li>中位晋级率小样本（昨日基数&lt;5 家）叶子 ×0.8；</li>
-     *   <li>复合子按修正后的叶子重新加权合成；</li>
-     *   <li>晋级结构：空间未打开（H&lt;5）×0.9；溢价结构：大盘背离 ×0.8；大面结构：全局跌停外溢 −35/−20/−8；</li>
+     *   <li>复合子按修正后的叶子重新加权合成（自下而上）；</li>
+     *   <li>晋级结构：空间未打开（H&lt;5）×0.8；溢价结构：大盘背离 ×0.8；大面结构：全局跌停外溢 −35/−20/−8；</li>
      *   <li>维分按修正后的五个子项重新加权，再依次过闸门：中位吹哨 ×0.8、大盘背离 ×0.85。</li>
      *       （龙头错位 ×0.9 闸门 2026-09-12 D5 融合起下线，错位只出信号、扣分归 D5 阵眼一致性叶）</li>
      * </ol>
@@ -341,38 +360,38 @@ public final class BoardScoreCalculator {
         BigDecimal hRaw = m.get("max_height");
         Integer h = hRaw == null ? null : hRaw.intValue();
 
-        // 1+2：层叶子 N/A 标注 + 中位晋级小样本
+        // 1+2：层叶子 N/A 标注 + 中位晋级小样本（递归到任意深度真叶子，兼容大面「家数+率」3 层）
+        List<NodeEval> leaves = new ArrayList<>();
         for (NodeEval sub : board.getChildren()) {
-            for (NodeEval leaf : sub.getChildren()) {
-                Integer li = layerIndexOfMetric(leaf.getSourceKey());
-                if (li != null) {
-                    if (h != null && !layerActive(li, h)) {
-                        leaf.setApplicable(false);
-                        leaf.setRaw(null);
-                        leaf.setScore(null);
-                        leaf.setBandHit(null);
-                    } else {
-                        leaf.setApplicable(true);
-                    }
+            collectLeaves(sub, leaves);
+        }
+        for (NodeEval leaf : leaves) {
+            Integer li = layerIndexOfMetric(leaf.getSourceKey());
+            if (li != null) {
+                if (h != null && !layerActive(li, h)) {
+                    leaf.setApplicable(false);
+                    leaf.setRaw(null);
+                    leaf.setScore(null);
+                    leaf.setBandHit(null);
+                } else {
+                    leaf.setApplicable(true);
                 }
-                if ("jr_mid".equals(leaf.getSourceKey()) && leaf.getScore() != null) {
-                    BigDecimal base = m.get("jr_mid_base");
-                    if (base != null && base.signum() > 0
-                            && base.compareTo(BigDecimal.valueOf(JR_MID_SMALL_SAMPLE_BASE)) < 0) {
-                        leaf.setScore(leaf.getScore().multiply(JR_MID_SMALL_SAMPLE_MULT)
-                                .setScale(2, RoundingMode.HALF_UP));
-                        leaf.setAdjustment("小样本(昨日基数 " + plain(base) + " 家<"
-                                + JR_MID_SMALL_SAMPLE_BASE + ") ×" + plain(JR_MID_SMALL_SAMPLE_MULT));
-                    }
+            }
+            if ("jr_mid".equals(leaf.getSourceKey()) && leaf.getScore() != null) {
+                BigDecimal base = m.get("jr_mid_base");
+                if (base != null && base.signum() > 0
+                        && base.compareTo(BigDecimal.valueOf(JR_MID_SMALL_SAMPLE_BASE)) < 0) {
+                    leaf.setScore(leaf.getScore().multiply(JR_MID_SMALL_SAMPLE_MULT)
+                            .setScale(2, RoundingMode.HALF_UP));
+                    leaf.setAdjustment("小样本(昨日基数 " + plain(base) + " 家<"
+                            + JR_MID_SMALL_SAMPLE_BASE + ") ×" + plain(JR_MID_SMALL_SAMPLE_MULT));
                 }
             }
         }
 
-        // 3：复合子按修正后叶子重新合成
+        // 3：复合子按修正后叶子重新合成（自下而上，先重算层复合再重算大面结构等子项）
         for (NodeEval sub : board.getChildren()) {
-            if (sub.getChildren() != null && !sub.getChildren().isEmpty()) {
-                sub.setScore(weightedOfChildren(sub.getChildren()));
-            }
+            recomputeBottomUp(sub);
         }
 
         // 4：三个复合子的口径修正
@@ -412,7 +431,7 @@ public final class BoardScoreCalculator {
         List<GateInfo> gates = new ArrayList<>();
         gates.add(new GateInfo("whistle", "中位吹哨",
                 BOARD_WHISTLE_MULTIPLIER, whistle,
-                whistle ? "中位晋级过弱或中位负溢价叠加大面" : "中位晋级率/溢价/大面未越吹哨线"));
+                whistle ? "中位晋级<15%或中位大面≥3家" : "中位晋级率≥15%且中位大面<3家"));
         if (whistle) {
             raw = raw.multiply(BOARD_WHISTLE_MULTIPLIER);
         }
@@ -460,6 +479,55 @@ public final class BoardScoreCalculator {
             first.setNote("大盘背离（" + why + "）：首板数量 ×" + plain(FIRST_DIVERGENCE_COUNT_MULT)
                     + "、首板封板率 −" + FIRST_DIVERGENCE_SEALED_DEDUCT);
         }
+    }
+
+    /**
+     * D5 高位维强信号守卫（与 service 端 guard 同口径，2026-09-13）。顺序固定：
+     * <ol>
+     *   <li>监管反馈否决权：核按钮(跌停/大面)≥1 → 监管压制子分 ×0.5；</li>
+     *   <li>无头抱团折扣：总龙头失效（龙头易主 level≥3）→ 抱团子分 ×0.85；</li>
+     *   <li>按修正后四子项重加权；强制风控（death/top_break）触发时总分封到崩塌顶。</li>
+     * </ol>
+     * 乘数/封顶与 {@link HighEcoMetrics} 共享常量，改动即改口径、必须连测试一起改。
+     */
+    private static void applyHighEcoGuards(NodeEval high, Map<String, BigDecimal> m) {
+        // ① 监管反馈否决权
+        NodeEval pressure = childEval(high, "pressure");
+        BigDecimal nuke = m.get("d5f_nuke");
+        if (pressure != null && pressure.getScore() != null && nuke != null && nuke.signum() > 0) {
+            pressure.setScore(scale(clamp0to100(
+                    pressure.getScore().multiply(HighEcoMetrics.GUARD_NUKE_VETO_MULT))));
+            pressure.setAdjustment("监管股核按钮 " + nuke.toPlainString()
+                    + " 只，压制 ×" + plain(HighEcoMetrics.GUARD_NUKE_VETO_MULT));
+        }
+        // ② 无头抱团折扣
+        NodeEval coalition = childEval(high, "coalition");
+        BigDecimal handover = m.get("d5_sig_handover");
+        if (coalition != null && coalition.getScore() != null
+                && handover != null && handover.intValue() >= 3) {
+            coalition.setScore(scale(clamp0to100(
+                    coalition.getScore().multiply(HighEcoMetrics.GUARD_HEADLESS_MULT))));
+            coalition.setAdjustment("总龙头失效，无头抱团 ×" + plain(HighEcoMetrics.GUARD_HEADLESS_MULT));
+        }
+
+        BigDecimal raw = weightedOfChildren(high.getChildren());
+        if (raw == null) {
+            high.setScore(null);
+            return;
+        }
+
+        // ③ 强制风控封顶
+        boolean force = isOne(m.get("d5_force_death")) || isOne(m.get("d5_force_top_break"));
+        List<GateInfo> gates = new ArrayList<>();
+        gates.add(new GateInfo("force", "强制风控", BigDecimal.ONE, force, force
+                ? "死亡结构/监管龙头断板：总分封至崩塌 ≤" + HighEcoMetrics.GUARD_FORCE_CAP
+                : "无强制风控触发"));
+        if (force && raw.doubleValue() > HighEcoMetrics.GUARD_FORCE_CAP) {
+            raw = BigDecimal.valueOf(HighEcoMetrics.GUARD_FORCE_CAP);
+        }
+        high.setGates(gates);
+        high.setNote(joinGateNotes(gates));
+        high.setScore(scale(clamp0to100(raw)));
     }
 
     private static String joinGateNotes(List<GateInfo> gates) {
@@ -515,20 +583,20 @@ public final class BoardScoreCalculator {
     }
 
     /**
-     * 四层在当日 H 下是否真实存在（与 LadderMetricsService.layerIndex/hsplit 同一口径）：
-     * 低位=2 板（H≥2）、中位=3-4 板（H≥3）、极高位（H≥5）、中高位 5..⌈H/2⌉（H≥9 才有）。
+     * 三层在当日 H 下是否真实存在（与 LadderMetricsService.layerIndex 同一口径）：
+     * 低位=2 板（H≥2）、中位=3-4 板（H≥3）、高位=5 板+（H≥空间板高度，对齐高位生态 D5 边界）。
+     * H&lt;5 时高位层不存在 → 该层叶子标 N/A、剔除分母不归一化。
      */
     public static boolean layerActive(int layerIndex, int h) {
         switch (layerIndex) {
             case 0: return h >= 2;
             case 1: return h >= 3;
-            case 2: return h >= 9;
-            case 3: return h >= SPACE_OPEN_MIN_HEIGHT;
+            case 2: return h >= SPACE_OPEN_MIN_HEIGHT;
             default: return true;
         }
     }
 
-    /** 连板四层叶子 source_key（jr_/prem_/big_ 前缀 + low/mid/midhigh/top）→ 层序号 0..3；非四层叶返回 null。 */
+    /** 连板三层叶子 source_key（jr_/prem_/big_ 前缀 + low/mid/high）→ 层序号 0..2；非三层叶返回 null。 */
     private static Integer layerIndexOfMetric(String sourceKey) {
         if (sourceKey == null) {
             return null;
@@ -540,6 +608,9 @@ public final class BoardScoreCalculator {
             suffix = sourceKey.substring(5);
         } else if (sourceKey.startsWith("big_")) {
             suffix = sourceKey.substring(4);
+            if (suffix.endsWith("_rate")) {
+                suffix = suffix.substring(0, suffix.length() - "_rate".length());
+            }
         }
         if (suffix == null) {
             return null;
@@ -547,9 +618,40 @@ public final class BoardScoreCalculator {
         switch (suffix) {
             case "low": return 0;
             case "mid": return 1;
-            case "midhigh": return 2;
-            case "top": return 3;
+            case "high":
+            case "midhigh":  // 兼容旧数据源：一并归入高位层
+            case "top":
+                return 2;
             default: return null;
+        }
+    }
+
+    /** 把节点下的所有真叶子（无子节点）收集进 out，深度不限（兼容大面「家数+率」3 层）。 */
+    private static void collectLeaves(NodeEval node, List<NodeEval> out) {
+        List<NodeEval> kids = node.getChildren();
+        if (kids == null || kids.isEmpty()) {
+            out.add(node);
+        } else {
+            for (NodeEval k : kids) {
+                collectLeaves(k, out);
+            }
+        }
+    }
+
+    /** 自下而上重算复合节点：先递归子复合，再用子项加权合成自己；叶子（无子）不动。 */
+    private static void recomputeBottomUp(NodeEval node) {
+        List<NodeEval> kids = node.getChildren();
+        if (kids == null || kids.isEmpty()) {
+            return;
+        }
+        for (NodeEval k : kids) {
+            recomputeBottomUp(k);
+        }
+        BigDecimal v = weightedOfChildren(kids);
+        if (v != null) {
+            node.setScore(v);
+        } else {
+            node.setScore(null);
         }
     }
 
@@ -1085,37 +1187,33 @@ public final class BoardScoreCalculator {
         List<String> out = new ArrayList<>();
         BigDecimal jrLow = m.get("jr_low");
         BigDecimal jrMid = m.get("jr_mid");
-        BigDecimal jrMidHigh = m.get("jr_midhigh");
-        BigDecimal jrTop = m.get("jr_top");
-        BigDecimal premMid = m.get("prem_mid");
+        BigDecimal jrHigh = m.get("jr_high");
         BigDecimal bigMid = m.get("big_mid");
 
+        // 中位吹哨（2026-09-12：溢价从硬条件里撤离，中位大面≥3 家单独即吹）：
+        // 中位晋级率<15%，或中位大面≥3 家。
         boolean whistle = (jrMid != null && jrMid.compareTo(new BigDecimal("15")) < 0)
-                || (premMid != null && bigMid != null
-                        && premMid.signum() < 0 && bigMid.compareTo(new BigDecimal("3")) >= 0);
+                || (bigMid != null && bigMid.compareTo(new BigDecimal("3")) >= 0);
         if (whistle) {
             out.add(SIG_WHISTLE);
         }
-        if (jrTop != null && jrMid != null && jrLow != null
-                && jrTop.compareTo(new BigDecimal("50")) >= 0
+        if (jrHigh != null && jrMid != null && jrLow != null
+                && jrHigh.compareTo(new BigDecimal("50")) >= 0
                 && jrMid.compareTo(new BigDecimal("25")) < 0
                 && jrLow.compareTo(new BigDecimal("25")) < 0) {
             out.add(SIG_TOP_CROWD);
         }
-        if (jrTop != null && jrMidHigh != null
-                && jrTop.compareTo(new BigDecimal("50")) >= 0
-                && jrMidHigh.compareTo(new BigDecimal("20")) < 0) {
-            out.add(SIG_CROWD_COLLAPSE);
-        }
-        if (jrLow != null && jrTop != null
+        // 中高/极高位断层信号取消：去重后中高位并入高位(5板+)，无断层可判；
+        // SIG_CROWD_COLLAPSE 仍由 D5 高位生态的 coalition_risk 交叉信号触发。
+        if (jrLow != null && jrHigh != null
                 && jrLow.compareTo(new BigDecimal("40")) >= 0
-                && jrTop.compareTo(new BigDecimal("30")) < 0) {
+                && jrHigh.compareTo(new BigDecimal("30")) < 0) {
             out.add(SIG_HIGH_LOW_SWITCH);
         }
-        if (jrLow != null && jrMid != null && jrTop != null
+        if (jrLow != null && jrMid != null && jrHigh != null
                 && jrLow.compareTo(new BigDecimal("15")) < 0
                 && jrMid.compareTo(new BigDecimal("15")) < 0
-                && jrTop.compareTo(new BigDecimal("20")) < 0) {
+                && jrHigh.compareTo(new BigDecimal("20")) < 0) {
             out.add(SIG_FULL_EBB);
         }
 
@@ -1317,22 +1415,27 @@ public final class BoardScoreCalculator {
 
     private static DimNode boardDim() {
         List<SubNode> subs = new ArrayList<>();
-        // 子权重按时间截面 PRD v2.0（2026-09-12）：晋级30/溢价25/大面20/炸板15/数量10，和=1.00。
+        // 子权重按三层简化 PRD v2.2（2026-09-13）：数量高度10/晋级30/溢价25/大面20/炸板15，和=1.00。
+        // 去重：中高位/极高位并成高位(5板+)，只保留接力效率视角且高位权重压低，穿透的高位抱团/监管/反包归 D5。
+        // 数量高度仍排最前（用户项4：排序靠前）；权重按方案回调到 10%。
+        subs.add(SubNode.band("count_height", "数量高度", 0.10, "max_height", ladder(
+                BandRule.of("GTE", 7.0, null, 95),
+                BandRule.of("GTE", 5.0, null, 70),
+                BandRule.of("GTE", 4.0, null, 25),
+                BandRule.of("GTE", 3.0, null, 15),
+                BandRule.of("ELSE", null, null, 5))));
         subs.add(SubNode.composite("promo", "晋级结构", 0.30, LAYER_WEIGHTED_BAND, layers(
-                promoLayer("promo_low", "低位晋级", 0.15, "jr_low"),
-                promoLayer("promo_mid", "中位晋级", 0.25, "jr_mid"),
-                promoLayer("promo_midhigh", "中高位晋级", 0.20, "jr_midhigh"),
-                promoLayer("promo_top", "极高位晋级", 0.40, "jr_top"))));
+                promoLayer("promo_low", "低位晋级", 0.50, "jr_low"),
+                promoLayer("promo_mid", "中位晋级", 0.35, "jr_mid"),
+                promoLayer("promo_high", "高位晋级", 0.15, "jr_high"))));
         subs.add(SubNode.composite("premium", "溢价结构", 0.25, LAYER_WEIGHTED_BAND, layers(
-                premiumLayer("premium_low", "低位溢价", 0.15, "prem_low"),
-                premiumLayer("premium_mid", "中位溢价", 0.25, "prem_mid"),
-                premiumLayer("premium_midhigh", "中高位溢价", 0.20, "prem_midhigh"),
-                premiumLayer("premium_top", "极高位溢价", 0.40, "prem_top"))));
+                premiumLayer("premium_low", "低位溢价", 0.45, "prem_low"),
+                premiumLayer("premium_mid", "中位溢价", 0.35, "prem_mid"),
+                premiumLayer("premium_high", "高位溢价", 0.20, "prem_high"))));
         subs.add(SubNode.composite("bigloss", "大面结构", 0.20, LAYER_WEIGHTED_BAND, layers(
-                biglossLayer("bigloss_low", "低位大面", 0.15, "big_low"),
-                biglossLayer("bigloss_mid", "中位大面", 0.25, "big_mid"),
-                biglossLayer("bigloss_midhigh", "中高位大面", 0.20, "big_midhigh"),
-                biglossLayer("bigloss_top", "极高位大面", 0.40, "big_top"))));
+                biglossLayer("bigloss_low", "低位大面", 0.45, "big_low"),
+                biglossLayer("bigloss_mid", "中位大面", 0.35, "big_mid"),
+                biglossLayer("bigloss_high", "高位大面", 0.20, "big_high"))));
         subs.add(SubNode.composite("broken_quality", "炸板质量", 0.15, WEIGHTED_SUM, layers(
                 SubNode.band("bq_sealed", "家数封板率", 0.60, "sealed_home_rate", ladder(
                         BandRule.of("GTE", 85.0, null, 95),
@@ -1346,13 +1449,6 @@ public final class BoardScoreCalculator {
                         BandRule.of("GTE", 45.0, null, 60),
                         BandRule.of("GTE", 30.0, null, 40),
                         BandRule.of("ELSE", null, null, 15))))));
-        // 数量高度按空间板 H 给分：H≥7 打开空间=95，5-6=70，H=4 空间未打开=25，H=3=15，≤2=5。
-        subs.add(SubNode.band("count_height", "数量高度", 0.10, "max_height", ladder(
-                BandRule.of("GTE", 7.0, null, 95),
-                BandRule.of("GTE", 5.0, null, 70),
-                BandRule.of("GTE", 4.0, null, 25),
-                BandRule.of("GTE", 3.0, null, 15),
-                BandRule.of("ELSE", null, null, 5))));
         return new DimNode("board", "连板生态", 0.22, 3, "score_board", subs);
     }
 
@@ -1375,13 +1471,25 @@ public final class BoardScoreCalculator {
                 BandRule.of("ELSE", null, null, 5)));
     }
 
+    /**
+     * 大面结构·单层双指标（2026-09-12）：同一层「家数」与「大面率（大面家数/该层昨日种子）」各占 50% 合成。
+     * 家数看绝对量、率看相对面（小样本比家数更公平）；任一读数缺失时另一指标独撑整层权重。
+     */
     private static SubNode biglossLayer(String key, String label, double weight, String sourceKey) {
-        return SubNode.band(key, label, weight, sourceKey, ladder(
-                BandRule.of("EQ", 0.0, null, 95),
-                BandRule.of("LTE", 2.0, null, 80),
-                BandRule.of("LTE", 5.0, null, 60),
-                BandRule.of("LTE", 10.0, null, 35),
-                BandRule.of("ELSE", null, null, 10)));
+        return SubNode.composite(key, label, weight, WEIGHTED_SUM, layers(
+                SubNode.band(key + "_cnt", label + "·家数", 0.50, sourceKey, ladder(
+                        BandRule.of("EQ", 0.0, null, 95),
+                        BandRule.of("LTE", 2.0, null, 80),
+                        BandRule.of("LTE", 5.0, null, 60),
+                        BandRule.of("LTE", 10.0, null, 35),
+                        BandRule.of("ELSE", null, null, 10))),
+                SubNode.band(key + "_rate", label + "·大面率", 0.50, sourceKey + "_rate", ladder(
+                        BandRule.of("EQ", 0.0, null, 95),
+                        BandRule.of("LTE", 10.0, null, 85),
+                        BandRule.of("LTE", 20.0, null, 70),
+                        BandRule.of("LTE", 35.0, null, 50),
+                        BandRule.of("LTE", 50.0, null, 30),
+                        BandRule.of("ELSE", null, null, 10)))));
     }
 
     /**
