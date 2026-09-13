@@ -2,7 +2,7 @@
   <div class="node-page">
     <div class="page-header">
       <h2>节点追踪</h2>
-      <el-button type="primary" @click="openCreate">新增节点事件</el-button>
+      <el-button type="primary" @click="openLadderCreate()">新增节点事件</el-button>
     </div>
 
     <!-- ② 节点演变路径（六态色带）：看活跃节点 D0 落在周期哪个位置，历史节点按状态标点 -->
@@ -343,18 +343,25 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="showLadderDialog" title="从今日天梯新增节点" width="760px" class="dark-node-dialog">
-      <template v-if="ladderLeaders.length">
+    <el-dialog v-model="showLadderDialog" title="新增节点事件（从天梯选龙头）" width="760px" class="dark-node-dialog">
+      <el-form label-position="top">
+        <el-form-item label="选择 D0 日期">
+          <el-date-picker v-model="ladderD0Date" type="date" value-format="YYYY-MM-DD"
+            placeholder="默认回落最近交易日" style="width: 100%" @change="onLadderDateChange" />
+        </el-form-item>
+      </el-form>
+      <template v-if="leaderChoices.length">
         <div class="intel-head">
-          今日 D0：<b>{{ ladderPreview.date || '—' }}</b> · 涨停
+          D0 <b>{{ ladderPreview.date || '—' }}</b> 涨停
           {{ ladderPreview.limitUpCount != null ? ladderPreview.limitUpCount + '家' : '未知' }} · 跌停
-          {{ ladderPreview.limitDownCount != null ? ladderPreview.limitDownCount + '家' : '未知' }} · 天梯最高
+          {{ ladderPreview.limitDownCount != null ? ladderPreview.limitDownCount + '家' : '未知' }} · 天梯最高板
           {{ ladderPreview.maxBoard || '—' }} 板
+          <span v-if="ladderPreview.prevDate" class="prev-note">｜昨日(T-1) {{ ladderPreview.prevDate }} 最高板 {{ ladderPreview.prevMaxBoard ?? '—' }} 板</span>
         </div>
         <el-form label-position="top">
-          <el-form-item label="选择今日龙头（默认当日最高板；可下拉切换）">
-            <el-select v-model="ladderPickedCode" filterable style="width: 100%" @change="onLadderPick2">
-              <el-option v-for="ld in ladderLeaders" :key="ld.code" :label="ladderLabel(ld)" :value="ld.code" />
+          <el-form-item label="选择龙头（仅昨日最高板 / D0最高板，默认昨日最高板）">
+            <el-select v-model="ladderPickedCode" style="width: 100%" @change="onLadderPick2">
+              <el-option v-for="c in leaderChoices" :key="c.ld.code" :label="ladderLabel(c)" :value="c.ld.code" />
             </el-select>
           </el-form-item>
           <el-form-item label="前置过滤器判据">
@@ -381,9 +388,10 @@
           </div>
         </div>
       </template>
-      <div v-else class="intel-empty">今日没有可用的天梯明细（涨停池 ≥2 板为空），请先拉取当日行情。</div>
+      <div v-else class="intel-empty">该 D0 无涨停池明细（≥2 板为空），请换日期或先拉取当日行情。</div>
       <template #footer>
         <el-button @click="showLadderDialog = false">取消</el-button>
+        <el-button @click="openCreate">高级手填（细分原因/登记阵眼）</el-button>
         <el-button type="primary" :disabled="!ladderPickedCode" @click="createTwoPlans">生成两条节点（总节点 + 板块节点）</el-button>
       </template>
     </el-dialog>
@@ -408,6 +416,9 @@ const ladderNoKill = ref(true)
 const ladderHeightOk = ref(true)
 const showLadderDialog = ref(false)
 const ladderPreview = ref({})
+const ladderD0Date = ref('')
+/** 龙头下拉只给两项：D0昨日最高板 / D0最高板。元素形如 { kind:'prev'|'today', ld:Leader }。 */
+const leaderChoices = ref([])
 const suggestNode = ref(null)
 const anchorOptions = ref([])
 
@@ -493,27 +504,43 @@ function resetNodeForm() {
   nodeForm.anchorStart = ''
   nodeForm.anchorEnd = ''
 }
-/** 从今日天梯新增：专用双方案弹窗，默认当日最高板龙头，选后可下拉切换并自动生效各字段。 */
-async function openLadderCreate() {
+/** 从天梯新建：先选 D0 日期，龙头下拉只给「昨日最高板(默认)/D0最高板」两项，选后自动生效各字段并生成总节点+板块节点。 */
+async function openLadderCreate(date) {
   ladderLeaders.value = []
+  leaderChoices.value = []
   ladderPickedCode.value = ''
   ladderNoKill.value = true
   ladderHeightOk.value = true
   ladderPreview.value = {}
+  ladderD0Date.value = date || ''
   showLadderDialog.value = true
   try {
-    const res = await nodeApi.ladderIntel()
+    const res = await nodeApi.ladderIntel(date || undefined)
     const intel = res.data || {}
     ladderPreview.value = intel
+    ladderD0Date.value = intel.date || date || ''
     ladderLeaders.value = Array.isArray(intel.leaders) ? intel.leaders : []
-    // 默认选当日最高板（leaders 已按板高降序）
-    if (ladderLeaders.value.length) {
-      ladderPickedCode.value = ladderLeaders.value[0].code
+    const prevTop = (Array.isArray(intel.prevLeaders) ? intel.prevLeaders : [])[0] || null
+    const todayTop = ladderLeaders.value[0] || null
+    const choices = []
+    if (prevTop) choices.push({ kind: 'prev', ld: prevTop })
+    if (todayTop) choices.push({ kind: 'today', ld: todayTop })
+    leaderChoices.value = choices
+    // 默认昨日最高板；无昨日则回落 D0最高板
+    if (choices.length) {
+      ladderPickedCode.value = (prevTop ? prevTop : todayTop).code
     }
-  } catch (e) { /* 取不到留空 */ }
+  } catch (e) {
+    ladderLeaders.value = []
+    leaderChoices.value = []
+  }
+}
+function onLadderDateChange(val) {
+  openLadderCreate(val || undefined)
 }
 function pickedLeader() {
-  return ladderLeaders.value.find(x => x.code === ladderPickedCode.value) || null
+  const c = leaderChoices.value.find(x => x.ld.code === ladderPickedCode.value)
+  return c ? c.ld : null
 }
 /** 方案A 总节点 / 方案B 板块节点：同龙头，A=全市场候选，B=龙头板块内候选。 */
 const planA = computed(() => buildPlan('A', pickedLeader()))
@@ -543,8 +570,10 @@ function buildPlan(system, ld) {
   }
 }
 function onLadderPick2() { /* 计划由 computed 自动重算 */ }
-function ladderLabel(ld) {
-  return (ld.board === ladderPreview.value.maxBoard ? '★ 最高板 ' : '') + `${ld.name}（${ld.board}板）${ld.industry ? ' · ' + ld.industry : ''}`
+function ladderLabel(c) {
+  const ld = c.ld
+  const pre = c.kind === 'prev' ? '昨日最高板' : 'D0最高板'
+  return `${pre} · ${ld.name}（${ld.board}板）` + (ld.industry ? ' · ' + ld.industry : '')
 }
 function goTianti() {
   openLadderCreate()

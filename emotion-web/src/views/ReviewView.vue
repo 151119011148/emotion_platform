@@ -4,7 +4,7 @@
     <div class="page-header">
       <h2>每日复盘</h2>
       <el-date-picker v-model="form.tradeDate" type="date" value-format="YYYY-MM-DD"
-        placeholder="选择日期" style="width: 160px" />
+        :disabled-date="disableDate" placeholder="选择交易日" style="width: 160px" />
       <span class="header-spacer"></span>
       <el-tag v-if="fetchOverall" :type="overallTag" effect="dark">{{ overallText }}</el-tag>
       <el-button type="primary" :loading="fetching" @click="handleFetch">🔄 一键拉取行情</el-button>
@@ -41,7 +41,7 @@
         <div v-for="ix in d1.indexes" :key="ix.indexCode" class="index-card">
           <span class="ix-name">{{ ix.indexName || ix.indexCode }}</span>
           <span class="ix-close">{{ fmtNum(ix.closePrice) }}</span>
-          <span class="ix-pct" :class="pctClass(ix.changePct)">{{ fmtPct(ix.changePct) }}</span>
+          <span class="ix-pct" :class="pctClass(ix.changePct)">{{ signed(ix.changePct) + '%' }}</span>
         </div>
         <div v-if="!d1.indexes.length" class="empty-note">五大指数未拉取（去点「一键拉取行情」）</div>
       </div>
@@ -50,7 +50,7 @@
         <Stat :k="'上涨 / 下跌'" :v="nz(d1.daily.upCount) + ' / ' + nz(d1.daily.downCount)" />
         <Stat :k="'涨停 / 跌停'" :v="nz(d1.daily.limitUpCount) + ' / ' + nz(d1.daily.limitDownCount)" />
         <Stat :k="'连板高度'" :v="nz(d1.daily.maxConsecutiveLimit, true)" />
-        <Stat :k="'炸板率'" :v="fmtPct(d1.daily.brokenBoardRate)" />
+        <Stat :k="'炸板率'" :v="fmtPctVal(d1.daily.brokenBoardRate)" />
         <Stat :k="'大面' " :v="nz(d1.daily.bigLossCount, true)" />
         <Stat :k="'昨涨停溢价'" :v="fmtPct(d1.daily.yesterdayLimitPremium)" />
       </div>
@@ -65,45 +65,32 @@
         <ReadinessBadge :note="readiness.D2" />
         <ScoreChip :score="scoreOf('D2')" />
       </div>
-      <div class="d2-toolbar">
-        <div class="d2-seg">
-          <button class="seg-btn" :class="d2Tab === D2_TABS.TOPIC && 'on'" @click="d2Tab = D2_TABS.TOPIC">题材热度</button>
-          <button class="seg-btn" :class="d2Tab === D2_TABS.BOARD && 'on'" @click="d2Tab = D2_TABS.BOARD">核心板块</button>
-        </div>
-        <span class="header-spacer"></span>
-        <span class="idx-count" v-if="conceptIndex != null">题材索引 {{ fmtNum(conceptIndex) }} 行</span>
-        <el-button size="small" plain :loading="buildingIndex" @click="handleBuildIndex">重建题材索引</el-button>
-      </div>
-
-      <!-- 题材热度 Top5 -->
-      <div v-if="d2Tab === D2_TABS.TOPIC">
-        <div v-if="(d2.topics || []).length" class="topic-list">
-          <div v-for="(t, i) in d2.topics" :key="t.name" class="topic-row">
-            <span class="topic-rank" :class="'rk' + (i + 1)">{{ i + 1 }}</span>
-            <span class="topic-name">{{ t.name }}</span>
-            <span class="topic-sub">涨停 {{ t.ztCount }} · 最高 {{ t.maxBoard }} 板</span>
+      <!-- D2 双列表：题材热度 + 核心板块 同时展示（概念 / 行业两个维度） -->
+      <div class="d2-grid">
+        <div class="d2-col">
+          <h4 class="d2-sub">题材热度 <span class="muted">概念维度 · Top5</span></h4>
+          <div v-if="themesView.length" class="topic-list">
+            <div v-for="(t, i) in themesView" :key="t.name" class="topic-row">
+              <span class="topic-rank" :class="'rk' + (i + 1)">{{ i + 1 }}</span>
+              <span class="topic-name">{{ t.name }}</span>
+              <span class="topic-sub">涨停 {{ t.ztCount }} · 最高 {{ t.maxBoard }} 板</span>
+            </div>
           </div>
+          <div v-else class="empty-note">今日题材表为空（读取时后端会按热门行业自动回填题材）</div>
         </div>
-        <div v-else class="empty-note">
-          今日无题材热度：涨停池为空，或尚未重建题材索引
-          <span v-if="!conceptIndex">（本机还没有索引，点右上「重建题材索引」）</span>
-        </div>
-      </div>
 
-      <!-- 核心板块 Top5 -->
-      <div v-if="d2Tab === D2_TABS.BOARD">
-        <el-table v-if="d2.industries.length" :data="topIndustries" size="small" class="dim-table">
-          <el-table-column label="板块" prop="industry" min-width="110" />
-          <el-table-column label="涨停" prop="ztCount" width="62" align="right" />
-          <el-table-column label="最高板" prop="maxBoard" width="70" align="right" />
-          <el-table-column label="封单(亿)" align="right" width="90">
-            <template #default="{ row }">{{ fmtYi(row.sealSum) }}</template>
-          </el-table-column>
-          <el-table-column label="一字" prop="yiziCnt" width="56" align="right" />
-          <el-table-column label="大面" prop="bigLossCnt" width="56" align="right" />
-        </el-table>
-        <div v-else class="empty-note">行业板块快照为空（当日无涨停池，或未拉取三池）</div>
-        <p v-if="d2.industries.length > 5" class="dim-more">共 {{ d2.industries.length }} 个板块在涨停池，此处展示涨停数前 5</p>
+        <div class="d2-col">
+          <h4 class="d2-sub">核心板块 <span class="muted">行业维度 · Top5</span></h4>
+          <div v-if="d2.industries.length" class="topic-list">
+            <div v-for="(b, i) in topIndustries" :key="b.industry" class="topic-row">
+              <span class="topic-rank" :class="'rk' + (i + 1)">{{ i + 1 }}</span>
+              <span class="topic-name">{{ b.industry }}</span>
+              <span class="topic-sub">涨停 {{ b.ztCount }} · 最高 {{ b.maxBoard }} 板 · 封单 {{ fmtYi(b.sealSum) }}亿</span>
+            </div>
+          </div>
+          <div v-else class="empty-note">行业板块快照为空（当日无涨停池，或未拉取三池）</div>
+          <p v-if="d2.industries.length > 5" class="dim-more">共 {{ d2.industries.length }} 个板块在涨停池，此处展示涨停数前 5</p>
+        </div>
       </div>
     </section>
 
@@ -138,10 +125,6 @@
             </div>
           </div>
           <div v-else class="tier-empty">断档（本层无在板股）</div>
-          <div v-if="(lv.failed || []).length" class="tier-failed">
-            <span class="f-title">晋级失败：</span>
-            <span v-for="f in lv.failed" :key="f.code" class="f-chip">{{ f.name }}</span>
-          </div>
         </div>
         <div v-if="!(tianti.levels || []).length" class="empty-note">当日无 ≥2 板连板（或未拉取三池）</div>
       </template>
@@ -164,25 +147,28 @@
           <Stat :k="'一字板'" :v="nz(shouban.summary.yiziCount, true)" />
           <Stat :k="'均封单(亿)'" :v="fmtYi(shouban.summary.avgSealAmount)" />
         </div>
-        <el-table v-if="(shouban.sealed || []).length" :data="shouban.sealed" size="small" class="dim-table">
-          <el-table-column label="代码" prop="code" width="80" />
-          <el-table-column label="名称" prop="name" min-width="92" />
-          <el-table-column label="行业" prop="industry" min-width="92" />
-          <el-table-column label="形态" width="72">
-            <template #default="{ row }"><span :class="patternClass(row.pattern)">{{ patternText(row.pattern) }}</span></template>
-          </el-table-column>
-          <el-table-column label="开板" width="58" align="center">
-            <template #default="{ row }">{{ row.breakCount ? row.breakCount + '次' : '—' }}</template>
-          </el-table-column>
-          <el-table-column label="封单(亿)" align="right" width="92">
-            <template #default="{ row }">{{ fmtYi(row.sealAmount) }}</template>
-          </el-table-column>
-          <el-table-column label="涨幅" width="80" align="right">
-            <template #default="{ row }"><span :class="pctClass(row.changePct)">{{ fmtPct(row.changePct) }}</span></template>
-          </el-table-column>
-        </el-table>
-        <div v-else class="empty-note">今日无首板封住（或未拉取三池）</div>
-        <p v-if="(shouban.sealed || []).length > 20" class="dim-more">共 {{ shouban.sealed.length }} 家首板封住，此处展示全部</p>
+        <div class="sb-list">
+          <div class="list-head" @click="sealedOpen = !sealedOpen">
+            <h4>首板封住名单 <span class="fold-tag ok-tag">{{ sealedOpen ? '收起 ▲' : '展开 ▼' }}</span></h4>
+            <span class="list-count ok-text">{{ (shouban.sealed || []).length }} 只</span>
+          </div>
+          <div v-show="sealedOpen" class="list-body">
+            <div v-if="!(shouban.sealed || []).length" class="list-empty">当日没有封住的首板（或行情明细未回补，点一键拉取）</div>
+            <div v-else class="chips">
+              <div v-for="r in shouban.sealed" :key="r.code" class="chip">
+                <span class="chip-name">{{ r.name }}</span>
+                <span class="chip-code">{{ r.code }}</span>
+                <span class="chip-industry" :class="{ 'in-main': r.inMain }">{{ r.industry || '—' }}</span>
+                <el-tag v-if="r.pattern" size="small" :type="SB_PATTERN_TYPE[r.pattern] || 'info'" effect="plain">
+                  {{ SB_PATTERN_LABEL[r.pattern] || '—' }}
+                </el-tag>
+                <span v-if="r.sealAmount != null" class="chip-seal">封单 {{ moneyText(r.sealAmount) }}</span>
+                <span v-if="r.breakCount != null && r.breakCount > 0" class="chip-reseal">开板{{ r.breakCount }}次↩回封</span>
+                <span :class="pctClass(r.changePct)" class="chip-pct">{{ signed(r.changePct) + '%' }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </template>
       <div v-else class="empty-note">首板封住名单未取到（需当日三池）</div>
     </section>
@@ -208,7 +194,7 @@
             </div>
             <div class="anchor-line2">
               <span v-if="it.consecutive != null">{{ it.consecutive }} 板</span>
-              <span :class="pctClass(it.chg)">{{ fmtPct(it.chg) }}</span>
+              <span :class="pctClass(it.chg)">{{ signed(it.chg) + '%' }}</span>
               <span v-if="it.actionLabel" class="ac-act">{{ it.actionLabel }}</span>
             </div>
             <div v-if="it.industry" class="anchor-line3">{{ it.industry }}</div>
@@ -231,7 +217,7 @@
             <template #default="{ row }"><span class="mon-status" :class="statusClass(row.status)">{{ row.status }}</span></template>
           </el-table-column>
           <el-table-column label="涨幅" width="80" align="right">
-            <template #default="{ row }"><span :class="pctClass(row.chg)">{{ fmtPct(row.chg) }}</span></template>
+            <template #default="{ row }"><span :class="pctClass(row.chg)">{{ signed(row.chg) + '%' }}</span></template>
           </el-table-column>
         </el-table>
         <div v-else class="empty-note">当日监管池为空（例行 ZD 不进此表）</div>
@@ -444,10 +430,13 @@ const readiness = computed(() => dashboard.value?.readiness || {})
 const tianti = ref(null)        // /tianti 连板天梯
 const shouban = ref(null)       // /shouban 首板封住名单
 const d5high = ref(null)        // /d5/high 阵眼 + 监管池
-const D2_TABS = { TOPIC: 'topic', BOARD: 'board' }
-const d2Tab = ref(D2_TABS.TOPIC)
-const conceptIndex = ref(null)  // 题材索引规模(行数)，null=尚未查过
-const buildingIndex = ref(false)
+const themesData = ref(null)   // 题材表：来自 /intraday/themes（与日内核心页题材表同源）
+const themesView = computed(() => (themesData.value?.themes || []).slice(0, 5))
+
+/* D4 首板封住名单：chip 样式与首板生态页同款（默认展开，点头部折叠） */
+const sealedOpen = ref(false)
+const SB_PATTERN_LABEL = { ONE_LINE: '一字', T_SHAPE: 'T字', TURNOVER: '换手' }
+const SB_PATTERN_TYPE = { ONE_LINE: 'danger', T_SHAPE: 'warning', TURNOVER: 'info' }
 
 const fetching = ref(false)
 const fetchTasks = ref([])        // {task,status,rows,msg} 原始 SSE 流
@@ -501,6 +490,25 @@ const recordId = ref(null)
 const savedRecord = ref(null)
 const formReady = ref(false)
 const saving = ref(false)
+
+/* 可复盘交易日集合（降序，[0]=最近交易日）：非交易日/未拉取日置灰不可选 */
+const tradingDays = ref([])
+const disableDate = (d) => {
+  if (!tradingDays.value.length) return false // 从未拉取时放开选择，允许手动输入后一键拉取
+  const p = (n) => String(n).padStart(2, '0')
+  const key = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+  return !tradingDays.value.includes(key)
+}
+async function loadTradingDays() {
+  try {
+    const r = await reviewApi.tradingDays()
+    tradingDays.value = r?.data || []
+    // 进入页面优先选最近交易日：当前选中日不在交易日集合里就切到集合第一个（最近交易日）
+    if (tradingDays.value.length && !tradingDays.value.includes(form.tradeDate)) {
+      form.tradeDate = tradingDays.value[0]   // 触发下方 watch → handleDateChange
+    }
+  } catch (e) { tradingDays.value = [] }
+}
 const ebbActive = computed(() => savedRecord.value?.forcedEbb === 1)
 const ebbReason = computed(() => savedRecord.value?.forcedEbbReason || '')
 
@@ -569,28 +577,15 @@ async function loadReuse(date) {
   prdApi.tianti(date).then(r => { if (form.tradeDate === date) tianti.value = r.data || null }).catch(() => {})
   prdApi.shouban(date).then(r => { if (form.tradeDate === date) shouban.value = r.data || null }).catch(() => {})
   d5Api.high(date).then(r => { if (form.tradeDate === date) d5high.value = r.data || null }).catch(() => {})
-  refreshConceptIndex()   // 题材索引规模（决定 D2 题材 tab 是否提示先建）
+  loadThemes(date)   // D2 题材热度：日内核心题材表（概念维度，后端自动回填）
 }
 
-async function refreshConceptIndex() {
+/* D2 题材热度数据源：日内核心页题材表（t_theme/t_theme_stock，后端按热门行业自动回填） */
+async function loadThemes(date) {
   try {
-    const r = await reviewApi.conceptsStatus()
-    conceptIndex.value = r?.data ?? null
-  } catch (e) { conceptIndex.value = null }
-}
-
-async function handleBuildIndex() {
-  if (buildingIndex.value) return
-  buildingIndex.value = true
-  try {
-    ElMessage.info('正在全量构建题材索引（约 500 板块，耗时较长）…')
-    const r = await reviewApi.buildConcepts()
-    conceptIndex.value = r?.data ?? null
-    await loadDashboard(form.tradeDate)   // 索引变化会改变 d2.topics
-    ElMessage.success('题材索引已重建：' + (conceptIndex.value ?? 0) + ' 条')
-  } catch (e) {
-    ElMessage.error((e.response?.data?.message) || '题材索引构建失败')
-  } finally { buildingIndex.value = false }
+    const r = await prdApi.intradayThemes(date)
+    if (form.tradeDate === date) themesData.value = r?.data || null
+  } catch (e) { themesData.value = null }
 }
 
 async function handleFetch() {
@@ -702,12 +697,17 @@ function fmtScore(v) { return v === null || v === undefined || v === '' ? '未�
 function fmtYi(v) { if (v === null || v === undefined) return '—'; const n = Number(v); const yi = n / 1e8; return yi >= 100 ? yi.toFixed(0) : yi.toFixed(1) }
 function nz(v, raw = false) { if (v === null || v === undefined) return '—'; return raw ? String(v) : Number(v).toLocaleString('zh-CN') }
 function pctClass(v) { if (v === null || v === undefined) return ''; const n = Number(v); return n > 0 ? 'up' : n < 0 ? 'down' : '' }
+function signed(v) { if (v === null || v === undefined) return ''; const n = Number(v); return (n > 0 ? '+' : '') + n.toFixed(2) }
+function moneyText(v) { const n = Number(v); if (Number.isNaN(n)) return '—'; if (n >= 1e8) return (n / 1e8).toFixed(2) + ' 亿'; if (n >= 1e4) return (n / 1e4).toFixed(0) + ' 万'; return n.toFixed(0) + ' 元' }
 const patternText = (p) => ({ ONE_LINE: '一字', T_SHAPE: 'T字', TURNOVER: '换手' }[p] || p || '—')
 const patternClass = (p) => ({ ONE_LINE: 'p-one', T_SHAPE: 'p-t', TURNOVER: 'p-turn' }[p] || '')
 const statusClass = (s) => s && /涨停|核按钮/.test(s) ? 'st-danger' : (/断板|分歧/.test(s || '') ? 'st-warn' : '')
 const topIndustries = computed(() => (d2.value.industries || []).slice(0, 5))
 
-onMounted(() => { handleDateChange(form.tradeDate) })
+onMounted(async () => {
+  await loadTradingDays()
+  handleDateChange(form.tradeDate)
+})
 </script>
 
 <style scoped>
@@ -774,12 +774,12 @@ onMounted(() => { handleDateChange(form.tradeDate) })
 .g-chip i { font-style: normal; color: #f87171; margin-left: 4px; }
 .g-chip i.neg { color: #f87171; }
 
-/* D2 日内核心：题材/板块段切换 + 题材热度 */
-.d2-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
-.d2-seg { display: inline-flex; background: #131c28; border: 1px solid #22303f; border-radius: 8px; padding: 2px; gap: 2px; }
-.seg-btn { background: transparent; border: none; color: #8899a6; font-size: 12px; padding: 5px 12px; border-radius: 6px; cursor: pointer; }
-.seg-btn.on { background: #22303f; color: #22d3ee; font-weight: 600; }
-.idx-count { color: #64748b; font-size: 11px; }
+/* D2 日内核心：题材热度 + 核心板块 双列同时展示 */
+.d2-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 4px; }
+.d2-col { min-width: 0; }
+.d2-sub { margin: 0 0 8px; font-size: 13px; color: #e1e8ed; display: flex; align-items: baseline; gap: 6px; }
+.d2-sub .muted { font-size: 11px; color: #64748b; font-weight: 400; }
+@media (max-width: 860px) { .d2-grid { grid-template-columns: 1fr; } }
 .topic-list { display: flex; flex-direction: column; gap: 6px; }
 .topic-row { display: flex; align-items: center; gap: 10px; background: #131c28; border: 1px solid #22303f; border-radius: 8px; padding: 7px 10px; }
 .topic-rank { width: 20px; height: 20px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #0b0f14; flex: none; }
@@ -826,6 +826,46 @@ onMounted(() => { handleDateChange(form.tradeDate) })
 .mon-status.st-danger { color: #f87171; }
 .mon-status.st-warn { color: #fbbf24; }
 .d5-action { margin-top: 12px; }
+
+/* D4 首板封住名单：chip 样式（复用首板生态页封住名单同款） */
+.sb-list { margin-top: 8px; }
+.list-head { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; border-radius: 8px; padding: 6px 8px; transition: background .15s; border-bottom: 1px dashed #33455a; }
+.list-head:hover { background: rgba(255, 255, 255, .025); }
+.list-head:hover h4 { color: #fff; }
+.list-head .fold-tag { margin-left: 4px; }
+.list-head h4 { margin: 0; color: #e1e8ed; font-size: 14px; }
+.list-count { font-size: 12px; font-weight: 600; margin-left: auto; }
+.ok-text { color: #6ee7b7; }
+.fold-tag {
+  display: inline-block;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #9fb2c6;
+  background: #22303f;
+  border: 1px solid #3a4d63;
+  border-radius: 999px;
+  line-height: 1.7;
+  transition: color .18s, border-color .18s, background .18s, transform .12s;
+  vertical-align: middle;
+}
+.list-head:hover .fold-tag { color: #ffd166; border-color: #ffd166; background: #2b3d52; }
+.list-head:active .fold-tag { transform: translateY(1px); background: #2f4258; }
+.list-body { padding: 12px 4px 0; }
+.list-empty { color: #6b7c8c; font-size: 12px; padding: 4px 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #0f1419; border: 1px solid #2d3748; border-radius: 999px;
+  padding: 4px 10px; font-size: 12px;
+}
+.chip-name { color: #e1e8ed; font-weight: 600; }
+.chip-code { color: #6b7c8c; font-size: 11px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.chip-industry { color: #a8b7c4; font-size: 11px; }
+.chip-industry.in-main { color: #fbbf24; }
+.chip-seal { color: #a8b7c4; font-size: 11px; }
+.chip-reseal { color: #7dd3fc; font-size: 11px; background: rgba(56, 189, 248, .12); border-radius: 6px; padding: 1px 6px; }
+.chip-pct { font-weight: 600; font-size: 11px; }
 
 /* 评分总览 */
 .five-strip { display: flex; flex-wrap: wrap; gap: 12px 20px; margin-bottom: 10px; }

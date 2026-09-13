@@ -9,7 +9,8 @@ export const recordApi = {
   create: (data) => api.post('/records', data),
   update: (id, data) => api.put(`/records/${id}`, data),
   getToday: () => api.get('/records/today'),
-  getByDate: (date) => api.get(`/records/date/${date}`),
+  // 仪表盘点曲线回看历史日：某天确实没录时页面自己降级，不弹红条
+  getByDate: (date) => api.get(`/records/date/${date}`, { skipErrorToast: true }),
   getRange: (start, end) => api.get('/records/range', { params: { start, end } }),
   getLatest: (days = 20) => api.get('/records/latest', { params: { days } }),
   getAdvice: () => api.get('/records/advice'),
@@ -55,7 +56,9 @@ export const prdApi = {
   mainline: (date) => api.get('/mainline', { params: { date }, timeout: 25000, skipErrorToast: true }),
   // 双轨 v0.2：雷达区「升级到主线区」写接口（落 t_mainline_mark）
   promote: (tradeDate, industry) => api.post('/mainline/promote', { tradeDate, industry }, { timeout: 25000 }),
-  cancelPromote: (tradeDate, industry) => api.delete('/mainline/promote', { data: { tradeDate, industry }, timeout: 25000 })
+  cancelPromote: (tradeDate, industry) => api.delete('/mainline/promote', { data: { tradeDate, industry }, timeout: 25000 }),
+  // 题材表（概念维度，一票可归多题材）：读取时后端自动回填热门行业题材
+  intradayThemes: (date) => api.get('/intraday/themes', { params: { date }, timeout: 25000, skipErrorToast: true })
 }
 
 /**
@@ -151,9 +154,15 @@ export const reviewApi = {
   save: (data) => api.post('/review/save', data, { timeout: 25000 }),
   // T7 无自动源时人工补录监管：{code, name, kind, title, date}
   manualSurveillance: (data) => api.post('/surveillance/manual', data),
+  // 监管全生命周期轨迹（D5 高位生态热力表）：D+1→出监管每日轨迹 + ≤5只累计涨幅曲线
+  // active=false 时把已出池的历史事件也一起给（前端"含已出池"勾选用）
+  surveillanceTrack: (date, kinds, active) => api.get('/surveillance/track',
+    { params: { date, kinds, active }, timeout: 30000, skipErrorToast: true }),
   // D2 题材索引：低频全量重建（约 500 板块，耗时长）/ 查当前索引规模
   buildConcepts: () => api.post('/review/concepts/build', null, { timeout: 600000 }),
-  conceptsStatus: () => api.get('/review/concepts/status', { skipErrorToast: true })
+  conceptsStatus: () => api.get('/review/concepts/status', { skipErrorToast: true }),
+  // 近 N 个月可复盘交易日（有涨停明细的日，降序，第一个=最近交易日）
+  tradingDays: () => api.get('/review/trading-days', { skipErrorToast: true })
 }
 
 /**

@@ -307,6 +307,39 @@ class PrdMetricsServiceTest {
         assertEquals(2, PrdMetricsService.consecutiveDays(h, D, "电力"), "今天5+昨日5=2天");
     }
 
+    /** 前五口径：只要当天涨停家数排进板块前五就算一天。10号元件2家列第二(前五)、11号9家居首→第2天。 */
+    @Test
+    void consecutiveTop5Days_countsDaysInBoardTop5() {
+        Map<LocalDate, Map<String, Integer>> h = new HashMap<>();
+        Map<String, Integer> d10 = new HashMap<>();
+        d10.put("电力", 5);
+        d10.put("元件", 2);
+        d10.put("多元金融", 2);
+        d10.put("燃气Ⅱ", 2);
+        Map<String, Integer> d11 = new HashMap<>();
+        d11.put("元件", 9);
+        d11.put("电力", 4);
+        h.put(D.minusDays(1), d10);
+        h.put(D, d11);
+
+        assertEquals(2, PrdMetricsService.consecutiveTop5Days(h, D, "元件"),
+                "10号2家列第2(前五)、11号9家居首(前五)=连续2天");
+        // 10号不足5个涨停行业时，凡有涨停皆算前五
+        assertEquals(2, PrdMetricsService.consecutiveTop5Days(h, D, "电力"),
+                "10号5家、11号4家(前五)，电力也连续2天");
+        // 掉出前五->中断
+        d11.clear();
+        d11.put("元件", 9);
+        d11.put("电力", 1);
+        d11.put("通信", 8);
+        d11.put("化工", 7);
+        d11.put("汽车", 6);
+        d11.put("半导体", 5);
+        d11.put("光伏", 4);
+        assertEquals(0, PrdMetricsService.consecutiveTop5Days(h, D, "电力"),
+                "11号电力1家跌出前五，当天不在前五归0");
+    }
+
     /** 雷达区每行带题材关联：行业名匹配到 t_theme 则附题材名，未登记=null。 */
     @Test
     void aggregate_radar_carriesThemeAssociation() {

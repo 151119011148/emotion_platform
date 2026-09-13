@@ -166,11 +166,40 @@ CREATE TABLE IF NOT EXISTS t_theme (
     start_date DATE COMMENT '题材启动日',
     status VARCHAR(10) DEFAULT '萌芽' COMMENT '萌芽/确认/扩散/亢奋/退潮',
     strength INT DEFAULT 0 COMMENT '强度(0-100)',
+    is_main_line TINYINT DEFAULT 0 COMMENT '是否为人工主线题材(题材表可升级到主线区)',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 
     INDEX idx_user_id (user_id),
     INDEX idx_cycle_id (cycle_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 题材-个股关系表(按日快照)：题材(概念)与板块(行业)的根本差异是"一只票可归多个题材"，
+-- 所以题材计数必须用 is_primary 主题材去重；这里记(code 可出现在多个 theme_id 下，一票多题材)。
+-- 人工归类=MANUAL；自动回填热门行业= AUTO。
+CREATE TABLE IF NOT EXISTS t_theme_stock (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id     BIGINT      NOT NULL,
+    theme_id    BIGINT      NOT NULL COMMENT '关联 t_theme.id',
+    trade_date  DATE        NOT NULL COMMENT '按日快照(题材轮换可回溯)',
+    code        VARCHAR(6)  NOT NULL COMMENT '6位代码',
+    name        VARCHAR(20) DEFAULT '' COMMENT '冗余简称',
+    industry    VARCHAR(20) DEFAULT '' COMMENT '冗余行业，便于题材→板块映射',
+    is_primary  TINYINT     DEFAULT 1 COMMENT '1=主题材(参与涨停数统计) 0=辅题材(仅关联不计数)',
+    source      VARCHAR(8)  DEFAULT 'MANUAL' COMMENT 'MANUAL人工/AUTO自动回填',
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uk_theme_date_code (theme_id, trade_date, code),
+    INDEX idx_user_date (user_id, trade_date),
+    INDEX idx_date (trade_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='题材-个股关系(按日)';
+
+-- 老库 t_theme 没有 is_main_line：幂等补列(MySQL < 8.0.29 不支持 ADD COLUMN IF NOT EXISTS，用预编译判存在)
+SET @themes_col = (SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 't_theme' AND COLUMN_NAME = 'is_main_line');
+SET @themes_ddl = IF(@themes_col = 0,
+    'ALTER TABLE t_theme ADD COLUMN is_main_line TINYINT DEFAULT 0 COMMENT ''1=人工主线题材''',
+    'SELECT 0');
+PREPARE themes_stmt FROM @themes_ddl; EXECUTE themes_stmt; DEALLOCATE PREPARE themes_stmt;
 
 -- 龙头股表
 CREATE TABLE IF NOT EXISTS t_leading_stock (
@@ -1662,4 +1691,31 @@ CREATE TABLE IF NOT EXISTS t_stock_concept (
     INDEX idx_code (code),
     INDEX idx_concept (concept)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='股票-概念板块全局索引(D2题材聚合)';
+
+-- =====================================================================
+-- 2026-09-13 监管全生命周期轨迹：t_surveillance 只存事件(ann_date=公告日D0)，
+-- 监管期(SEVERE/EXCH=10交易日、ZD=5)由 SurveillanceKind 现推后落此表，
+-- 支撑 D5 高位生态"监管池→全生命周期热力表"(D+1→出监管)。幂等 CREATE，重复跑无害。
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS t_surveillance_daily (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    stock_code VARCHAR(6) NOT NULL COMMENT '6位股票代码',
+    stock_name VARCHAR(20) DEFAULT '' COMMENT '股票简称',
+    ann_date DATE NOT NULL COMMENT '监管公告日 D0',
+    kind VARCHAR(10) NOT NULL COMMENT 'SEVERE/EXCH/ZD',
+    trade_date DATE NOT NULL COMMENT '监管期内交易日',
+    day_offset INT NOT NULL COMMENT '相对公告日的交易日偏移: D0=0, D+1=1 ... D+N=N',
+    consecutive INT DEFAULT NULL COMMENT '当日连板数(进池日有值,非涨跌停日为NULL)',
+    change_pct DECIMAL(6,2) DEFAULT NULL COMMENT '当日涨跌幅%(腾讯日K补齐;停牌/缺失为NULL)',
+    pool VARCHAR(4) DEFAULT NULL COMMENT 'ZT涨停/DT跌停/ZB炸板,非进池日为NULL',
+    big_loss TINYINT DEFAULT NULL COMMENT '当日是否大面/核按钮(1=是)',
+    break_count INT DEFAULT NULL COMMENT '当日炸板次数',
+    seal_amount DECIMAL(18,2) DEFAULT NULL COMMENT '当日封单额',
+    suspended TINYINT NOT NULL DEFAULT 0 COMMENT '当日停牌(该票无日K,与公共交易日错位):1=停牌',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uk_code_ann_date (stock_code, ann_date, trade_date),
+    INDEX idx_kind_date (kind, trade_date),
+    INDEX idx_code_date (stock_code, trade_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='监管全生命周期每日轨迹(公开数据,监管窗口现算后落库)';
 

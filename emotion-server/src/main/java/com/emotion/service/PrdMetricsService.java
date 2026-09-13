@@ -314,7 +314,7 @@ public class PrdMetricsService {
             }
             r.maxBoard = mb;
             r.leader = lead;
-            r.persistenceDays = consecutiveDays(dailyIndustryZt, date, e.getKey());
+            r.persistenceDays = consecutiveTop5Days(dailyIndustryZt, date, e.getKey());
             r.isMainline = r.persistenceDays >= MAINLINE_CONFIRM_DAYS;
             r.flag = r.isMainline ? "MAIN" : (r.persistenceDays == 2 ? "WATCH" : "NEW");
             r.ztGatherPct = s.ztTotal == 0 ? 0 : round2(r.zt * 100.0 / s.ztTotal);
@@ -711,7 +711,7 @@ public class PrdMetricsService {
         return "萌芽";
     }
 
-    /** 三类轮动信号（PRD RotationEngine 的可推导子集）：老主线退潮 / 新题材种子 / 高低切。 */
+    /** 三类轮动信号（PRD RotationEngine 的可推导子集）：老主线退潮 / 新行业种子 / 高低切。 */
     static List<String> detectRotation(Snapshot s, List<MarketStock> prevZT, List<MarketStock> todayZT,
                                        List<MarketStock> prevZB) {
         List<String> out = new ArrayList<String>();
@@ -743,7 +743,7 @@ public class PrdMetricsService {
                 }
             }
             if (!seeds.isEmpty()) {
-                out.add("新题材种子：" + join(seeds));
+                out.add("新晋行业种子【昨日0家涨停 → 今日≥3家】：" + join(seeds) + "，括号内为今日涨停家数");
             }
         }
         // 3. 高低切：昨日最高板断板 + 今日首板家数放大
@@ -869,6 +869,83 @@ public class PrdMetricsService {
             cursor = cursor.minusDays(1);
         }
         return days;
+    }
+
+    /**
+     * 板块表「连续」口径：该行业当天涨停家数排进板块表前五、且连续保持，逐日 +1。
+     * 与 {@link #consecutiveDays}（≥阈值活跃日）不同——只按「进前五」算一天。
+     * 例：09-10 元件 2 家列第 2（前五内）→ 第 1 天；09-11 元件 9 家居首 → 第 2 天。
+     * <p>前五判定严格复现板块表显示顺序（涨停家数降序 → 连续天数降序 → 名称升序，取前 5 行），
+     * 并列涨停家数不全会算进前五（会被连板更高的行业挤出）。「连续天数」既是结果又参与排序——
+     * 故用定点迭代求解：以涨停家数为第一 key，次 key 用上一轮连续数，迭代至连续数收敛。
+     */
+    static int consecutiveTop5Days(Map<LocalDate, Map<String, Integer>> dailyIndustryZt,
+                                   LocalDate date, String industry) {
+        if (date == null || industry == null || dailyIndustryZt == null
+                || !dailyIndustryZt.containsKey(date)) {
+            return 0;
+        }
+        // 收集窗口内实际有涨停数据的日期（升序；缺日即断档，计入 break）
+        List<LocalDate> days = new ArrayList<LocalDate>();
+        LocalDate cursor = date;
+        for (int i = 0; i < PERSISTENCE_WINDOW; i++) {
+            if (!dailyIndustryZt.containsKey(cursor)) {
+                break;
+            }
+            days.add(cursor);
+            cursor = cursor.minusDays(1);
+        }
+        Collections.reverse(days);
+        // key = "date|industry"，value = 截至该日的连续前五天数
+        Map<String, Integer> streak = new HashMap<String, Integer>();
+        for (int iter = 0; iter < PERSISTENCE_WINDOW * 2 + 1; iter++) {
+            Map<String, Integer> next = new HashMap<String, Integer>();
+            Map<LocalDate, Set<String>> top5 = new HashMap<LocalDate, Set<String>>();
+            final Map<String, Integer> baseStreak = streak;
+            for (LocalDate d : days) {
+                Map<String, Integer> by = dailyIndustryZt.get(d);
+                List<String> inds = new ArrayList<String>(by.keySet());
+                Collections.sort(inds, (x, y) -> {
+                    int c = Integer.compare(by.get(y), by.get(x));
+                    if (c != 0) {
+                        return c;
+                    }
+                    String kx = d + "|" + x;
+                    String ky = d + "|" + y;
+                    int s = Integer.compare(streakD(baseStreak, ky), streakD(baseStreak, kx));
+                    if (s != 0) {
+                        return s;
+                    }
+                    return x.compareTo(y);
+                });
+                Set<String> set = new HashSet<String>();
+                for (int k = 0; k < inds.size() && k < 5; k++) {
+                    set.add(inds.get(k));
+                }
+                top5.put(d, set);
+            }
+            for (LocalDate d : days) {
+                for (String ind : dailyIndustryZt.get(d).keySet()) {
+                    int v = 0;
+                    LocalDate c = d;
+                    while (top5.containsKey(c) && top5.get(c).contains(ind)) {
+                        v++;
+                        c = c.minusDays(1);
+                    }
+                    next.put(d + "|" + ind, v);
+                }
+            }
+            if (next.equals(streak)) {
+                break;
+            }
+            streak = next;
+        }
+        return streak.getOrDefault(date + "|" + industry, 0);
+    }
+
+    private static int streakD(Map<String, Integer> streak, String key) {
+        Integer v = streak.get(key);
+        return v == null ? 0 : v;
     }
 
     private static MarketStock findByCode(List<MarketStock> rows, String code) {

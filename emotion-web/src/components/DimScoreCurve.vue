@@ -79,13 +79,55 @@ function buildOption() {
   if (!rows.length) return {}
   const dates = rows.map((r) => r.date)
   const range = axisRange(rows)
-  // 只画与可见纵轴重叠的带（自适应缩放后越界的带不铺，避免一大片无意义底色）
+  // 只画与可见纵轴重叠的带（自适应缩放后越界的带不铺，避免一大片无意义底色）。
+  // 带名不再标在图上：markArea 逐带 label 会被渲染成堆叠乱文（实测四带名字挤成一团），
+  // 带义由右上角图例 + 阈值虚线承担
   const bands = BANDS
     .filter((b) => b.max > range.min && b.min < range.max)
     .map((b) => [
       { name: b.label, yAxis: Math.max(b.min, range.min), itemStyle: { color: b.fill } },
       { yAxis: Math.min(b.max, range.max), itemStyle: { color: b.fill } }
     ])
+
+  // 阈值虚线只在可见范围内画（自适应缩放后 40/60/85 可能落在轴外，画了也看不见）；
+  // 颜色提亮一点（原 #2d3748 在深底上几乎隐形），不带文字标签
+  const THRESHOLDS = [
+    { v: 40 },
+    { v: 60 },
+    { v: 85 }
+  ]
+  const thrLines = THRESHOLDS
+    .filter((t) => t.v > range.min && t.v < range.max)
+    .map((t) => ({
+      yAxis: t.v,
+      label: { show: false },
+      lineStyle: { color: 'rgba(136, 153, 166, 0.5)', type: 'dashed', width: 1 }
+    }))
+
+  // 最新一条已评分的横线：一眼看出当前分落在哪；标签挂左端，不挤在右端
+  let latest = null
+  rows.forEach((r) => { if (r.score != null) latest = Number(r.score) })
+  const latestLine = latest != null
+    ? [{
+        yAxis: latest,
+        label: { formatter: `最新 ${latest.toFixed(1)}`, color: '#fbbf24', fontSize: 10, position: 'start' },
+        lineStyle: { color: '#fbbf24', width: 1.5, type: 'dashed' }
+      }]
+    : []
+
+  // 渐变按"分数越高越暖"铺：把 0/40/60/85/100 锚点映射到像素 offset
+  //（纵轴自适应，offset 写死会与真实分位错位；与仪表盘温度曲线同一套冷→暖语义）
+  const span = range.max - range.min || 1
+  const off = (v) => Math.max(0, Math.min(1, (range.max - v) / span))
+  const areaStops = [
+    { offset: off(100), color: 'rgba(245, 34, 45, 0.30)' },   // 顶部=高分 热红
+    { offset: off(85),  color: 'rgba(250, 173, 20, 0.18)' },  // 发酵 暖橙
+    { offset: off(60),  color: 'rgba(250, 173, 20, 0.10)' },  // 混沌上沿 淡橙
+    { offset: off(40),  color: 'rgba(148, 163, 184, 0.08)' }, // 混沌下沿 中性
+    { offset: off(0),   color: 'rgba(59, 130, 246, 0.03)' }   // 底部=低分 冷蓝
+  ]
+    .sort((a, b) => a.offset - b.offset)
+    .filter((s, i, arr) => i === 0 || Math.abs(s.offset - arr[i - 1].offset) > 0.001)
 
   return {
     tooltip: {
@@ -104,6 +146,10 @@ function buildOption() {
           const band = fiveDimBandOf(v)
           lines.push(`得分: <b>${v.toFixed(1)} / 100</b>`)
           if (band) lines.push(`带位: <b>${band}</b>`)
+          if (i > 0 && rows[i - 1]?.score != null) {
+            const d = +(v - Number(rows[i - 1].score)).toFixed(1)
+            lines.push(`日变化: <b style="color:${d >= 0 ? '#fbbf24' : '#60a5fa'}">${d >= 0 ? '+' : ''}${d}</b>`)
+          }
         }
         return lines.join('<br/>')
       }
@@ -135,27 +181,41 @@ function buildOption() {
           return {
             value: Number(r.score),
             itemStyle: selected
-              ? { color: '#fbbf24', borderColor: '#e1e8ed', borderWidth: 1 }
+              ? { color: '#fbbf24', borderColor: '#fff', borderWidth: 1.5 }
               : { color: '#fbbf24' },
-            symbolSize: selected ? 11 : 6
+            symbolSize: selected ? 14 : 9
           }
         }),
-        smooth: true,
+        smooth: 0.5,
         symbol: 'circle',
         showAllSymbol: true,
         connectNulls: false,
-        lineStyle: { width: 3, color: '#fbbf24' },
-        itemStyle: { color: '#fbbf24' },
+        lineStyle: { width: 2.6, color: '#fbbf24' },
+        emphasis: {
+          // hover 给金色描边，提示这些点可以点
+          itemStyle: { borderColor: '#fbbf24', borderWidth: 1.5 }
+        },
         areaStyle: {
           opacity: 1,
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(251, 191, 36, 0.25)' },
-            { offset: 1, color: 'rgba(251, 191, 36, 0.02)' }
-          ])
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, areaStops)
         },
         markArea: {
           silent: true,
           data: bands
+        },
+        markPoint: {
+          symbol: 'pin',
+          symbolSize: 40,
+          data: [
+            // 用金/蓝而非红/蓝：最高分常不到 85，标红会被误读成"高潮"
+            { type: 'max', itemStyle: { color: '#fbbf24' }, label: { formatter: '{c}', color: '#1a2332', fontSize: 9 } },
+            { type: 'min', itemStyle: { color: '#60a5fa' }, label: { formatter: '{c}', color: '#1a2332', fontSize: 9 } }
+          ]
+        },
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          data: [...thrLines, ...latestLine]
         }
       }
     ]

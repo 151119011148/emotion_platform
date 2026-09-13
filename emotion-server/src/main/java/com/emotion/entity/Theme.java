@@ -18,5 +18,7 @@ public class Theme {
     private Integer strength;
     /** 题材催化硬度1-5（5=政策/产业级，1=Pure情绪）；PRD D2·催化剂硬度取数源。 */
     private Integer catalystHardness;
+    /** 是否人工主线题材（题材表「设为主线」落 1）。 */
+    private Integer isMainLine;
     private LocalDateTime createdAt;
 }

@@ -155,35 +155,12 @@
         </div>
       </section>
 
-      <!-- 监管池 -->
-      <section class="block" v-if="vo.monitorPool?.length" v-loading="loading">
-        <div class="block-head"><h3>监管池 <span class="sub">SEVERE / EXCH，例行 ZD 不在此表</span></h3></div>
-        <el-table :data="vo.monitorPool" size="small" max-height="420">
-          <el-table-column prop="code" label="代码" width="90" />
-          <el-table-column prop="name" label="名称" width="110" />
-          <el-table-column prop="industry" label="板块" width="100" show-overflow-tooltip />
-          <el-table-column label="连板" width="70" align="center">
-            <template #default="{ row }">{{ row.consecutive == null ? '—' : row.consecutive + '板' }}</template>
-          </el-table-column>
-          <el-table-column label="类型" width="130">
-            <template #default="{ row }">
-              <el-tag :type="row.kind === 'EXCH' ? 'warning' : 'danger'" effect="plain" size="small">{{ kindLabel(row.kind) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="进入日" width="100">
-            <template #default="{ row }">{{ fmtDate(row.annDate) }}</template>
-          </el-table-column>
-          <el-table-column label="今日" width="110" align="right">
-            <template #default="{ row }">
-              <span :class="pctClass(row.chg)">{{ row.chg == null ? '—' : signed(row.chg) + '%' }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" min-width="140">
-            <template #default="{ row }">
-              <span :class="statusClass(row.status)">{{ row.status }}</span>
-            </template>
-          </el-table-column>
-        </el-table>
+      <!-- 监管池 · 全生命周期轨迹 -->
+      <section class="block">
+        <div class="block-head">
+          <h3>监管池 · 全生命周期 <span class="sub">D+1→出监管颜色编码轨迹；进监管次日最见监管无效/生效</span></h3>
+        </div>
+        <MonitorHeatmap :date="date" />
       </section>
 
       <!-- 交叉信号 -->
@@ -222,6 +199,7 @@ import { d5Api, recordApi } from '../api/modules'
 import { signed } from '../utils/scores'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
 import DimIntroTip from '../components/DimIntroTip.vue'
+import MonitorHeatmap from '../components/MonitorHeatmap.vue'
 
 const route = useRoute()
 

@@ -21,6 +21,12 @@ public class NodePrefillVO {
     private Integer limitDownCount;
     /** 今日涨停池 ≥2 板龙头，从高板到低按封单额排序，供新建框快速选锚定龙头。 */
     private List<Leader> leaders = new ArrayList<>();
+    /** 与 date 相邻的前一个交易日（T-1）；用于「昨日最高板」选项。 */
+    private LocalDate prevDate;
+    /** T-1 天梯最高板。 */
+    private Integer prevMaxBoard;
+    /** T-1 涨停池 ≥2 板龙头（从高板到低），选项只用其最高板一只，其余作为候选池。 */
+    private List<Leader> prevLeaders = new ArrayList<>();
 
     @Data
     public static class Leader {

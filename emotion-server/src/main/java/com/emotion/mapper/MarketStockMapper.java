@@ -51,4 +51,9 @@ public interface MarketStockMapper extends BaseMapper<MarketStock> {
     /** Latest trade_date strictly before date that has pool detail; serves as yesterday limit-up pool for day-over-day ladder matching. */
     @Select("SELECT DISTINCT trade_date FROM t_market_stock WHERE trade_date < #{date} ORDER BY trade_date DESC LIMIT 1")
     LocalDate prevDetailDate(@Param("date") LocalDate date);
+
+    /** [from,to] 区间内有盘面明细的交易日，升序；题材持续天数回看用它定窗口内每日是否有数据。 */
+    @Select("SELECT DISTINCT trade_date FROM t_market_stock "
+            + "WHERE trade_date <= #{to} AND trade_date >= #{from} ORDER BY trade_date")
+    List<LocalDate> listDetailDatesBetween(@Param("from") LocalDate from, @Param("to") LocalDate to);
 }

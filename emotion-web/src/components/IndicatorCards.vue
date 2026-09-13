@@ -66,10 +66,6 @@
           <div v-if="c.forcedEbb" class="card-forced">强制退潮</div>
         </div>
       </el-tooltip>
-      <!-- 维度卡扩展区：仪表盘按卡 key 注入（日内核心=五要素+轮动、连板生态=空间板） -->
-      <div class="card-extra">
-        <slot :name="c.key"></slot>
-      </div>
     </div>
   </div>
 </template>
@@ -264,11 +260,6 @@ const cards = computed(() => {
   font-size: 11px;
   color: #8899a6;
   text-align: left;
-}
-.card-extra {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed #2d3748;
 }
 .card-forced {
   position: absolute;

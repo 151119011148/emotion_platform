@@ -328,16 +328,31 @@ public class NodeService {
         LocalDate date = resolveDate(requested);
         NodePrefillVO vo = new NodePrefillVO();
         vo.setDate(date);
-        com.emotion.entity.MarketDaily day = date == null ? null
-                : marketDailyMapper.selectOne(new LambdaQueryWrapper<com.emotion.entity.MarketDaily>()
-                        .eq(com.emotion.entity.MarketDaily::getTradeDate, date).last("LIMIT 1"));
-        if (day != null) {
-            vo.setMaxBoard(day.getMaxConsecutiveLimit());
-            vo.setLimitUpCount(day.getLimitUpCount());
-            vo.setLimitDownCount(day.getLimitDownCount());
+        if (date != null) {
+            com.emotion.entity.MarketDaily day = marketDailyMapper.selectOne(new LambdaQueryWrapper<com.emotion.entity.MarketDaily>()
+                    .eq(com.emotion.entity.MarketDaily::getTradeDate, date).last("LIMIT 1"));
+            if (day != null) {
+                vo.setMaxBoard(day.getMaxConsecutiveLimit());
+                vo.setLimitUpCount(day.getLimitUpCount());
+                vo.setLimitDownCount(day.getLimitDownCount());
+            }
+            collectLeaders(date, vo.getLeaders());
         }
+        LocalDate prevDate = date == null ? null : resolveDate(date.minusDays(1));
+        vo.setPrevDate(prevDate);
+        if (prevDate != null) {
+            collectLeaders(prevDate, vo.getPrevLeaders());
+            if (!vo.getPrevLeaders().isEmpty()) {
+                vo.setPrevMaxBoard(vo.getPrevLeaders().get(0).getBoard());
+            }
+        }
+        return vo;
+    }
+
+    /** 取某交易日涨停池 ≥2 板龙头，按板高降序、同板按封单额降序，最多 20 只。 */
+    private void collectLeaders(LocalDate date, List<NodePrefillVO.Leader> out) {
         if (date == null) {
-            return vo;
+            return;
         }
         List<MarketStock> zt = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
                 .eq(MarketStock::getTradeDate, date)
@@ -361,7 +376,7 @@ public class NodeService {
             return -bySeal;
         });
         for (MarketStock row : ladders) {
-            if (vo.getLeaders().size() >= 20) {
+            if (out.size() >= 20) {
                 break;
             }
             NodePrefillVO.Leader ld = new NodePrefillVO.Leader();
@@ -369,9 +384,8 @@ public class NodeService {
             ld.setName(row.getName());
             ld.setIndustry(row.getIndustry());
             ld.setBoard(row.getConsecutive() == null ? 1 : row.getConsecutive());
-            vo.getLeaders().add(ld);
+            out.add(ld);
         }
-        return vo;
     }
 
     /** 有明细的最近交易日：优先给定日，无则往前走逐个找；thead 是空就给 null（返回空预填）。 */

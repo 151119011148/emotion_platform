@@ -1,11 +1,13 @@
 package com.emotion.controller;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
+import java.util.stream.Collectors;
 
 import com.emotion.dto.DailyRecordRequest;
 import com.emotion.entity.DailyRecord;
@@ -13,6 +15,7 @@ import com.emotion.entity.IndexClose;
 import com.emotion.entity.IndustrySnapshot;
 import com.emotion.entity.MarketDaily;
 import com.emotion.entity.ReviewFetch;
+import com.emotion.mapper.MarketStockMapper;
 import com.emotion.mapper.SurveillanceMapper;
 import com.emotion.market.SurveillanceKind;
 import com.emotion.market.SurveillanceNotice;
@@ -67,6 +70,7 @@ public class ReviewController {
     private final ReviewExportService reviewExportService;
     private final SurveillanceService surveillanceService;
     private final SurveillanceMapper surveillanceMapper;
+    private final MarketStockMapper marketStockMapper;
     private final ConceptIndexService conceptIndexService;
     private final TopicHeatService topicHeatService;
     private final TencentClient tencent;
@@ -82,6 +86,7 @@ public class ReviewController {
                             ReviewExportService reviewExportService,
                             SurveillanceService surveillanceService,
                             SurveillanceMapper surveillanceMapper,
+                            MarketStockMapper marketStockMapper,
                             ConceptIndexService conceptIndexService,
                             TopicHeatService topicHeatService,
                             TencentClient tencent,
@@ -96,11 +101,21 @@ public class ReviewController {
         this.reviewExportService = reviewExportService;
         this.surveillanceService = surveillanceService;
         this.surveillanceMapper = surveillanceMapper;
+        this.marketStockMapper = marketStockMapper;
         this.conceptIndexService = conceptIndexService;
         this.topicHeatService = topicHeatService;
         this.tencent = tencent;
         this.json = json;
         this.executor = executor;
+    }
+
+    @GetMapping("/trading-days")
+    public ApiResponse<List<String>> tradingDays(@RequestParam(defaultValue = "3") int months) {
+        LocalDate today = LocalDate.now(ZoneId.of("Asia/Shanghai"));
+        LocalDate from = today.minusMonths(months);
+        List<LocalDate> days = marketStockMapper.listDetailDatesBetween(from, today);
+        Collections.reverse(days); // 降序：最近交易日在前，前端默认取第一个
+        return ApiResponse.ok(days.stream().map(LocalDate::toString).collect(Collectors.toList()));
     }
 
     /** 一键拉取：T1-T8 编排 + SSE 流式进度。每个任务先发 running 再发终结状态。 */

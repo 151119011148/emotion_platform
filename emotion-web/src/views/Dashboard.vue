@@ -35,120 +35,46 @@
       <span class="load-error-hint">若这句提到 Unknown column，说明库还没跟上 schema.sql（含五维那一步迁移）。</span>
     </div>
 
-    <div class="main-grid">
-      <!-- 左列：五维生态卡（维度序 1..5：大盘/日内核心/连板/首板/高位） -->
-      <div class="left-col">
-        <IndicatorCards :record="headRecord">
-          <template #theme_main>
-            <div v-if="mainline && mainline.mainIndustry" class="card-meta">
-              <div class="meta-head">
-                <span class="meta-industry">{{ mainline.mainIndustry }}</span>
-                <el-tag v-if="mainline.lifecycleStage"
-                  :type="STAGE_TYPE[mainline.lifecycleStage] || 'info'" effect="dark" size="small">
-                  {{ mainline.lifecycleStage }}
-                </el-tag>
-                <el-tag :type="mainline.mainlineConfirmed ? 'success' : 'warning'" effect="plain" size="small">
-                  {{ mainline.mainlineConfirmed ? '已成主线' : `热度${mainline.persistenceDays ?? 0}/3日` }}
-                </el-tag>
-              </div>
-              <div class="meta-elems">
-                <div class="meta-elem">
-                  <span>涨停聚集</span>
-                  <b>{{ pctOrNA(mainline.ztGatherPct) }}</b>
-                </div>
-                <div class="meta-elem">
-                  <span>高度聚集</span>
-                  <b>{{ pctOrNA(mainline.heightGatherPct) }}</b>
-                </div>
-                <div class="meta-elem">
-                  <span>成交聚集</span>
-                  <b>{{ pctOrNA(mainline.amountGatherPct) }}</b>
-                </div>
-                <div class="meta-elem">
-                  <span>硬度</span>
-                  <b>{{ mainline.catalystHardness ?? '—' }}/5</b>
-                </div>
-                <div class="meta-elem">
-                  <span>持续</span>
-                  <b>{{ mainline.persistenceDays ?? '—' }}天</b>
-                </div>
-              </div>
-              <ul v-if="mainline.rotationSignals?.length" class="meta-rotation">
-                <li v-for="(s, i) in mainline.rotationSignals" :key="i">{{ s }}</li>
-              </ul>
-            </div>
-            <div v-else class="card-meta empty">当日无日内核心</div>
-          </template>
-
-          <template #board>
-            <div v-if="mainline && mainline.dragon" class="card-meta">
-              <div class="meta-space-line">
-                <el-tag type="danger" effect="dark" size="small">空间板</el-tag>
-                <span class="meta-name">{{ mainline.dragon.name }}</span>
-                <span class="meta-board">{{ mainline.dragon.board }} 板</span>
-                <span :class="pctClass(mainline.dragon.changePct)">
-                  {{ signed(mainline.dragon.changePct) }}%
-                </span>
-                <el-tag :type="ACTION_TYPE[mainline.dragon.action] || 'info'" effect="plain" size="small">
-                  {{ ACTION_LABEL[mainline.dragon.action] || mainline.dragon.action || '—' }}
-                </el-tag>
-              </div>
-              <router-link class="bar-link" to="/tianti">连板天梯 →</router-link>
-            </div>
-            <div v-else class="card-meta empty">当日无空间板</div>
-          </template>
-        </IndicatorCards>
+    <!-- 曲线：紧贴页头温度下方；点可以点——点了切到那天的仪表盘 -->
+    <div class="chart-section">
+      <div class="chart-controls">
+        <el-radio-group v-model="days" size="small" @change="loadCurve">
+          <el-radio-button :value="20">近20日</el-radio-button>
+          <el-radio-button :value="60">近60日</el-radio-button>
+        </el-radio-group>
+        <el-button v-if="selectedDate" size="small" link type="primary" @click="backToToday">
+          回到当日
+        </el-button>
       </div>
+      <TemperatureChart :data="curveData" :active-date="headRecord?.tradeDate" @select-date="onSelectDate" />
+    </div>
 
-      <!-- 右列：温度曲线 + 阶段定位 / 建议 -->
-      <div class="right-col">
-        <div class="chart-section">
-          <div class="chart-controls">
-            <el-radio-group v-model="days" size="small" @change="loadCurve">
-              <el-radio-button :value="20">近20日</el-radio-button>
-              <el-radio-button :value="60">近60日</el-radio-button>
-            </el-radio-group>
-          </div>
-          <TemperatureChart :data="curveData" />
-        </div>
-        <div class="bottom-row">
-          <StageLocator :stage="currentStage" :direction="headRecord?.stageDirection" :record="headRecord" />
-          <StageAdvice :advice="advice" :record="headRecord" />
-        </div>
-      </div>
+    <!-- 五维生态卡：曲线下方整排排布（维度序 1..5：大盘/日内核心/连板/首板/高位） -->
+    <IndicatorCards :record="headRecord" />
+
+    <div class="bottom-row">
+      <StageLocator :stage="currentStage" :direction="headRecord?.stageDirection" :record="headRecord" />
+      <StageAdvice :advice="advice" :record="headRecord" />
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
-import { recordApi, prdApi } from '../api/modules'
+import { ref, computed, onMounted } from 'vue'
+import { recordApi } from '../api/modules'
 import { useScoringStore } from '../stores/scoring'
 import { stageColorOf, seqOnly } from '../utils/stages'
-import { signed } from '../utils/scores'
 import TemperatureChart from '../components/TemperatureChart.vue'
 import IndicatorCards from '../components/IndicatorCards.vue'
 import StageLocator from '../components/StageLocator.vue'
 import StageAdvice from '../components/StageAdvice.vue'
 
-// PRD 2.0 日内核心/空间板展示常量
-const ACTION_LABEL = { PROMOTE: '晋级', HOLD: '在位', BREAK: '断板', ABSENT: '缺席' }
-const ACTION_TYPE = { PROMOTE: 'success', HOLD: 'primary', BREAK: 'danger', ABSENT: 'info' }
-const STAGE_TYPE = { 萌芽: 'info', 确认: 'primary', 扩散: 'warning', 亢奋: 'danger', 退潮: 'info' }
-
-function pctOrNA(v) {
-  return v == null ? '—' : Number(v).toFixed(1) + '%'
-}
-
-function pctClass(p) {
-  if (p == null || Number.isNaN(Number(p))) return ''
-  return Number(p) > 0 ? 'up' : Number(p) < 0 ? 'down' : ''
-}
-
 // 本地日期，不能用 toISOString()：那是 UTC，00:00–07:59 会算成前一天
 const todayStr = new Date().toLocaleDateString('en-CA')
 const days = ref(20)
 const headRecord = ref(null)
+/** 点击曲线点选中的日期；null=默认跟随当日（回落最近记录）。 */
+const selectedDate = ref(null)
 const curveData = ref({ dates: [], temperatures: [], stages: [] })
 const advice = ref(null)
 const loadError = ref('')
@@ -277,23 +203,28 @@ async function loadAdvice() {
   } catch (e) { /* ignore */ }
 }
 
-// PRD 2.0：日内核心五要素/轮动信号 + 空间板。头部记录落在哪天就看哪天；接口挂了静默降级整条隐藏
-const mainline = ref(null)
-async function loadMainline() {
-  const d = headRecord.value?.tradeDate
-  if (!d) {
-    mainline.value = null
-    return
-  }
+/** 点击曲线点：整页切到那天（页头温度、五维卡、阶段定位都跟着换）。 */
+async function loadByDate(date) {
+  loadError.value = ''
   try {
-    const res = await prdApi.mainline(d)
-    mainline.value = res?.data || null
+    const res = await recordApi.getByDate(date)
+    headRecord.value = res.data || null
   } catch (e) {
-    mainline.value = null
+    headRecord.value = null
+    loadError.value = e?.message || '该日记录读取失败'
   }
 }
 
-watch(() => headRecord.value?.tradeDate, loadMainline)
+function onSelectDate(date) {
+  if (!date || date === headRecord.value?.tradeDate) return
+  selectedDate.value = date
+  loadByDate(date).then(loadDay)
+}
+
+function backToToday() {
+  selectedDate.value = null
+  loadHead().then(loadDay)
+}
 
 onMounted(() => {
   scoring.load()
@@ -421,22 +352,17 @@ onMounted(() => {
   color: #fbbf24;
 }
 
-/* 左列五维卡 + 右列曲线/定位/建议 */
-.main-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
-  gap: 20px;
-  align-items: start;
-}
-.left-col :deep(.indicator-cards) {
-  grid-template-columns: 1fr;
-}
+/* 曲线卡：紧贴页头温度下方，整宽 */
 .chart-section {
   background: #1a2332;
   border-radius: 12px;
   padding: 20px;
+  margin-bottom: 20px;
 }
 .chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 12px;
 }
 .bottom-row {
@@ -447,97 +373,10 @@ onMounted(() => {
   margin-top: 20px;
 }
 
-/* ---- 维度卡扩展区（日内核心五要素/轮动、连板生态空间板） ---- */
-.card-meta {
-  font-size: 12px;
-}
-.card-meta.empty {
-  color: #6b7c8c;
-  font-style: italic;
-}
-.meta-head {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-.meta-industry {
-  font-size: 15px;
-  font-weight: 700;
-  color: #fbbf24;
-}
-.meta-elems {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 12px;
-}
-.meta-elem {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-  padding: 4px 8px;
-  background: #0f1419;
-  border-radius: 6px;
-}
-.meta-elem span {
-  color: #8899a6;
-  font-size: 11px;
-  white-space: nowrap;
-}
-.meta-elem b {
-  color: #e1e8ed;
-  font-weight: 700;
-  font-size: 13px;
-  white-space: nowrap;
-}
-.meta-rotation {
-  margin: 10px 0 0;
-  padding: 0;
-  list-style: none;
-}
-.meta-rotation li {
-  padding: 3px 0;
-  color: #cbd5e1;
-  border-bottom: 1px dashed #2d3748;
-  line-height: 1.5;
-}
-.meta-rotation li:last-child {
-  border-bottom: none;
-}
-.meta-space-line {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.meta-name {
-  font-size: 15px;
-  font-weight: 700;
-  color: #e1e8ed;
-}
-.meta-board {
-  color: #fbbf24;
-  font-weight: 700;
-}
-.bar-link {
-  font-size: 12px;
-  color: #3b82f6;
-  text-decoration: none;
-  white-space: nowrap;
-}
-.bar-link:hover {
-  text-decoration: underline;
-}
 .up { color: #ef4444; }
 .down { color: #3b82f6; }
 
 @media (max-width: 960px) {
-  .main-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .bottom-row {
     grid-template-columns: minmax(0, 1fr);
   }
