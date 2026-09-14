@@ -242,7 +242,10 @@ function renderChart() {
 
 const onResize = () => chart?.resize()
 
-watch(() => [props.rows, props.selected], renderChart, { deep: true })
+// 用 flush:'post'：props.rows 从空数组变成有数据的那一次，canvas 是"这一帧渲染才挂上的"，
+// 默认的 pre-flush 会在 DOM 更新前就跑到 → chartRef.value 还是 null，整条曲线永远不会 init。
+// post-flush 保证 ref 已绑上真实节点，echarts.init 才拿得到容器尺寸。
+watch(() => [props.rows, props.selected], renderChart, { deep: true, flush: 'post' })
 onMounted(() => {
   renderChart()
   window.addEventListener('resize', onResize)

@@ -132,7 +132,7 @@ const scoreOpen = ref(false)
 
 const metrics = computed(() => scoring.detail?.metrics || {})
 const marketDim = computed(() => (scoring.detail?.dims || []).find((d) => d.key === 'market') || null)
-// 强制退潮是全模型级信号（跌停≥10 / 阵眼核按钮 / 中位吹哨+大面 / 极高位爆量断板），直接镜像引擎，不在前端重算。
+// 强制退潮是全模型级信号（跌停≥20 / 阵眼核按钮 / 中位吹哨+大面 / 极高位爆量断板），直接镜像引擎，不在前端重算。
 const forcedEbb = computed(() => scoring.detail?.forcedEbb === true)
 const forcedEbbReason = computed(() => scoring.detail?.forcedEbbReason || '')
 

@@ -355,7 +355,7 @@ const metrics = computed(() => scoring.detail?.metrics || {})
 /** 闸门触发条件（人话，与引擎 BoardScoreCalculator 常量一致）。 */
 function gateCondition(key) {
   if (key === 'whistle') return '中位晋级率<15% 或 中位大面≥3家'
-  if (key === 'divergence') return '大盘分<40 或 强制退潮 或 跌停≥10家'
+  if (key === 'divergence') return '大盘分<40 或 强制退潮 或 跌停≥20家'
   if (key === 'dragon_misalign') return '总龙头行业 ≠ 日内核心行业'
   return '—'
 }
