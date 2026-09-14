@@ -54,7 +54,12 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(Arrays.asList("http://localhost:5173", "http://localhost:3000"));
+        // localhost 与 127.0.0.1 在 CORS 里是两个不同的 origin，必须都列上：dev 走 vite 代理时
+        // changeOrigin 只改写 Host、不改写 Origin，后端仍收到浏览器地址栏的 origin，
+        // 漏一个就会被 DefaultCorsProcessor 判为非法来源，直接返回 403 Invalid CORS request。
+        config.setAllowedOrigins(Arrays.asList(
+                "http://localhost:5173", "http://localhost:3000",
+                "http://127.0.0.1:5173", "http://127.0.0.1:3000"));
         config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(Arrays.asList("*"));
         config.setAllowCredentials(true);
