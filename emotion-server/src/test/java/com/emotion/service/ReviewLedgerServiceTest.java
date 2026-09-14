@@ -5,6 +5,7 @@ import com.emotion.dto.PredictionRequest;
 import com.emotion.entity.Prediction;
 import com.emotion.entity.Position;
 import com.emotion.entity.Stock;
+import com.emotion.mapper.MarketStockMapper;
 import com.emotion.mapper.StockMapper;
 import org.junit.jupiter.api.Test;
 
@@ -57,6 +58,19 @@ class ReviewLedgerServiceTest {
                     }
                     return defaultValue(method.getReturnType());
                 });
+    }
+
+    /**
+     * 行情明细表一律"那天没明细"：现价回填只在 readPositions 里发生，不在这个类的边界内。
+     * 台账测试要钉的是校验与落库，不是收盘价从哪来。
+     */
+    private static MarketStockMapper marketStockMapper() {
+        return (MarketStockMapper) Proxy.newProxyInstance(
+                MarketStockMapper.class.getClassLoader(),
+                new Class<?>[]{MarketStockMapper.class},
+                (proxy, method, args) -> "selectList".equals(method.getName())
+                        ? new ArrayList<>()
+                        : defaultValue(method.getReturnType()));
     }
 
     // ---- 持仓 ----
@@ -277,7 +291,7 @@ class ReviewLedgerServiceTest {
     // ---- fixture ----
 
     private static ReviewLedgerService service(RecordingPositionStore p, RecordingPredictionStore pr) {
-        return new ReviewLedgerService(p, pr, stockMapper());
+        return new ReviewLedgerService(p, pr, stockMapper(), marketStockMapper());
     }
 
     private static PositionRequest position(String code, String cost, String current, String floatPct,
@@ -331,7 +345,9 @@ class ReviewLedgerServiceTest {
         int calls;
 
         RecordingPositionStore() {
-            super(null);
+            // PositionStore 现在多要一个 t_position_history 的 mapper（整表替换前先快照）。
+            // 这里把 replaceForDate 整个 override 掉了，两个 mapper 都用不上，给 null 即可。
+            super(null, null);
         }
 
         @Override
