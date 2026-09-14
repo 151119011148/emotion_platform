@@ -869,13 +869,16 @@ public class PrdMetricsService {
         }
         int days = 0;
         LocalDate cursor = date;
-        for (int i = 0; i < PERSISTENCE_WINDOW; i++) {
+        LocalDate floor = date.minusDays(PERSISTENCE_WINDOW * 2L); // 上限扫描 60 日历日；周末/节假日无数据自动跳过不断档
+        while (cursor.isAfter(floor) && days < PERSISTENCE_WINDOW) {
             Map<String, Integer> byIndustry = dailyIndustryZt.get(cursor);
-            Integer n = byIndustry == null ? null : byIndustry.get(industry);
-            if (n == null || n < SEED_ZT_THRESHOLD) {
-                break;
+            if (byIndustry != null) { // 非交易日（周末/节假日）在 map 里缺失，跳过不断档
+                Integer n = byIndustry.get(industry);
+                if (n == null || n < SEED_ZT_THRESHOLD) {
+                    break;
+                }
+                days++;
             }
-            days++;
             cursor = cursor.minusDays(1);
         }
         return days;
@@ -895,14 +898,16 @@ public class PrdMetricsService {
                 || !dailyIndustryZt.containsKey(date)) {
             return 0;
         }
-        // 收集窗口内实际有涨停数据的日期（升序；缺日即断档，计入 break）
+        // 收集窗口内的「交易日」（从 date 往回，只取 map 中真实有涨停数据的日期）。周末/节假日缺失
+        // 自动跳过、不视为断档——元件 09-12/13 休市，09-14 的连续要能连上 09-11/10/09。
+        // 只有翻到下一交易日该行业不在前五（真正走弱/跳空）才 break。
         List<LocalDate> days = new ArrayList<LocalDate>();
         LocalDate cursor = date;
-        for (int i = 0; i < PERSISTENCE_WINDOW; i++) {
-            if (!dailyIndustryZt.containsKey(cursor)) {
-                break;
+        LocalDate floor = date.minusDays(PERSISTENCE_WINDOW * 2L); // 上限扫描 60 个日历日，留足假期余量
+        while (cursor.isAfter(floor) && days.size() < PERSISTENCE_WINDOW) {
+            if (dailyIndustryZt.containsKey(cursor)) {
+                days.add(cursor);
             }
-            days.add(cursor);
             cursor = cursor.minusDays(1);
         }
         Collections.reverse(days);
@@ -934,13 +939,15 @@ public class PrdMetricsService {
                 }
                 top5.put(d, set);
             }
-            for (LocalDate d : days) {
+            for (int di = 0; di < days.size(); di++) {
+                LocalDate d = days.get(di);
                 for (String ind : dailyIndustryZt.get(d).keySet()) {
                     int v = 0;
-                    LocalDate c = d;
-                    while (top5.containsKey(c) && top5.get(c).contains(ind)) {
+                    for (int j = di; j >= 0; j--) {
+                        if (!top5.get(days.get(j)).contains(ind)) { // days 全是交易日，跨周末的连续在 di..0 索引里天然连上
+                            break;
+                        }
                         v++;
-                        c = c.minusDays(1);
                     }
                     next.put(d + "|" + ind, v);
                 }

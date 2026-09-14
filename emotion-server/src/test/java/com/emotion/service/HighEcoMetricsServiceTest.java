@@ -120,8 +120,10 @@ class HighEcoMetricsServiceTest {
         assertEquals(1, HighEcoMetrics.handoverLevel(false, 0, false));
         assertEquals(0, HighEcoMetrics.handoverLevel(true, 0, false));
         assertTrue(HighEcoMetrics.forceMonitoredTopBreak(true, true));
-        assertTrue(HighEcoMetrics.forceDeath(1, 1));
-        assertFalse(HighEcoMetrics.forceDeath(1, 2));
+        // 死亡结构强制空仓：存活率闸门 ≥50%；低位存活时即使核按钮+唯一板也不强制
+        assertTrue(HighEcoMetrics.forceDeath(1, 1, 80));
+        assertFalse(HighEcoMetrics.forceDeath(1, 2, 80));
+        assertFalse(HighEcoMetrics.forceDeath(1, 1, 40));
     }
 
     @Test
@@ -245,11 +247,16 @@ class HighEcoMetricsServiceTest {
         MarketStock prevDragon = zt("600001", "金健米业", "农业", 5, 9.9, 0, 92500);
         MarketStock topToday = zt("600002", "新空间板", "元件", 5, 10.0, 0, 92500);
         MarketStock low = zt("600004", "跟风", "元件", 2, 10.0, 0, 92500);
+        // 高位存活的监管成员（在昨日涨停里、今日不再加仓到涨停池，避免撑高空间板家数 → topCount 仍=1）
+        MarketStock prevHigh = zt("600005", "高位存活", "元件", 5, 10.0, 0, 92500);
         List<MarketStock> todayZt = new ArrayList<>(Arrays.asList(topToday, low));
-        List<MarketStock> prevZt = new ArrayList<>(Arrays.asList(prevDragon));
+        List<MarketStock> prevZt = new ArrayList<>(Arrays.asList(prevDragon, prevHigh));
         List<MarketStock> todayDt = new ArrayList<>(Arrays.asList(ztDt("600003")));
         SurvivalMember severe = member("600003", "深中华", "元件", 2, SurveillanceKind.SEVERE,
                 D.minusDays(2), new BigDecimal("-9.96"));
+        // 留一个高位存活者，让 monitored 存活率 = 1/2 = 50%，够到 forceDeath 的存活率闸门
+        SurvivalMember highSurvivor = member("600005", "高位存活", "元件", 5, SurveillanceKind.EXCH,
+                D.minusDays(3), new BigDecimal("5.0"));
 
         PrdMetricsService.Snapshot snap = new PrdMetricsService.Snapshot();
         snap.mainIndustry = "元件";
@@ -259,7 +266,7 @@ class HighEcoMetricsServiceTest {
         HighEcoMetricsService svc = new HighEcoMetricsService(null, null);
         HighEcoMetricsService.Build b = svc.aggregate(D, 5, "元件",
                 todayZt, Collections.<MarketStock>emptyList(), todayDt, prevZt, todayZt,
-                null, Arrays.asList(dragon), Arrays.asList(severe), true, topToday);
+                null, Arrays.asList(dragon), Arrays.asList(severe, highSurvivor), true, topToday);
 
         HighEcoVO vo = b.getVo();
         // 三条守卫都命中

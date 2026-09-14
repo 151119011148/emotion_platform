@@ -463,6 +463,8 @@ public class HighEcoMetricsService {
         item.setRoleLabel(AnchorService.roleLabel(anchor.getRole()));
         item.setStartDate(anchor.getStartDate());
         item.setEndDate(anchor.getEndDate());
+        item.setCycleTag(anchor.getCycleTag());
+        item.setNote(anchor.getNote());
         item.setActiveDays(activeDays(anchor, date, tradingDays));
         item.setConsecutive(board);
         MarketStock row = poolRow(zt, zb, dt);
@@ -954,8 +956,8 @@ public class HighEcoMetricsService {
         if (HighEcoMetrics.forceMonitoredTopBreak(topMonitored, topBrokeOrNuke)) {
             metrics.put(M_FORCE_TOP_BREAK, BigDecimal.ONE);
         }
-        // ② 核按钮 + 空间板唯一
-        if (HighEcoMetrics.forceDeath(p.nuke, topCount)) {
+        // ② 核按钮 + 空间板唯一 + 高位存活率≥50（与 deathStructure 信号同门）
+        if (HighEcoMetrics.forceDeath(p.nuke, topCount, p.highSurvPct)) {
             metrics.put(M_FORCE_DEATH, BigDecimal.ONE);
         }
     }

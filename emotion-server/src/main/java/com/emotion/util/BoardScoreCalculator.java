@@ -75,9 +75,9 @@ public final class BoardScoreCalculator {
     /** 全局跌停外溢扣分（作用在大面结构合成分上）：≥20 扣 35 / ≥10 扣 20 / ≥5 扣 8。 */
     public static final int[] BIG_SPILLOVER_DOWN_TIERS = {20, 10, 5};
     public static final int[] BIG_SPILLOVER_DOWN_DEDUCT = {35, 20, 8};
-    /** 维分闸门·大盘背离：大盘维分&lt;40 或强制退潮或跌停≥10 → 连板维 ×0.85。 */
+    /** 维分闸门·大盘背离：大盘维分&lt;40 或强制退潮或跌停≥20 → 连板维 ×0.85。 */
     public static final BigDecimal GATE_DIVERGENCE_MARKET_SCORE = new BigDecimal("40");
-    public static final int GATE_DIVERGENCE_LIMIT_DOWN = 10;
+    public static final int GATE_DIVERGENCE_LIMIT_DOWN = 20;
     public static final BigDecimal GATE_DIVERGENCE_MULT = new BigDecimal("0.85");
     // 注：龙头错位（dragon_misalign）自 2026-09-12 起不再乘 D3 维分，只保留 SIG_ANCHOR_MISMATCH 信号；
     // D2 日内核心维的 ×0.9 维持不变（DRAGON_MISALIGN_MULTIPLIER）。

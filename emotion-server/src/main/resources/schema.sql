@@ -1182,7 +1182,7 @@ INSERT IGNORE INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator
     (@fid2,'board','promo',2,'GUARD',NULL,NULL,NULL,'空间未打开:H<5(无高位层,5板+)→晋级结构×0.8',''),
     (@fid2,'board','premium',1,'GUARD',NULL,NULL,NULL,'大盘背离:大盘分<40 或 红盘率<20%→溢价结构×0.8',''),
     (@fid2,'board','bigloss',1,'GUARD',NULL,NULL,NULL,'全局跌停外溢:跌停≥20/≥10/≥5 → 大面结构-35/-20/-8',''),
-    (@fid2,'board','-',0,'GUARD',NULL,NULL,NULL,'维分闸门:中位吹哨×0.8;大盘背离(大盘分<40/强制退潮/跌停≥10)×0.85。龙头错位2026-09-12起只输出信号不再扣分(扣分归D5阵眼一致性)','引擎统一施加,见连板生态打分表尾');
+    (@fid2,'board','-',0,'GUARD',NULL,NULL,NULL,'维分闸门:中位吹哨×0.8;大盘背离(大盘分<40/强制退潮/跌停≥20)×0.85。龙头错位2026-09-12起只输出信号不再扣分(扣分归D5阵眼一致性)','引擎统一施加,见连板生态打分表尾');
 -- D4 纯 T 日阶梯（2026-09-12 时间截面重构）：旧 first_premium/promo_1to2/big_1to2 随子项删除，规则在迁移段 DELETE
 INSERT IGNORE INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator, threshold_low, threshold_high, score, formula, note) VALUES
     (@fid2,'first','first_count',1,'GTE',60,NULL,95,'首板家数 >=60',''),(@fid2,'first','first_count',2,'GTE',40,NULL,80,'>=40',''),(@fid2,'first','first_count',3,'GTE',25,NULL,65,'25~39(大盘背离日×0.85)',''),(@fid2,'first','first_count',4,'GTE',15,NULL,50,'15~24',''),(@fid2,'first','first_count',5,'GTE',8,NULL,35,'8~14',''),(@fid2,'first','first_count',6,'ELSE',NULL,NULL,20,'<8',''),
@@ -1192,7 +1192,7 @@ INSERT IGNORE INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator
     (@fid2,'first','first_yizi',1,'GTE',30,NULL,95,'一字首板占比 >=30%',''),(@fid2,'first','first_yizi',2,'GTE',20,NULL,80,'>=20%',''),(@fid2,'first','first_yizi',3,'GTE',10,NULL,60,'>=10%',''),(@fid2,'first','first_yizi',4,'GTE',5,NULL,40,'>=5%',''),(@fid2,'first','first_yizi',5,'ELSE',NULL,NULL,20,'<5%',''),
     (@fid2,'first','first_theme',1,'GTE',40,NULL,95,'首板题材聚集度 >=40%','最热行业首板占比'),(@fid2,'first','first_theme',2,'GTE',30,NULL,82,'>=30%',''),(@fid2,'first','first_theme',3,'GTE',20,NULL,68,'>=20%',''),(@fid2,'first','first_theme',4,'GTE',10,NULL,48,'>=10%',''),(@fid2,'first','first_theme',5,'ELSE',NULL,NULL,28,'<10%',''),
     (@fid2,'first','first_seal_quality',0,'AGG',NULL,NULL,NULL,'0.6×首板均封单分 + 0.4×一字首板占比分',''),
-    (@fid2,'first','-',1,'GUARD',NULL,NULL,NULL,'大盘背离(大盘分<40/强制退潮/跌停≥10):首板数量×0.85、首板封板率-10','引擎applyFirstCalibration');
+    (@fid2,'first','-',1,'GUARD',NULL,NULL,NULL,'大盘背离(大盘分<40/强制退潮/跌停≥20):首板数量×0.85、首板封板率-10','引擎applyFirstCalibration');
 -- D5 高位生态：8 个 BAND_LADDER 叶的阶梯 + STRATEGY 反馈五态 COMPOUND 展示行（真算法在 Java）。
 INSERT IGNORE INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator, threshold_low, threshold_high, score, formula, note) VALUES
     (@fid2,'high','d5c_ratio',1,'BETWEEN',20,40,100,'高位家数占比 20%~40% 健康','分母=连板(≥2板)家数'),
@@ -1494,7 +1494,7 @@ VALUES
   (@fid2,'board','promo',2,'GUARD',NULL,NULL,NULL,'空间未打开:H<5(无高位层,5板+)→晋级结构×0.8',''),
   (@fid2,'board','premium',1,'GUARD',NULL,NULL,NULL,'大盘背离:大盘分<40 或 红盘率<20%→溢价结构×0.8',''),
   (@fid2,'board','bigloss',1,'GUARD',NULL,NULL,NULL,'全局跌停外溢:跌停≥20/≥10/≥5 → 大面结构-35/-20/-8',''),
-  (@fid2,'board','-',0,'GUARD',NULL,NULL,NULL,'维分闸门:中位吹哨(晋级<15%或中位大面≥3)×0.8;大盘背离(大盘分<40/强制退潮/跌停≥10)×0.85。龙头错位2026-09-12起只输出信号不再扣分(扣分归D5阵眼一致性)','引擎统一施加,见连板生态打分表尾');
+  (@fid2,'board','-',0,'GUARD',NULL,NULL,NULL,'维分闸门:中位吹哨(晋级<15%或中位大面≥3)×0.8;大盘背离(大盘分<40/强制退潮/跌停≥20)×0.85。龙头错位2026-09-12起只输出信号不再扣分(扣分归D5阵眼一致性)','引擎统一施加,见连板生态打分表尾');
 
 -- 4.0.2) 2026-09-13 连板维三层简化 v2.2（存量库，可重复执行）：
 -- 数量高度 10/晋级30/溢价25/大面20/炸板15（和=1.00）；四层→三层(低=2/中=3-4/高=5板+，高对齐 D5)；
@@ -1625,7 +1625,7 @@ VALUES
   (@fid2,'first','first_theme',4,'GTE',10,NULL,48,'>=10%',''),
   (@fid2,'first','first_theme',5,'ELSE',NULL,NULL,28,'<10%',''),
   (@fid2,'first','first_seal_quality',0,'AGG',NULL,NULL,NULL,'0.6×首板均封单分 + 0.4×一字首板占比分',''),
-  (@fid2,'first','-',1,'GUARD',NULL,NULL,NULL,'大盘背离(大盘分<40/强制退潮/跌停≥10):首板数量×0.85、首板封板率-10','引擎applyFirstCalibration');
+  (@fid2,'first','-',1,'GUARD',NULL,NULL,NULL,'大盘背离(大盘分<40/强制退潮/跌停≥20):首板数量×0.85、首板封板率-10','引擎applyFirstCalibration');
 
 -- ============ 存量库迁移(2026-09-12 D5 高位生态融合 v3)：可重复执行 ============
 -- 背景：PRD D5 把原"阵眼(龙头分工,15%)"与"抱团+监管"融合成"高位生态(25%)"，
@@ -1752,7 +1752,7 @@ INSERT INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator, thres
 
 -- 6) D3 龙头错位闸门下线（只保留信号输出）：GUARD 行文案收敛。
 UPDATE t_scoring_rule
-   SET formula='维分闸门:中位吹哨×0.8;大盘背离(大盘分<40/强制退潮/跌停≥10)×0.85。龙头错位2026-09-12起只输出信号不再扣分(扣分归D5阵眼一致性)'
+   SET formula='维分闸门:中位吹哨×0.8;大盘背离(大盘分<40/强制退潮/跌停≥20)×0.85。龙头错位2026-09-12起只输出信号不再扣分(扣分归D5阵眼一致性)'
  WHERE model_id=@fid2 AND dim_key='board' AND sub_key='-' AND rule_no=0;
 
 -- 重放完成后历史按新口径重算：POST /api/records/recalc-all（旧 score_anchor 列冻结留痕）。

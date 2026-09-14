@@ -341,6 +341,36 @@ class PrdMetricsServiceTest {
                 "11号电力1家跌出前五，当天不在前五归0");
     }
 
+    /** 周末缺口不断档：元件 09-14(周一) 连上 09-11/10/09 = 连续 4 天；只有真正跳空的交易日(09-08不在前五)才断。 */
+    @Test
+    void consecutiveTop5Days_skipsWeekendGap() {
+        LocalDate mon = D.plusDays(3); // 09-14 周一；D=09-11 周五，09-12/13 休市缺数据
+        Map<LocalDate, Map<String, Integer>> h = new HashMap<>();
+        Map<String, Integer> d0808 = new HashMap<>(); // 09-08 元件弱，不在前五
+        d0808.put("农化制品", 8); d0808.put("农产品加", 4); d0808.put("出版", 4);
+        d0808.put("一般零售", 3); d0808.put("化学制品", 3);
+        Map<String, Integer> d0909 = new HashMap<>();
+        d0909.put("农产品加", 4); d0909.put("一般零售", 3); d0909.put("电网设备", 3);
+        d0909.put("航运港口", 3); d0909.put("元件", 2);
+        Map<String, Integer> d0910 = new HashMap<>();
+        d0910.put("电力", 5); d0910.put("元件", 2); d0910.put("多元金融", 2);
+        d0910.put("燃气Ⅱ", 2); d0910.put("玻璃玻纤", 2);
+        Map<String, Integer> d0911 = new HashMap<>();
+        d0911.put("元件", 9); d0911.put("电力", 4); d0911.put("地面兵装", 3);
+        d0911.put("通信设备", 3); d0911.put("汽车零部", 2);
+        Map<String, Integer> d0914 = new HashMap<>();
+        d0914.put("元件", 6); d0914.put("化学制品", 3); d0914.put("汽车零部", 3);
+        d0914.put("电力", 3); d0914.put("电网设备", 3);
+        h.put(mon.minusDays(6), d0808); h.put(mon.minusDays(5), d0909);
+        h.put(mon.minusDays(4), d0910); h.put(mon.minusDays(3), d0911);
+        h.put(mon, d0914); // 09-12/13 缺失（周末）
+
+        assertEquals(4, PrdMetricsService.consecutiveTop5Days(h, mon, "元件"),
+                "09-09/10/11/14 连续4个交易日进前五（周末缺数据不算断档）");
+        assertEquals(3, PrdMetricsService.consecutiveTop5Days(h, mon, "电力"),
+                "09-10/11/14 进前五，09-09不在前五 → 3 天");
+    }
+
     /** 雷达区每行带题材关联：行业名匹配到 t_theme 则附题材名，未登记=null。 */
     @Test
     void aggregate_radar_carriesThemeAssociation() {

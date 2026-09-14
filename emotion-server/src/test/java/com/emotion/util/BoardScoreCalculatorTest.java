@@ -389,7 +389,7 @@ class BoardScoreCalculatorTest {
         assertEquals(2, sealQuality.getChildren().size());
     }
 
-    /** 大盘背离（跌停≥10）时：首板数量 ×0.85、封板率 −10，维分按修正子项重算。 */
+    /** 大盘背离（跌停≥20）时：首板数量 ×0.85、封板率 −10，维分按修正子项重算。 */
     @Test
     void firstCalibration_divergenceDiscountsCountAndSealedRate() {
         Map<String, BigDecimal> metrics = new TreeMap<>();

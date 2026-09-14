@@ -428,9 +428,10 @@ public final class HighEcoMetrics {
         return topMonitored && topBrokeOrNuke;
     }
 
-    /** 监管股核按钮≥1 且空间板唯一 → 死亡结构强制空仓。 */
-    public static boolean forceDeath(int nuke, int topCount) {
-        return nuke >= 1 && topCount == 1;
+    /** 监管股核按钮≥1 且空间板唯一 且 高位存活率≥50% → 死亡结构强制空仓（存活率闸门与
+     *  {@link #deathStructure} 条件信号对齐，避免单核按钮+唯一板就把整页归零）。 */
+    public static boolean forceDeath(int nuke, int topCount, double highSurvPct) {
+        return nuke >= 1 && topCount == 1 && highSurvPct >= 50;
     }
 
     // ---------------- 加权小工具 ----------------
