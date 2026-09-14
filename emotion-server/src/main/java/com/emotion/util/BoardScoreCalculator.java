@@ -89,7 +89,7 @@ public final class BoardScoreCalculator {
     public static final int FIRST_DIVERGENCE_SEALED_DEDUCT = 10;
 
     // 强制退潮阈值
-    public static final int FORCED_EBB_LIMIT_DOWN = 10;    // 1. 跌停家数 >= 10
+    public static final int FORCED_EBB_LIMIT_DOWN = 20;    // 1. 跌停家数 >= 20
     public static final int FORCED_EBB_JR_MID_PCT = 10;    // 3. 中位晋级率 < 10%
     public static final int FORCED_EBB_BIG_MID = 5;         // 3. 且中位大面 >= 5 家
     public static final int FORCED_EBB_MAX_HEIGHT = 7;      // 4. H >= 7

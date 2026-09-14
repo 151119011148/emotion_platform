@@ -68,6 +68,9 @@
         <h3>五维评分</h3>
         <span class="header-spacer"></span>
         <ScoreChip :score="score.total" label="总分" />
+        <el-button type="primary" :loading="saving" :disabled="!form.tradeDate" @click="handleSave">
+          💾 保存复盘
+        </el-button>
       </div>
       <template v-if="score.available">
         <div class="five-strip">

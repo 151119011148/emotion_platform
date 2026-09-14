@@ -5,6 +5,7 @@ import com.emotion.dto.PredictionRequest;
 import com.emotion.entity.Prediction;
 import com.emotion.entity.Position;
 import com.emotion.entity.Stock;
+import com.emotion.mapper.MarketStockMapper;
 import com.emotion.mapper.StockMapper;
 import org.junit.jupiter.api.Test;
 
@@ -54,6 +55,19 @@ class ReviewLedgerServiceTest {
                             out.add(s);
                         }
                         return out;
+                    }
+                    return defaultValue(method.getReturnType());
+                });
+    }
+
+    /** 行情表 mapper：测试只走 savePositions/savePredictions，不触发填充现价，缺省空实现即可。 */
+    private static MarketStockMapper marketStockMapper() {
+        return (MarketStockMapper) Proxy.newProxyInstance(
+                MarketStockMapper.class.getClassLoader(),
+                new Class<?>[]{MarketStockMapper.class},
+                (proxy, method, args) -> {
+                    if ("selectList".equals(method.getName())) {
+                        return new ArrayList<>();
                     }
                     return defaultValue(method.getReturnType());
                 });
@@ -277,7 +291,7 @@ class ReviewLedgerServiceTest {
     // ---- fixture ----
 
     private static ReviewLedgerService service(RecordingPositionStore p, RecordingPredictionStore pr) {
-        return new ReviewLedgerService(p, pr, stockMapper());
+        return new ReviewLedgerService(p, pr, stockMapper(), marketStockMapper());
     }
 
     private static PositionRequest position(String code, String cost, String current, String floatPct,
@@ -331,7 +345,7 @@ class ReviewLedgerServiceTest {
         int calls;
 
         RecordingPositionStore() {
-            super(null);
+            super(null, null);
         }
 
         @Override

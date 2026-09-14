@@ -75,18 +75,18 @@ class DailyRecordServiceFiveDimTest {
         assertNull(record.getScoreHigh());
     }
 
-    /** 强制退潮:跌停 >=10 触发,无视 total 落 "退潮(强制)" + forced_ebb=1 + 原因. */
+    /** 强制退潮:跌停 >=20 触发,无视 total 落 "退潮(强制)" + forced_ebb=1 + 原因. */
     @Test
-    void applyFiveDimScoreMarksForcedEbbWhenLimitDownCrossesTen() {
+    void applyFiveDimScoreMarksForcedEbbWhenLimitDownCrossesTwenty() {
         DailyRecord record = newRecord();
         ScoreInputs in = ScoreInputs.empty();
         Map<String, BigDecimal> metrics = allDimMetrics();
-        metrics.put("limit_down_count", new BigDecimal("15"));
+        metrics.put("limit_down_count", new BigDecimal("20"));
         in.setMetrics(metrics);
 
         DailyRecordService.applyFiveDimScore(record, in);
 
-        assertEquals(1, record.getForcedEbb().intValue(), "跌停>=10 应触发强制退潮");
+        assertEquals(1, record.getForcedEbb().intValue(), "跌停>=20 应触发强制退潮");
         assertEquals("退潮(强制)", record.getStage(), "stage 应穿透为 退潮(强制)");
         assertNotNull(record.getForcedEbbReason(), "reason 必填,便于复盘界面显示");
     }
