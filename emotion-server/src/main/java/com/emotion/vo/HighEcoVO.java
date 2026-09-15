@@ -66,6 +66,10 @@ public class HighEcoVO {
         private String roleLabel;
         private LocalDate startDate;
         private LocalDate endDate;
+        /** 同轮归组标签（如 2026-08），仅作展示与编辑回填。 */
+        private String cycleTag;
+        /** 人工备注，仅作展示与编辑回填。 */
+        private String note;
         /** 生效第几个交易日（按池明细日期计，无明细时按自然日）。 */
         private Integer activeDays;
         /** 今日连板（断板日取昨板，便于看它从多高掉下来）。 */

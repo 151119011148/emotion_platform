@@ -181,7 +181,9 @@ export const reviewApi = {
  */
 export const anchorsApi = {
   config: (date) => api.get('/anchors/config', { params: { date }, skipErrorToast: true }),
-  add: (data) => api.post('/anchors', data)
+  add: (data) => api.post('/anchors', data),
+  update: (id, data) => api.put(`/anchors/${id}`, data),
+  remove: (id) => api.delete(`/anchors/${id}`)
 }
 
 /**

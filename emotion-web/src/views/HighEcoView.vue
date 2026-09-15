@@ -41,10 +41,13 @@
       <section class="block" v-loading="loading">
         <div class="block-head">
           <h3>① 阵眼个体 <span class="sub">点 · 人工配置 · 权重 35%</span></h3>
-          <span v-if="vo.anchor?.score != null" class="sub-score">得分 {{ vo.anchor.score }}</span>
+          <div class="head-right">
+            <span v-if="vo.anchor?.score != null" class="sub-score">得分 {{ vo.anchor.score }}</span>
+            <el-button type="primary" size="small" @click="openAnchorAdd">+ 新增阵眼</el-button>
+          </div>
         </div>
         <el-alert v-if="!vo.anchor?.configured" type="info" :closable="false" show-icon
-          title="当日无在位人工阵眼（本子项未评，登记入口已下线，可用 /api/anchors 接口登记后可计入）" style="margin-bottom: 12px" />
+          title="当日无在位人工阵眼（本子项未评），点右上「新增阵眼」登记本位后即可计入" style="margin-bottom: 12px" />
         <div v-for="a in vo.anchor?.items || []" :key="a.id" class="anchor-card">
           <div class="anchor-line">
             <el-tag type="danger" effect="dark" size="small">{{ a.roleLabel || '阵眼' }}</el-tag>
@@ -75,6 +78,10 @@
             <span class="score-total">40/25/20/15 → {{ a.score == null ? '未评' : a.score }}</span>
           </div>
           <p v-if="a.consistWarn" class="anchor-warn">⚠️ {{ a.consistWarn }}（一致性 60）</p>
+          <div class="anchor-ops">
+            <el-button link type="primary" size="small" @click="openAnchorEdit(a)">编辑</el-button>
+            <el-button link type="danger" size="small" @click="removeAnchor(a)">删除</el-button>
+          </div>
         </div>
       </section>
 
@@ -189,13 +196,53 @@
         </div>
       </section>
     </template>
+
+    <!-- 阵眼 新增 / 编辑 弹框 -->
+    <el-dialog v-model="anchorDialog" :title="editingId ? '编辑阵眼' : '新增阵眼'" width="520px" append-to-body>
+      <el-form label-width="88px" @submit.prevent>
+        <el-form-item label="股票" required>
+          <el-select v-model="anchorForm.stockCode" filterable remote clearable class="w-full"
+            :remote-method="searchAnchorStock" :loading="stockLoading" placeholder="输代码或名称搜索"
+            @change="pickAnchorStock" @clear="anchorForm.stockName = ''">
+            <el-option v-for="s in stockResults" :key="s.code" :value="s.code" :label="(s.code + ' ' + (s.name || ''))" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="名称">
+          <el-input :model-value="anchorForm.stockName" disabled placeholder="选股后自动回填" />
+        </el-form-item>
+        <el-form-item label="角色" required>
+          <el-select v-model="anchorForm.role" class="w-full">
+            <el-option v-for="r in ANCHOR_ROLE_OPTIONS" :key="r.value" :value="r.value" :label="r.label" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="周期标签">
+          <el-input v-model="anchorForm.cycleTag" placeholder="如 2026-08（仅供分组展示，可不填）" />
+        </el-form-item>
+        <el-form-item label="跨度起点" required>
+          <el-date-picker v-model="anchorForm.startDate" type="date" value-format="YYYY-MM-DD"
+            :disabled-date="notBeforeToday" placeholder="这轮周期从哪天起爆" class="w-full" />
+        </el-form-item>
+        <el-form-item label="跨度终点">
+          <el-date-picker v-model="anchorForm.endDate" type="date" value-format="YYYY-MM-DD"
+            :disabled-date="notBeforeToday" placeholder="留空 = 仍在位" class="w-full" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="anchorForm.note" type="textarea" :rows="2" placeholder="选填：为何把它锚作阵眼" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="anchorDialog = false">取消</el-button>
+        <el-button type="primary" :loading="anchorSaving" @click="submitAnchor">{{ editingId ? '保存修改' : '登记' }}</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { d5Api, recordApi } from '../api/modules'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { d5Api, recordApi, anchorsApi, reviewApi } from '../api/modules'
 import { signed } from '../utils/scores'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
 import DimIntroTip from '../components/DimIntroTip.vue'
@@ -281,10 +328,12 @@ async function load() {
     const res = await d5Api.high(date.value)
     vo.value = res?.data || null
     // 曲线与异动监管页同一取数口：range 返回按日升序，切出最近一段直接喂图
+    // 现行 D5 是融合版，score_high 从 9/10 才开始落值；9/10 前回退旧版 score_anchor，
+    // 否则曲线在融合边界前整段空白。
     const rangeRes = await recordApi.getRange(shiftDays(date.value, LOOKBACK_DAYS), date.value).catch(() => null)
     curveRows.value = ((rangeRes && rangeRes.data) || []).slice(-CURVE_ROWS).map((r) => ({
       date: r.tradeDate,
-      score: r.scoreHigh
+      score: r.scoreHigh ?? r.scoreAnchor
     }))
   } finally {
     loading.value = false
@@ -305,6 +354,92 @@ onMounted(async () => {
 })
 
 watch(date, load)
+
+// ---------------- 阵眼个体 增删改查 ----------------
+const ANCHOR_ROLE_OPTIONS = [
+  { value: 'ZONG', label: '总龙头' },
+  { value: 'FENZHI', label: '分支龙' },
+  { value: 'BUZHANG', label: '补涨龙' },
+  { value: 'FANBAO', label: '反包龙' },
+  { value: 'CYCLE', label: '周期阵眼' },
+  { value: 'LEADER', label: '周期总龙' }
+]
+
+const anchorDialog = ref(false)
+const anchorSaving = ref(false)
+const editingId = ref(null)
+const anchorForm = ref({ stockCode: '', stockName: '', role: 'ZONG', cycleTag: '', startDate: '', endDate: '', note: '' })
+const stockResults = ref([])
+const stockLoading = ref(false)
+
+function openAnchorAdd() {
+  editingId.value = null
+  stockResults.value = []
+  anchorForm.value = { stockCode: '', stockName: '', role: 'ZONG', cycleTag: '', startDate: '', endDate: '', note: '' }
+  anchorDialog.value = true
+}
+function openAnchorEdit(a) {
+  editingId.value = a.id
+  stockResults.value = a.code ? [{ code: a.code, name: a.name }] : []
+  anchorForm.value = {
+    stockCode: a.code,
+    stockName: a.name,
+    role: a.role || 'ZONG',
+    cycleTag: a.cycleTag || '',
+    startDate: a.startDate || '',
+    endDate: a.endDate || '',
+    note: a.note || ''
+  }
+  anchorDialog.value = true
+}
+async function searchAnchorStock(q) {
+  if (!q || !q.trim()) { stockResults.value = []; return }
+  stockLoading.value = true
+  try {
+    const d = await reviewApi.searchStocks(q.trim())
+    stockResults.value = (Array.isArray(d) ? d : (d?.data || [])).slice(0, 12)
+  } catch (e) { stockResults.value = [] } finally { stockLoading.value = false }
+}
+function pickAnchorStock(code) {
+  const hit = stockResults.value.find((s) => s.code === code)
+  anchorForm.value.stockName = hit ? hit.name : ''
+}
+async function submitAnchor() {
+  const f = anchorForm.value
+  if (!f.stockCode) { ElMessage.warning('请选择股票'); return }
+  if (!f.startDate) { ElMessage.warning('请选择跨度起点'); return }
+  if (f.endDate && f.endDate < f.startDate) { ElMessage.warning('终点不能早于起点'); return }
+  anchorSaving.value = true
+  try {
+    const payload = {
+      stockCode: f.stockCode,
+      role: f.role,
+      cycleTag: f.cycleTag || undefined,
+      startDate: f.startDate,
+      endDate: f.endDate || undefined,
+      note: f.note || undefined
+    }
+    if (editingId.value) {
+      await anchorsApi.update(editingId.value, payload)
+      ElMessage.success('阵眼已更新')
+    } else {
+      await anchorsApi.add(payload)
+      ElMessage.success('阵眼已登记')
+    }
+    anchorDialog.value = false
+    load()
+  } finally { anchorSaving.value = false }
+}
+async function removeAnchor(a) {
+  try {
+    await ElMessageBox.confirm(`删除阵眼「${a.name}」（${a.roleLabel || ''}）？该操作不可恢复。`, '删除确认', { type: 'warning' })
+  } catch (e) { return }
+  try {
+    await anchorsApi.remove(a.id)
+    ElMessage.success('已删除')
+    load()
+  } catch (e) { /* 后端已弹错 */ }
+}
 </script>
 
 <style scoped>
@@ -500,6 +635,15 @@ watch(date, load)
   margin: 8px 0 0;
   font-size: 12px;
   color: #d97706;
+}
+.anchor-ops {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 6px;
+}
+.w-full {
+  width: 100%;
 }
 /* 统计格 */
 .stat-grid {
