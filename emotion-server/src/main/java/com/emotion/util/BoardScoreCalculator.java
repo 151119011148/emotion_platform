@@ -1254,8 +1254,11 @@ public final class BoardScoreCalculator {
 
     /**
      * 强制退潮任一触发（无视总分）：
-     * 1 跌停>=10；2 阵眼跌停/核按钮；3 中位晋级<10%且中位大面>=5；4 极高位爆量断板；
-     * 5（D5）空间板处于 SEVERE/EXCH 监管且当日断板/核按钮；6（D5）监管股核按钮≥1 且空间板唯一（死亡结构）。
+     * 1 跌停>=10；2 中位晋级<10%且中位大面>=5；3 极高位爆量断板；
+     * 4（D5）空间板处于 SEVERE/EXCH 监管且当日断板/核按钮；5（D5）监管股核按钮≥1 且空间板唯一（死亡结构）。
+     *
+     * <p>注：旧第 2 条「阵眼核按钮/收盘跌停」已按产品决策取消——阵眼单票核按钮不等于全市场退潮，
+     * 交由分数自然退潮带表达，不再独立触发强制退潮。
      */
     static ForcedEbb detectForcedEbb(Map<String, BigDecimal> m) {
         ForcedEbb f = new ForcedEbb();
@@ -1264,9 +1267,6 @@ public final class BoardScoreCalculator {
         BigDecimal ld = m.get("limit_down_count");
         if (ld != null && ld.compareTo(new BigDecimal(FORCED_EBB_LIMIT_DOWN)) >= 0) {
             reasons.add("跌停家数" + ld.stripTrailingZeros().toPlainString() + ">=" + FORCED_EBB_LIMIT_DOWN);
-        }
-        if (isOne(m.get("anchor_limit_down"))) {
-            reasons.add("阵眼核按钮/收盘跌停");
         }
         BigDecimal jrMid = m.get("jr_mid");
         BigDecimal bigMid = m.get("big_mid");

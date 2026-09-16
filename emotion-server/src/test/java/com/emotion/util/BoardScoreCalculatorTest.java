@@ -578,7 +578,8 @@ class BoardScoreCalculatorTest {
     @Test
     void forcedEbb_conditions() {
         assertTrue(BoardScoreCalculator.detectForcedEbb(m("limit_down_count", 20)).forced);
-        assertTrue(BoardScoreCalculator.detectForcedEbb(m("anchor_limit_down", 1)).forced);
+        // 旧"阵眼核按钮/收盘跌停→强制退潮"已按产品决策取消，不再独立触发强制退潮
+        assertFalse(BoardScoreCalculator.detectForcedEbb(m("anchor_limit_down", 1)).forced);
         assertTrue(BoardScoreCalculator.detectForcedEbb(m("jr_mid", 5, "big_mid", 6)).forced);
         assertTrue(BoardScoreCalculator.detectForcedEbb(m("max_height", 8, "top_high_turnover_pct", 40, "top_high_break", 1)).forced);
         assertFalse(BoardScoreCalculator.detectForcedEbb(m("limit_down_count", 3, "jr_mid", 30, "big_mid", 1)).forced);
