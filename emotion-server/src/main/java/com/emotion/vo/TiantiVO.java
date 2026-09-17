@@ -74,6 +74,16 @@ public class TiantiVO {
         private Integer firstSealTime;
         /** 形态：ONE_LINE 一字 / T_SHAPE T字 / TURNOVER 换手；历史明细=null。 */
         private String pattern;
+        /** 流通市值（元），东财 ltsz；仅涨停池有，历史行可能 null。 */
+        private BigDecimal floatMv;
+        /** 换手率 %，东财 hs；仅涨停池有，历史行可能 null。 */
+        private BigDecimal turnoverRate;
+        /** 封板形态分档：一字/早盘秒板/早盘直线/早盘板/上午板/午后板/尾盘板（回头n）。 */
+        private String sealForm;
+        /** 封成比 = 封单额/成交额（无量纲），显示"封单虚高"用。 */
+        private BigDecimal sealRatio;
+        /** 一字断魂刀打标：今日+昨日连续锁死(≤93030&0炸板) 且 流通≤35亿 且 封足额/封成比≥3 且 换手<5%。 */
+        private Boolean oneWordKilling;
     }
 
     /** 晋级失败：昨日 n-1 板，今日未封住 n 板。 */

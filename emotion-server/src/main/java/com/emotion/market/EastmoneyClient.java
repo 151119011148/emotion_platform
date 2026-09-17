@@ -588,6 +588,8 @@ public class EastmoneyClient {
         row.setAmount(decimal(node, "amount"));
         row.setFbt(intOrNull(node, "fbt"));
         row.setLbt(intOrNull(node, "lbt"));
+        row.setLtsz(decimal(node, "ltsz"));
+        row.setHs(decimal(node, "hs"));
         return row;
     }
 

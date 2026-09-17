@@ -200,10 +200,27 @@ class BoardScoreCalculatorTest {
         assertNull(BoardScoreCalculator.strategyCatalyst(m("zt_gather_pct", 0)));
     }
 
+    /** A(2026-09-16) 催化剂激活：无题材行时按主线持续性+涨停家数推导硬度，替代一律固定 50。 */
+    @Test
+    void strategyCatalyst_derivesHardnessFromPersistenceAndMainZt() {
+        // 高持续性+高涨停 → 准政策/产业级
+        assertAmount("80", BoardScoreCalculator.strategyCatalyst(m("persistence_days", 4, "main_zt", 8)));
+        // 中高持续性+中涨停
+        assertAmount("60", BoardScoreCalculator.strategyCatalyst(m("persistence_days", 3, "main_zt", 5)));
+        // 中持续性+低涨停
+        assertAmount("40", BoardScoreCalculator.strategyCatalyst(m("persistence_days", 2, "main_zt", 3)));
+        // 单日小聚集 → 弱情绪
+        assertAmount("30", BoardScoreCalculator.strategyCatalyst(m("persistence_days", 1, "main_zt", 2)));
+        // 边界：恰不达 60 → 掉到 40
+        assertAmount("40", BoardScoreCalculator.strategyCatalyst(m("persistence_days", 3, "main_zt", 4)));
+        // 只给持续性、给不出主涨停 → 兜中位 50（人工未评）
+        assertAmount("50", BoardScoreCalculator.strategyCatalyst(m("main_sector_active", 1, "persistence_days", 3)));
+    }
+
     /**
-     * 9/11 元件案例完整重演：涨停聚集 22.5%(68) + 空间板不在本板块高度 25 + 成交额<15%(35)
-     * + 催化剂缺省 50 + 持续性首日 50 → 加权 45.25；萌芽封顶 50 不触发。
-     * 2026-09-12 D5 融合起龙头错位不再在 D2 扣分（×0.9 已下线），45.25 保持；错位只出信号，
+     * 9/11 元件案例完整重演：涨停聚集 22.5%(82,2026-09-16阶梯重校) + 空间板不在本板块高度 25
+     * + 成交额<15%(35) + 催化剂缺省 50(无 main_zt,兜中位) + 持续性首日 50 → 加权 48.75；萌芽封顶 50 不触发。
+     * 2026-09-12 D5 融合起龙头错位不再在 D2 扣分（×0.9 已下线），48.75 保持；错位只出信号，
      * 扣分归 D5 阵眼一致性叶（100→60）。
      */
     @Test
@@ -217,7 +234,7 @@ class BoardScoreCalculatorTest {
                 "mainline_stage_cap", 50,
                 "dragon_misalign", 1);
         Result r = BoardScoreCalculator.evaluate(BoardScoreCalculator.builtinTree(), metrics);
-        assertAmount("45.25", r.getDimScores().get("theme_main"));
+        assertAmount("48.75", r.getDimScores().get("theme_main"));
         NodeEval theme = r.getDimEvals().get(1);
         // D2 不再因错位扣分也不挂 note（封顶未触发）；错位只以信号形式可见
         assertNull(theme.getNote(), "无封顶/无乘数时 note 应为 null，实际=" + theme.getNote());

@@ -1,0 +1,178 @@
+package com.emotion.service;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.math.BigDecimal;
+import java.util.Collections;
+import java.util.List;
+
+import org.junit.jupiter.api.Test;
+
+import com.emotion.entity.MarketStock;
+
+/**
+ * 一字断魂刀打标口径（{@link TiantiService#isDuanDao}）与封板形态分档（{@link TiantiService#sealForm}）。
+ * 全内存 fixture，不碰 DB / Spring。
+ *
+ * <p>2026-09-17 修正后口径：今日+昨日连续两天锁死(首封≤93030 & 0炸板)、板数≥2、
+ * 流通市值≤35亿、封单≥10亿 或 封成比(封单/成交额)≥3、换手率&lt;5%，五者同时成立才打标。
+ * 不再要求"恰 3 板 + 三根全一字"（直线拉升=分时斜率，启动板可能是秒板而非一字）
+ * 也不再硬卡"流通≤20亿"（瑞尔特 22~24 亿属典型小盘断魂刀，放宽到 35 亿）。
+ */
+class TiantiServiceTest {
+
+    private static final BigDecimal MV_OK = new BigDecimal("2400000000");   // 24 亿(瑞尔特量级) ≤35 亿
+    private static final BigDecimal MV_OVER = new BigDecimal("3600000000"); // 36 亿 >35 亿
+    private static final BigDecimal SEAL_BIG = new BigDecimal("1200000000"); // 12 亿 ≥10 亿
+    private static final BigDecimal AMT_TINY = new BigDecimal("100000000");  // 1 亿
+    private static final BigDecimal TURN_LOW = new BigDecimal("2");          // 2% <5%
+    private static final BigDecimal TURN_HIGH = new BigDecimal("6");         // 6% ≥5%
+
+    /** 今日候选：秒板(92500)一封到底、流通≤35亿、封单充足、换手<5%。 */
+    private static MarketStock hit() {
+        MarketStock s = new MarketStock();
+        s.setCode("HIT");
+        s.setConsecutive(3);
+        s.setPool(MarketStock.POOL_LIMIT_UP);
+        s.setFirstSealTime(92500);
+        s.setBreakCount(0);
+        s.setFloatMv(MV_OK);
+        s.setSealAmount(SEAL_BIG);
+        s.setAmount(AMT_TINY);
+        s.setTurnoverRate(TURN_LOW);
+        return s;
+    }
+
+    /** 昨日/前日同代码的一封到死种子（秒板 0 炸板）。 */
+    private static MarketStock prevLocked() {
+        MarketStock s = new MarketStock();
+        s.setCode("HIT");
+        s.setConsecutive(2);
+        s.setPool(MarketStock.POOL_LIMIT_UP);
+        s.setFirstSealTime(92500);
+        s.setBreakCount(0);
+        return s;
+    }
+
+    private static List<MarketStock> prev(MarketStock... rows) {
+        return rows.length == 0 ? Collections.emptyList() : java.util.Arrays.asList(rows);
+    }
+
+    // ---------------- 命中最优路径 ----------------
+
+    @Test
+    void fullMatch_allConditions_true() {
+        assertTrue(TiantiService.isDuanDao(hit(), prev(prevLocked())));
+    }
+
+    @Test
+    void twoBoardsAlsoMatch_notRigidOnThree() {
+        // "恰 3 板"已放宽：2 连板、今日秒板启动即链路成立（启动板可能就是今天的秒板）
+        MarketStock s = hit();
+        s.setConsecutive(2);
+        assertTrue(TiantiService.isDuanDao(s, prev(prevLocked())));
+    }
+
+    // ---------------- 今日锁死（≤93030 & 0 炸板） ----------------
+
+    @Test
+    void todayNotLocked_false() {
+        // 早盘直线 93500 > 93030：今日不算"锁死不给上车"
+        MarketStock line = hit();
+        line.setFirstSealTime(93500);
+        assertFalse(TiantiService.isDuanDao(line, prev(prevLocked())));
+        // 一字 92500 但盘中开过板（T字）：非一封到底
+        MarketStock tShape = hit();
+        tShape.setBreakCount(1);
+        assertFalse(TiantiService.isDuanDao(tShape, prev(prevLocked())));
+        // 没首封时间：判不了
+        MarketStock noFbt = hit();
+        noFbt.setFirstSealTime(null);
+        assertFalse(TiantiService.isDuanDao(noFbt, prev(prevLocked())));
+    }
+
+    @Test
+    void belowTwoBoards_false() {
+        MarketStock first = hit();
+        first.setConsecutive(1);
+        assertFalse(TiantiService.isDuanDao(first, prev(prevLocked())));
+    }
+
+    // ---------------- 昨日连续锁死 ----------------
+
+    @Test
+    void prevMissingOrNotLocked_false() {
+        // 昨日池没有该 code
+        assertFalse(TiantiService.isDuanDao(hit(), Collections.emptyList()));
+        // 昨日该 code 但非锁死（今日 93500 早盘直线）
+        MarketStock prevLine = prevLocked();
+        prevLine.setFirstSealTime(93500);
+        assertFalse(TiantiService.isDuanDao(hit(), prev(prevLine)));
+    }
+
+    // ---------------- 流通市值 / 封单 / 换手 ----------------
+
+    @Test
+    void floatMvOutOfCap_false() {
+        MarketStock over = hit();
+        over.setFloatMv(MV_OVER);
+        assertFalse(TiantiService.isDuanDao(over, prev(prevLocked())));
+        MarketStock nullMv = hit();
+        nullMv.setFloatMv(null);
+        assertFalse(TiantiService.isDuanDao(nullMv, prev(prevLocked())));
+    }
+
+    @Test
+    void sealHuge_orRatioAtLeastThree() {
+        // 封单 <10亿 但封成比 ≥3 也成立：瑞尔特 9/11 的比值 3.88 即命中
+        MarketStock ruierte = hit();
+        ruierte.setSealAmount(new BigDecimal("385000000")); // 3.85 亿 <10亿
+        ruierte.setAmount(new BigDecimal("99000000"));      // 成交 0.99亿 → 封成比 3.89 ≥3
+        ruierte.setFloatMv(new BigDecimal("2430000000"));   // 24.3 亿 ≤35
+        ruierte.setTurnoverRate(new BigDecimal("4.09"));
+        assertTrue(TiantiService.isDuanDao(ruierte, prev(prevLocked())));
+        // 封成比 2 <3 应 false
+        MarketStock ratioLow = hit();
+        ratioLow.setSealAmount(new BigDecimal("200000000"));
+        ratioLow.setAmount(AMT_TINY);
+        assertFalse(TiantiService.isDuanDao(ratioLow, prev(prevLocked())));
+        // 封单 null → false
+        MarketStock nullSeal = hit();
+        nullSeal.setSealAmount(null);
+        assertFalse(TiantiService.isDuanDao(nullSeal, prev(prevLocked())));
+    }
+
+    @Test
+    void turnoverBelowFive_required() {
+        MarketStock low = hit();
+        low.setTurnoverRate(TURN_HIGH);
+        assertFalse(TiantiService.isDuanDao(low, prev(prevLocked())));
+        MarketStock nullTurn = hit();
+        nullTurn.setTurnoverRate(null);
+        assertFalse(TiantiService.isDuanDao(nullTurn, prev(prevLocked())));
+    }
+
+    @Test
+    void nullRow_false() {
+        assertFalse(TiantiService.isDuanDao(null, prev(prevLocked())));
+    }
+
+    // ---------------- 封板形态分档 ----------------
+
+    @Test
+    void sealForm_bucketsByFirstSealTime_andMarksReopen() {
+        assertEquals("一字", TiantiService.sealForm(92500, 0));
+        assertEquals("早盘秒板", TiantiService.sealForm(93030, 0));
+        assertEquals("早盘直线", TiantiService.sealForm(93031, 0));
+        assertEquals("早盘直线", TiantiService.sealForm(93500, 0));
+        assertEquals("早盘板", TiantiService.sealForm(93501, 0));
+        assertEquals("上午板", TiantiService.sealForm(113000, 0));
+        assertEquals("午后板", TiantiService.sealForm(140000, 0));
+        assertEquals("尾盘板", TiantiService.sealForm(143001, 0));
+        assertEquals("一字(回头2)", TiantiService.sealForm(92000, 2));
+        assertNull(TiantiService.sealForm(null, 0));
+    }
+}

@@ -418,6 +418,11 @@ public class PrdMetricsService {
         int mainZt = main == null ? 0 : (industryZt.get(main) == null ? 0 : industryZt.get(main));
         s.mainZt = mainZt;
         s.persistenceDays = main == null ? null : consecutiveTop5Days(dailyIndustryZt, date, main);
+        // A(2026-09-17)：主线涨停家数键给引擎，供 strategyCatalyst 在无题材行时按持续性+涨停家数推导催化剂硬度
+        //（与 persistence_days 同口径：仅确认了主线才落键，保证推导分支只在真有主线时触发）。
+        if (main != null) {
+            s.metrics.put("main_zt", BigDecimal.valueOf(mainZt));
+        }
 
         // ---------- 高度（总龙头=最高连板；同板高取涨幅最大，同涨幅取代码保证确定性） ----------
         int maxBoard = 0;

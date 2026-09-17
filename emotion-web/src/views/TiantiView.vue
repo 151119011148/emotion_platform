@@ -171,8 +171,13 @@
               <span class="chip-name">{{ r.name }}</span>
               <el-tag v-if="r.role" size="small" :type="ROLE_TYPE[r.role] || 'info'" effect="dark">{{ r.role }}</el-tag>
               <el-tag v-if="r.manualLeader" size="small" type="warning" effect="dark">总龙头</el-tag>
-              <el-tag v-if="r.pattern" size="small" :type="PATTERN_TYPE[r.pattern] || 'info'" effect="plain">
-                {{ PATTERN_LABEL[r.pattern] }}
+              <span v-if="r.sealForm" class="chip-sealform"
+                :title="`封板形态：${r.sealForm}（首封 ${fmtSeal(r.firstSealTime)}；炸板 ${r.breakCount ?? 0} 次）`">
+                {{ r.sealForm }}
+              </span>
+              <el-tag v-if="r.oneWordKilling" size="small" type="danger" effect="dark" class="oneword-badge"
+                :title="`一字断魂刀：今日+昨日连续锁死(首封≤93030且0炸板)，流通市值约 ${r.floatMv != null ? yiText(r.floatMv) : '-'}亿，换手 ${r.turnoverRate ?? '-'}%，封成比 ${r.sealRatio ?? '-'}`">
+                一字断魂刀
               </el-tag>
               <span v-if="r.breakCount != null && r.breakCount > 0" class="chip-reseal"
                 :title="`日内开板 ${r.breakCount} 次后封住（炸后回封）`">
@@ -181,6 +186,8 @@
               <span v-if="r.promoted === true" class="chip-promoted ok">晋级</span>
               <span v-if="r.promoted === false" class="chip-promoted bad">持稳</span>
               <span v-if="r.sealAmount != null" class="chip-seal">封单 {{ moneyText(r.sealAmount) }}</span>
+              <span v-if="r.turnoverRate != null" class="chip-turn">换手 {{ r.turnoverRate }}%</span>
+              <span v-if="r.sealRatio != null" class="chip-sealratio">封成比 {{ r.sealRatio }}</span>
               <span :class="pctClass(r.changePct)" class="chip-pct">{{ signed(r.changePct) }}%</span>
             </div>
             <!-- 2 板层=1进2 兑现名单（PRD 时间截面：昨首板种子今兑现）；3 板+失败常显，2 板默认折叠 -->
@@ -281,7 +288,6 @@ const scoring = useScoringStore()
 
 const ROLE_TYPE = { 空间板: 'danger', 中军: 'primary', 跟风: 'success', 卡位: 'warning', 反包: 'info' }
 const PATTERN_LABEL = { ONE_LINE: '一字', T_SHAPE: 'T字', TURNOVER: '换手' }
-const PATTERN_TYPE = { ONE_LINE: 'danger', T_SHAPE: 'warning', TURNOVER: 'info' }
 const FAIL_LABEL = { ZT: '仍封停(低板)', ZB: '炸板', DT: '跌停', GONE: '未触板' }
 const FAIL_TYPE = { ZT: 'warning', ZB: 'danger', DT: 'danger', GONE: 'info' }
 
@@ -516,6 +522,17 @@ function moneyText(v) {
   if (n >= 1e4) return (n / 1e4).toFixed(0) + ' 万'
   return n.toFixed(0) + ' 元'
 }
+function yiText(v) {
+  const n = Number(v)
+  if (Number.isNaN(n)) return '—'
+  return (n / 1e8).toFixed(2)
+}
+/** HHMMSS → "9:25"，供封板形态悬停展示首封时点。 */
+function fmtSeal(t) {
+  if (t == null) return '—'
+  const s = String(t).padStart(6, '0')
+  return `${parseInt(s.slice(0, 2), 10)}:${s.slice(2, 4)}`
+}
 function roleChipClass(role) {
   return role ? `role-${role}` : ''
 }
@@ -688,6 +705,9 @@ watch(date, load)
 .chip-promoted.ok { color: #6ee7b7; }
 .chip-promoted.bad { color: #94a3b8; }
 .chip-seal { color: #a8b7c4; font-size: 11px; }
+.chip-sealform { color: #fcd34d; font-size: 11px; background: rgba(251,191,36,.12); border-radius: 6px; padding: 1px 6px; }
+.chip-turn { color: #c4b5fd; font-size: 11px; }
+.chip-sealratio { color: #a8b7c4; font-size: 11px; }
 .chip-pct { font-weight: 600; font-size: 11px; }
 .chip-reseal { color: #7dd3fc; font-size: 11px; background: rgba(56,189,248,.12); border-radius: 6px; padding: 1px 6px; }
 /* 晋级失败：透明灰色，与在板个股明确区分 */

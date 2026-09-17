@@ -271,6 +271,8 @@ CREATE TABLE IF NOT EXISTS t_market_stock (
     big_loss TINYINT DEFAULT 0 COMMENT '是否大面：回撤>7% 且收盘绿盘',
     seal_amount DECIMAL(18,2) COMMENT '封单额(元)=东财fund,涨停池收盘封单资金',
     amount DECIMAL(18,2) COMMENT '当日成交额(元)=东财池接口amount；D2成交额聚集度取数源(池内口径)',
+    float_mv DECIMAL(18,2) DEFAULT NULL COMMENT '流通市值(元)=东财ltsz,仅涨停池；一字断魂刀判据(≤20亿)',
+    turnover_rate DECIMAL(8,2) DEFAULT NULL COMMENT '换手率%=东财hs,仅涨停池；一字断魂刀判据(<5%)',
     first_seal_time INT COMMENT '首次封板时间HHMMSS(fbt),判一字/T字用',
     last_seal_time INT COMMENT '最后封板时间HHMMSS(lbt)',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -1135,11 +1137,11 @@ INSERT IGNORE INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator
     (@fid2,'market','limit_combo',3,'COMPOUND',NULL,20,5,'跌停>20',''),
     (@fid2,'market','limit_combo',4,'ELSE',NULL,NULL,50,'其余','中间档占位');
 INSERT IGNORE INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator, threshold_low, threshold_high, score, formula, note) VALUES
-    (@fid2,'theme_main','zt_gather',1,'GTE',40,NULL,95,'涨停聚集度 >=40%','锚点：主线占四成涨停=极强'),
-    (@fid2,'theme_main','zt_gather',2,'GTE',30,NULL,82,'>=30',''),
-    (@fid2,'theme_main','zt_gather',3,'GTE',20,NULL,68,'>=20',''),
-    (@fid2,'theme_main','zt_gather',4,'GTE',10,NULL,48,'>=10',''),
-    (@fid2,'theme_main','zt_gather',5,'ELSE',NULL,NULL,28,'<10','分散无主线'),
+    (@fid2,'theme_main','zt_gather',1,'GTE',25,NULL,95,'涨停聚集度 >=25%','锚点：主线占四分之一涨停=极强(2026-09-16按市场重校)'),
+    (@fid2,'theme_main','zt_gather',2,'GTE',18,NULL,82,'>=18','元件22%(2026-09-11)落此档'),
+    (@fid2,'theme_main','zt_gather',3,'GTE',12,NULL,68,'>=12',''),
+    (@fid2,'theme_main','zt_gather',4,'GTE',8,NULL,48,'>=8',''),
+    (@fid2,'theme_main','zt_gather',5,'ELSE',NULL,NULL,28,'<8','分散无主线'),
     (@fid2,'theme_main','height_gather',1,'COMPOUND',NULL,NULL,95,'空间板在主线行业：高度比>=90%','STRATEGY:空间板归属本板块时走阶梯95/85/70/50/28,Java算'),
     (@fid2,'theme_main','height_gather',2,'COMPOUND',NULL,NULL,50,'空间板不在主线：(主线最高板/H)×50 封顶50','元件案例:2板/4板×50=25,不再按板数比给70'),
     (@fid2,'theme_main','amount_gather',1,'GTE',40,NULL,95,'成交额聚集度 >=40%','自动=主线涨停股amount/全部涨停股amount(涨停股口径,不接受人工覆盖)'),
@@ -1157,6 +1159,13 @@ INSERT IGNORE INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator
     (@fid2,'theme_main','persistence',3,'GTE',2,NULL,70,'=2天',''),
     (@fid2,'theme_main','persistence',4,'GTE',1,NULL,50,'首日',''),
     (@fid2,'theme_main','persistence',5,'ELSE',NULL,NULL,25,'中断','');
+-- B(2026-09-17) D2 涨停聚集度阶梯重校：INSERT IGNORE 只建新行、不覆盖已存旧档，
+-- 这里显式 UPDATE 幂等刷入新档（守卫旧值，重复执行自动收敛，改后再执行即 no-op）。
+UPDATE t_scoring_rule SET threshold_low=25, formula='涨停聚集度 >=25%', note='锚点:主线占四分之一涨停=极强(2026-09-16按市场重校)' WHERE model_id=@fid2 AND dim_key='theme_main' AND sub_key='zt_gather' AND rule_no=1 AND threshold_low=40;
+UPDATE t_scoring_rule SET threshold_low=18, score=82, formula='>=18', note='元件22%(2026-09-11)落此档' WHERE model_id=@fid2 AND dim_key='theme_main' AND sub_key='zt_gather' AND rule_no=2 AND threshold_low=30;
+UPDATE t_scoring_rule SET threshold_low=12, score=68, formula='>=12', note='' WHERE model_id=@fid2 AND dim_key='theme_main' AND sub_key='zt_gather' AND rule_no=3 AND threshold_low=20;
+UPDATE t_scoring_rule SET threshold_low=8, score=48, formula='>=8', note='' WHERE model_id=@fid2 AND dim_key='theme_main' AND sub_key='zt_gather' AND rule_no=4 AND threshold_low=10;
+UPDATE t_scoring_rule SET formula='<8', note='分散无主线' WHERE model_id=@fid2 AND dim_key='theme_main' AND sub_key='zt_gather' AND rule_no=5 AND threshold_low IS NULL AND formula='<10';
 INSERT IGNORE INTO t_scoring_rule (model_id, dim_key, sub_key, rule_no, operator, threshold_low, threshold_high, score, formula, note) VALUES
     (@fid2,'board','promo_low',1,'GTE',60,NULL,95,'层晋级率 >=60%',''),(@fid2,'board','promo_low',2,'GTE',40,NULL,80,'>=40',''),(@fid2,'board','promo_low',3,'GTE',25,NULL,65,'>=25',''),(@fid2,'board','promo_low',4,'GTE',15,NULL,45,'>=15',''),(@fid2,'board','promo_low',5,'ELSE',NULL,NULL,20,'<15',''),
     (@fid2,'board','promo_mid',1,'GTE',60,NULL,95,'',''),(@fid2,'board','promo_mid',2,'GTE',40,NULL,80,'',''),(@fid2,'board','promo_mid',3,'GTE',25,NULL,65,'',''),(@fid2,'board','promo_mid',4,'GTE',15,NULL,45,'',''),(@fid2,'board','promo_mid',5,'ELSE',NULL,NULL,20,'',''),
@@ -1415,6 +1424,44 @@ SET @stock_amount_sql = IF(@stock_amount_adds IS NULL,
 PREPARE stock_amount_stmt FROM @stock_amount_sql;
 EXECUTE stock_amount_stmt;
 DEALLOCATE PREPARE stock_amount_stmt;
+
+-- 1b) t_market_stock 补 float_mv 列（东财 ltsz 流通市值，仅涨停池；存量历史行重拉池子即可回补）。
+SELECT GROUP_CONCAT(CONCAT('ADD COLUMN ', col_name, ' ', col_ddl) ORDER BY ord_no SEPARATOR ', ')
+       INTO @stock_floatmv_adds
+  FROM (
+  SELECT 1 ord_no, 'float_mv' col_name,
+         'DECIMAL(18,2) DEFAULT NULL COMMENT ''流通市值(元)=东财ltsz,仅涨停池；一字断魂刀判据(≤20亿)''' col_ddl
+  ) need
+ WHERE NOT EXISTS (
+    SELECT 1 FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME   = 't_market_stock'
+       AND COLUMN_NAME  = need.col_name);
+SET @stock_floatmv_sql = IF(@stock_floatmv_adds IS NULL,
+    'SELECT ''t_market_stock float_mv 列已齐，本步跳过'' AS stock_floatmv_migration',
+    CONCAT('ALTER TABLE t_market_stock ', @stock_floatmv_adds));
+PREPARE stock_floatmv_stmt FROM @stock_floatmv_sql;
+EXECUTE stock_floatmv_stmt;
+DEALLOCATE PREPARE stock_floatmv_stmt;
+
+-- 1c) t_market_stock 补 turnover_rate 列（东财 hs 换手率%，仅涨停池；存量历史行重拉池子即可回补）。
+SELECT GROUP_CONCAT(CONCAT('ADD COLUMN ', col_name, ' ', col_ddl) ORDER BY ord_no SEPARATOR ', ')
+       INTO @stock_turnover_adds
+  FROM (
+  SELECT 1 ord_no, 'turnover_rate' col_name,
+         'DECIMAL(8,2) DEFAULT NULL COMMENT ''换手率%=东财hs,仅涨停池；一字断魂刀判据(<5%)''' col_ddl
+  ) need
+ WHERE NOT EXISTS (
+    SELECT 1 FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME   = 't_market_stock'
+       AND COLUMN_NAME  = need.col_name);
+SET @stock_turnover_sql = IF(@stock_turnover_adds IS NULL,
+    'SELECT ''t_market_stock turnover_rate 列已齐，本步跳过'' AS stock_turnover_migration',
+    CONCAT('ALTER TABLE t_market_stock ', @stock_turnover_adds));
+PREPARE stock_turnover_stmt FROM @stock_turnover_sql;
+EXECUTE stock_turnover_stmt;
+DEALLOCATE PREPARE stock_turnover_stmt;
 
 -- 2) 子指标收敛：height_gather/catalyst BAND_LADDER→STRATEGY（存量行 UPDATE，新库种子同值）。
 UPDATE t_scoring_sub

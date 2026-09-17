@@ -52,5 +52,9 @@ public class MarketStock {
     private Integer firstSealTime;
     /** 最后封板时间 HHMMSS（东财 lbt）。 */
     private Integer lastSealTime;
+    /** 流通市值（元），东财 ltsz，仅涨停池返回；一字断魂刀打标判据（≤20亿）用。 */
+    private BigDecimal floatMv;
+    /** 换手率 %，东财 hs，仅涨停池返回；一字断魂刀打标判据（<5%）用。 */
+    private BigDecimal turnoverRate;
     private LocalDateTime createdAt;
 }

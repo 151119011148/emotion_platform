@@ -1112,13 +1112,31 @@ public final class BoardScoreCalculator {
 
     /**
      * 催化剂硬度：t_theme 给了硬度 1-5 → 100/80/60/40/20；
-     * 日内核心存在（main_sector_active=1）但没有匹配题材行 → 保守中等 50，并在依据串标注人工未评；
+     * A(2026-09-16)：无题材行但有主线持续性读数时，按「主线持续性天数 × 主线涨停家数」推导硬度
+     *   （不再一律固定 50，让主线越强催化越硬，解决"日内核心普遍偏低"且催化剂永远中位的问题）；
+     * 有持续性读数但给不出主涨停家数 → 兜保守中等 50（人工未评）；
      * 日内核心都不存在（无涨停池）→ 未评，不凭空出分。
      */
     static BigDecimal strategyCatalyst(Map<String, BigDecimal> m) {
         BigDecimal hardness = m.get("catalyst_hardness");
         if (hardness != null) {
             return band(hardness, CATALYST_LADDER);
+        }
+        BigDecimal persist = m.get("persistence_days");
+        BigDecimal mainZt = m.get("main_zt");
+        if (persist != null && mainZt != null) {
+            int p = persist.intValue();
+            int zt = mainZt.intValue();
+            if (p >= 4 && zt >= 8) {
+                return BigDecimal.valueOf(80);   // 高持续性+高涨停 → 准政策/产业级
+            }
+            if (p >= 3 && zt >= 5) {
+                return BigDecimal.valueOf(60);   // 中高持续性+中涨停
+            }
+            if (p >= 2 && zt >= 3) {
+                return BigDecimal.valueOf(40);   // 中持续性+低涨停
+            }
+            return BigDecimal.valueOf(30);       // 单日小聚集 → 弱情绪
         }
         return m.get("main_sector_active") == null ? null : BigDecimal.valueOf(CATALYST_DEFAULT_SCORE);
     }
@@ -1127,6 +1145,13 @@ public final class BoardScoreCalculator {
         BigDecimal hardness = m.get("catalyst_hardness");
         if (hardness != null) {
             return "题材催化硬度 " + plain(hardness) + " 星 → " + plain(band(hardness, CATALYST_LADDER));
+        }
+        BigDecimal persist = m.get("persistence_days");
+        BigDecimal mainZt = m.get("main_zt");
+        if (persist != null && mainZt != null) {
+            return "无题材行，按主线推导硬度：持续 " + persist.intValue() + " 天 / 涨停 "
+                    + mainZt.intValue() + " 家 → " + plain(strategyCatalyst(m))
+                    + "（人工去 t_theme 维护精确硬度）";
         }
         if (m.get("main_sector_active") != null) {
             return "无匹配题材行，按中等 " + CATALYST_DEFAULT_SCORE + "（人工未评，去 t_theme 维护硬度替换）";
@@ -1374,11 +1399,14 @@ public final class BoardScoreCalculator {
         // height_gather/catalyst 是 STRATEGY——空间板归属砍半、无题材行默认 50 的判断在 Java。
         // 维分另有两道结构后处理：生命周期阶段天花板 + 龙头错位 ×0.9（见 applyThemeMainGuards）。
         List<SubNode> subs = new ArrayList<>();
+        // B(2026-09-16)：zt 聚集阶梯按 2026 市场重排——主线最热板块涨停聚集度常年卡在 22% 出头，
+        // 旧 [40/30/20/10] 让多数强势日只落到 68/48，区分度被压扁。重校到 [25/18/12/8] 使
+        // 22%(元件) 升到 82、30%+ 保持 95。amount_gather 未动（无分布数据先稳住）。
         subs.add(SubNode.band("zt_gather", "涨停聚集度", 0.25, "zt_gather_pct", ladder(
-                BandRule.of("GTE", 40.0, null, 95),
-                BandRule.of("GTE", 30.0, null, 82),
-                BandRule.of("GTE", 20.0, null, 68),
-                BandRule.of("GTE", 10.0, null, 48),
+                BandRule.of("GTE", 25.0, null, 95),
+                BandRule.of("GTE", 18.0, null, 82),
+                BandRule.of("GTE", 12.0, null, 68),
+                BandRule.of("GTE", 8.0, null, 48),
                 BandRule.of("ELSE", null, null, 28))));
         subs.add(SubNode.strategy("height_gather", "高度聚集度", 0.25, "height_gather"));
         subs.add(SubNode.band("amount_gather", "成交额聚集度", 0.20, "amount_gather_pct", ladder(

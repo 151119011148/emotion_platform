@@ -102,6 +102,9 @@ public class StockPoolWriter {
                 stock.setSealAmount(row.getFund());
                 stock.setFirstSealTime(row.getFbt());
                 stock.setLastSealTime(row.getLbt());
+                // 流通市值(ltsz)只有涨停池返回；一字断魂刀打标判据
+                stock.setFloatMv(row.getLtsz());
+                stock.setTurnoverRate(row.getHs());
             }
             boolean isBroken = MarketStock.POOL_BROKEN.equals(pool);
             stock.setPullbackPct(isBroken ? round2(row.pullbackFromLimitPct()) : null);

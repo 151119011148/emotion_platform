@@ -32,6 +32,10 @@ public class PoolRow {
     private Integer fbt;
     /** 最后封板时间 HHMMSS（lbt）。 */
     private Integer lbt;
+    /** 流通市值（元），东财 ltsz，仅涨停池返回；一字断魂刀判据（≤20亿）用。 */
+    private BigDecimal ltsz;
+    /** 换手率 %（东财 hs），涨停池返回；一字断魂刀判据（<5%）用。 */
+    private BigDecimal hs;
 
     /**
      * 从涨停价回落的日内回撤幅度 %。
