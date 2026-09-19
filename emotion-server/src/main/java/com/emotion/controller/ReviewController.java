@@ -1,11 +1,15 @@
 package com.emotion.controller;
 
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
@@ -18,6 +22,7 @@ import com.emotion.entity.ReviewFetch;
 import com.emotion.mapper.MarketStockMapper;
 import com.emotion.mapper.StockMapper;
 import com.emotion.mapper.SurveillanceMapper;
+import com.emotion.mapper.TradingHolidayMapper;
 import com.emotion.market.SurveillanceKind;
 import com.emotion.market.SurveillanceNotice;
 import com.emotion.market.TencentClient;
@@ -73,6 +78,7 @@ public class ReviewController {
     private final SurveillanceMapper surveillanceMapper;
     private final MarketStockMapper marketStockMapper;
     private final StockMapper stockMapper;
+    private final TradingHolidayMapper tradingHolidayMapper;
     private final ConceptIndexService conceptIndexService;
     private final TopicHeatService topicHeatService;
     private final TencentClient tencent;
@@ -90,6 +96,7 @@ public class ReviewController {
                             SurveillanceMapper surveillanceMapper,
                             MarketStockMapper marketStockMapper,
                             StockMapper stockMapper,
+                            TradingHolidayMapper tradingHolidayMapper,
                             ConceptIndexService conceptIndexService,
                             TopicHeatService topicHeatService,
                             TencentClient tencent,
@@ -106,6 +113,7 @@ public class ReviewController {
         this.surveillanceMapper = surveillanceMapper;
         this.marketStockMapper = marketStockMapper;
         this.stockMapper = stockMapper;
+        this.tradingHolidayMapper = tradingHolidayMapper;
         this.conceptIndexService = conceptIndexService;
         this.topicHeatService = topicHeatService;
         this.tencent = tencent;
@@ -117,9 +125,19 @@ public class ReviewController {
     public ApiResponse<List<String>> tradingDays(@RequestParam(defaultValue = "3") int months) {
         LocalDate today = LocalDate.now(ZoneId.of("Asia/Shanghai"));
         LocalDate from = today.minusMonths(months);
-        List<LocalDate> days = marketStockMapper.listDetailDatesBetween(from, today);
+        // A股交易日历：周一~周五 且 不在休市停机表(t_trading_holidays)里。
+        // 周末恒灰；官方休市日(如端午/中秋/国庆落在工作日)由停机表里排除。
+        // 交易日即便还没拉过行情也允许点选（点了再去「一键拉取」）。
+        Set<LocalDate> holidays = new HashSet<>(tradingHolidayMapper.listBetween(from, today));
+        List<String> days = new ArrayList<>();
+        for (LocalDate d = from; !d.isAfter(today); d = d.plusDays(1)) {
+            if (d.getDayOfWeek() != DayOfWeek.SATURDAY && d.getDayOfWeek() != DayOfWeek.SUNDAY
+                    && !holidays.contains(d)) {
+                days.add(d.toString());
+            }
+        }
         Collections.reverse(days); // 降序：最近交易日在前，前端默认取第一个
-        return ApiResponse.ok(days.stream().map(LocalDate::toString).collect(Collectors.toList()));
+        return ApiResponse.ok(days);
     }
 
     /** 股票远程搜索（A股字典 t_stock）：按代码前缀 / 名称模糊，供持仓台账选股下拉使用。 */

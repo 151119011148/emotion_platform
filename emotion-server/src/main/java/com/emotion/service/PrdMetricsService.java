@@ -90,12 +90,15 @@ public class PrdMetricsService {
     private final MarketStockMapper marketStockMapper;
     private final ThemeMapper themeMapper;
     private final MainlineMarkMapper mainlineMarkMapper;
+    private final IndustryClassifyService industryClassify;
 
     public PrdMetricsService(MarketStockMapper marketStockMapper, ThemeMapper themeMapper,
-                             MainlineMarkMapper mainlineMarkMapper) {
+                             MainlineMarkMapper mainlineMarkMapper,
+                             IndustryClassifyService industryClassify) {
         this.marketStockMapper = marketStockMapper;
         this.themeMapper = themeMapper;
         this.mainlineMarkMapper = mainlineMarkMapper;
+        this.industryClassify = industryClassify;
     }
 
     /** 一次快照：metrics 喂打分引擎，其余字段喂天梯/首板/主线详情页。 */
@@ -164,6 +167,11 @@ public class PrdMetricsService {
                 : listPool(prev, MarketStock.POOL_LIMIT_UP);
         List<MarketStock> prevZB = prev == null ? Collections.<MarketStock>emptyList()
                 : listPool(prev, MarketStock.POOL_BROKEN);
+        // 板块排名/D2 雷达切到通达信二级行业：把每只股票的 industry 归到 t_industry_stock 的二级行业名
+        industryClassify.apply(todayZT);
+        industryClassify.apply(todayZB);
+        industryClassify.apply(prevZT);
+        industryClassify.apply(prevZB);
 
         // 主线活跃历史（persistence 用）：近窗口内该行业每日涨停家数。先粗取行业再查会多一趟 SQL，
         // 这里直接一次拉全行业 ZT 行按 (date,industry) 分组，量大也就一个月 × 两三百行。
@@ -173,6 +181,7 @@ public class PrdMetricsService {
                 .eq(MarketStock::getPool, MarketStock.POOL_LIMIT_UP)
                 .ge(MarketStock::getTradeDate, windowStart)
                 .le(MarketStock::getTradeDate, date));
+        industryClassify.apply(window);
         for (MarketStock row : window) {
             String ind = row.getIndustry();
             if (ind == null || ind.trim().isEmpty()) {

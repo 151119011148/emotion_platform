@@ -1823,6 +1823,29 @@ CREATE TABLE IF NOT EXISTS t_industry_daily_snapshot (
     INDEX idx_date_maxboard (trade_date, max_board)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='行业板块单日聚合快照(公开数据,T5)';
 
+-- t_theme_daily_snapshot：日内核心题材榜 Top5 快照。题材维度按用户个性化（t_theme/t_theme_stock
+--   带 userId，AUTO 绑定），故带 user_id；仅持久化当日展示的前 5 名，题材表读取时自动回填（已有跳过）。
+CREATE TABLE IF NOT EXISTS t_theme_daily_snapshot (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    trade_date DATE NOT NULL COMMENT '交易日',
+    user_id BIGINT NOT NULL COMMENT '题材绑定所属用户(AUTO口径)',
+    `rank` TINYINT NOT NULL COMMENT '题材榜排名1-5',
+    theme_name VARCHAR(80) NOT NULL COMMENT '题材名称',
+    zt_count INT NOT NULL DEFAULT 0 COMMENT '题材涨停家数',
+    strength DECIMAL(6,2) NOT NULL DEFAULT 0 COMMENT '题材强度',
+    max_board TINYINT NOT NULL DEFAULT 0 COMMENT '题材最高连板',
+    continuous_days TINYINT NOT NULL DEFAULT 0 COMMENT '连续活跃天数',
+    hardness TINYINT NOT NULL DEFAULT 3 COMMENT '题材硬度(星数)',
+    lifecycle VARCHAR(20) NOT NULL DEFAULT '萌芽' COMMENT '生命周期阶段',
+    related_industries VARCHAR(500) DEFAULT NULL COMMENT '关联板块，逗号拼接的通达信二级行业',
+    leader_code VARCHAR(6) DEFAULT NULL COMMENT '题材龙头代码',
+    leader_name VARCHAR(20) DEFAULT NULL COMMENT '题材龙头名称',
+    leader_board TINYINT NOT NULL DEFAULT 0 COMMENT '题材龙头连板',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uk_user_date_rank (user_id, trade_date, `rank`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='日内核心题材榜Top5快照(按用户,读取回填)';
+
 -- t_review_fetch：每日复盘「一键拉取」最近一次编排的状态留档（T1-T8 逐任务结果 + 汇总）。
 --   只记拉取编排的元信息，不存放任何行情/评分数据；行情数据仍在各自的业务表里。
 CREATE TABLE IF NOT EXISTS t_review_fetch (
@@ -1895,4 +1918,60 @@ CREATE TABLE IF NOT EXISTS t_surveillance_daily (
     INDEX idx_kind_date (kind, trade_date),
     INDEX idx_code_date (stock_code, trade_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='监管全生命周期每日轨迹(公开数据,监管窗口现算后落库)';
+
+-- 通达信行业分类字典（海王星/TDX，来源 incon.dat #TDXNHY；数据由 scripts/import_tdx_tables.py 导入）
+CREATE TABLE IF NOT EXISTS t_industry (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    industry_code VARCHAR(10) NOT NULL COMMENT '通达信行业码(T0101)',
+    industry_name VARCHAR(50) NOT NULL,
+    parent_code VARCHAR(10),
+    level TINYINT COMMENT '1一级/2二级/3三级',
+    UNIQUE KEY uk_industry_code (industry_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='通达信行业分类字典(海王星/TDX)';
+
+-- 个股 → 通达信二级行业 映射（来源 tdxhy.cfg，行业码截 T+4）
+CREATE TABLE IF NOT EXISTS t_industry_stock (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    code VARCHAR(6) NOT NULL,
+    name VARCHAR(20),
+    market VARCHAR(4) COMMENT '深/沪/北',
+    industry_code VARCHAR(10) NOT NULL COMMENT '二级行业码',
+    industry_name VARCHAR(50) NOT NULL,
+    UNIQUE KEY uk_code (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='个股→通达信二级行业 映射';
+
+-- 通达信概念板块字典（来源 infoharbor_block.dat GN_ + tdxbk.cfg 全称/类别）
+CREATE TABLE IF NOT EXISTS t_concept_board (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    board_code VARCHAR(30) NOT NULL COMMENT '板块简称(锂电池/通达信88)',
+    board_name VARCHAR(60) NOT NULL COMMENT '板块全称',
+    index_code VARCHAR(10),
+    category VARCHAR(4) DEFAULT '1' COMMENT '1概念/2风格/3指数',
+    UNIQUE KEY uk_board_code (board_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='通达信概念板块字典(海王星/TDX)';
+
+-- =====================================================================
+-- t_trading_holidays：A股「休市停机表」，交易日历的权威来源。
+--   只存「落在工作日的官方休市日」（周末由代码恒判为非交易，不入库）。
+--   数据来自沪深北交易所按年发布的《休市安排》公告，每年维护一次即可。
+--   交易日判定 = 周一~周五 且 不在本表。
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS t_trading_holidays (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    trade_date DATE NOT NULL COMMENT '工作日的官方休市日（交易日历过滤用）',
+    reason VARCHAR(40) NOT NULL DEFAULT '' COMMENT '原因，如 端午/国庆',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_trade_date (trade_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='A股休市停机表(工作日的官方休市日,按年维护)';
+
+-- 2026 官方休市安排 seed（依据沪深北交易所公告；周末段不入表，代码恒灰）。
+-- INSERT IGNORE 保证幂等，重复回放不报错、不重复插。
+INSERT IGNORE INTO t_trading_holidays (trade_date, reason) VALUES
+('2026-01-01', '元旦'), ('2026-01-02', '元旦'),
+('2026-04-06', '清明'),
+('2026-05-01', '劳动节'), ('2026-05-04', '劳动节'), ('2026-05-05', '劳动节'),
+('2026-06-19', '端午'),
+('2026-09-25', '中秋'),
+('2026-10-01', '国庆'), ('2026-10-02', '国庆'), ('2026-10-05', '国庆'),
+('2026-10-06', '国庆'), ('2026-10-07', '国庆');
 

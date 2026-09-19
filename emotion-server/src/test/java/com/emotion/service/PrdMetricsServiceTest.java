@@ -43,7 +43,8 @@ class PrdMetricsServiceTest {
     }
 
     private PrdMetricsService service() {
-        return new PrdMetricsService(null, null, null);
+        // aggregate/radar 是纯函数，不进 DB、不依赖分类；最后一位 IndustryClassifyService 传 null 即可。
+        return new PrdMetricsService(null, null, null, null);
     }
 
     /**

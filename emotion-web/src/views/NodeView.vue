@@ -163,6 +163,7 @@
             <el-option label="失效" value="失效" />
           </el-select>
           <el-date-picker v-model="dateRange" type="daterange" size="small" value-format="YYYY-MM-DD"
+            :disabled-date="disabledDate"
             start-placeholder="起始日期" end-placeholder="结束日期" style="width: 230px" />
           <el-button size="small" @click="resetFilters">重置</el-button>
         </div>
@@ -273,6 +274,7 @@
         </el-form-item>
         <el-form-item label="D0 日期">
           <el-date-picker v-model="nodeForm.d0Date" type="date" value-format="YYYY-MM-DD"
+            :disabled-date="disabledDate"
             style="width: 100%" @change="loadAnchors" />
         </el-form-item>
         <el-form-item label="D0 候选票（逗号分隔）">
@@ -331,10 +333,10 @@
           </el-row>
           <el-row v-if="nodeForm.registerAnchor" :gutter="8" style="margin-top: 8px">
             <el-col :span="12">
-              <el-date-picker v-model="nodeForm.anchorStart" type="date" value-format="YYYY-MM-DD" placeholder="生效起始（默认 D0）" style="width: 100%" />
+              <el-date-picker v-model="nodeForm.anchorStart" type="date" value-format="YYYY-MM-DD" :disabled-date="disabledDate" placeholder="生效起始（默认 D0）" style="width: 100%" />
             </el-col>
             <el-col :span="12">
-              <el-date-picker v-model="nodeForm.anchorEnd" type="date" value-format="YYYY-MM-DD" placeholder="失效日（空=仍在位）" style="width: 100%" />
+              <el-date-picker v-model="nodeForm.anchorEnd" type="date" value-format="YYYY-MM-DD" :disabled-date="disabledDate" placeholder="失效日（空=仍在位）" style="width: 100%" />
             </el-col>
           </el-row>
         </el-form-item>
@@ -352,6 +354,7 @@
       <el-form label-position="top">
         <el-form-item label="选择 D0 日期">
           <el-date-picker v-model="ladderD0Date" type="date" value-format="YYYY-MM-DD"
+            :disabled-date="disabledDate"
             placeholder="默认回落最近交易日" style="width: 100%" @change="onLadderDateChange" />
         </el-form-item>
       </el-form>
@@ -407,8 +410,11 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { nodeApi, anchorsApi } from '../api/modules'
-import NodeSuggestPanel from '../components/NodeSuggestPanel.vue'
+import { useTradingCalendar } from '../utils/tradingCalendar'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import NodeSuggestPanel from '../components/NodeSuggestPanel.vue'
+
+const { disabledDate, loadTradingDays } = useTradingCalendar()
 
 const router = useRouter()
 const currentNode = ref(null)
@@ -865,6 +871,7 @@ async function handleCreateNode() {
 }
 
 onMounted(() => {
+  loadTradingDays()
   loadNodes()
 })
 </script>

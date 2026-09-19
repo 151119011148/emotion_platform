@@ -6,7 +6,7 @@
           body="雷达区=当日所有有涨停的行业扫描（只标连续天数与强度）；连续 3 个交易日（含今天）该行业排进板块前五，才晋级主线区打 D2 分。雷达区可点击「升级到主线区」落人工标记。" />
       </h2>
       <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" :clearable="false"
-        :disabled-date="notBeforeToday" style="width: 168px" />
+        :disabled-date="disabledDate" style="width: 168px" />
     </div>
 
     <DimScoreBlock :date="date" dim-key="theme_main" title="D2 · 主线明确度" />
@@ -224,9 +224,8 @@
           <el-table-column type="index" label="排名" width="52" align="center" :index="rankIndex" />
           <el-table-column label="题材" min-width="108" show-overflow-tooltip>
             <template #default="{ row }">
-              <el-tag size="small" :type="row.mainLine ? 'success' : 'primary'" effect="plain">
-                {{ row.name }}{{ row.mainLine ? ' ⭐主线' : '' }}
-              </el-tag>
+              <!-- 与板块表一致用纯文字：el-tag effect=plain 的浅色底在深色表里显白 -->
+              <span :class="{ 'main-row': row.mainLine }">{{ row.name }}{{ row.mainLine ? ' ⭐主线' : '' }}</span>
             </template>
           </el-table-column>
           <el-table-column label="涨停" width="56" align="center">
@@ -287,8 +286,11 @@ import { ref, watch, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { prdApi, recordApi } from '../api/modules'
 import { signed } from '../utils/scores'
+import { useTradingCalendar } from '../utils/tradingCalendar'
 import DimScoreBlock from '../components/DimScoreBlock.vue'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
+
+const { disabledDate, loadTradingDays } = useTradingCalendar()
 
 const route = useRoute()
 
@@ -417,6 +419,7 @@ onMounted(async () => {
       // 拿不到最近记录就停在今天
     }
   }
+  loadTradingDays()
   load()
 })
 
@@ -663,6 +666,17 @@ watch(date, load)
 }
 .theme-notice {
   margin: 6px 0 12px;
+  /* 题材表提示条缺省是 el-alert 的浅色(近白)底，与板块表深色不一致；压成透明+深色描边，随卡片底色 */
+  --el-alert-bg-color: transparent;
+  --el-alert-border-color: #2d3748;
+  background-color: transparent;
+  border: 1px solid #2d3748;
+}
+.theme-notice .el-alert__content {
+  color: #cbd5e1;
+}
+.theme-notice .el-alert__icon {
+  color: #8899a6;
 }
 .rotation-list li {
   display: flex;

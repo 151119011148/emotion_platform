@@ -6,7 +6,7 @@
           body="阵眼（点）= 你账号人工配置的 t_anchor（起止区间内恒定，断板日仍跟踪）；抱团（面）与监管（力）是公开事实。监管名单靠 /api/market/surveillance/refresh 回补过才全——事件窗为空时压制/反馈整支未评，不是「当天 0 分」。"/>
       </h2>
       <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" :clearable="false"
-        :disabled-date="notBeforeToday" style="width: 168px" />
+        :disabled-date="disabledDate" style="width: 168px" />
     </div>
 
     <!-- 总分 + 定性 -->
@@ -220,11 +220,11 @@
         </el-form-item>
         <el-form-item label="跨度起点" required>
           <el-date-picker v-model="anchorForm.startDate" type="date" value-format="YYYY-MM-DD"
-            :disabled-date="notBeforeToday" placeholder="这轮周期从哪天起爆" class="w-full" />
+            :disabled-date="disabledDate" placeholder="这轮周期从哪天起爆" class="w-full" />
         </el-form-item>
         <el-form-item label="跨度终点">
           <el-date-picker v-model="anchorForm.endDate" type="date" value-format="YYYY-MM-DD"
-            :disabled-date="notBeforeToday" placeholder="留空 = 仍在位" class="w-full" />
+            :disabled-date="disabledDate" placeholder="留空 = 仍在位" class="w-full" />
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="anchorForm.note" type="textarea" :rows="2" placeholder="选填：为何把它锚作阵眼" />
@@ -244,9 +244,12 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { d5Api, recordApi, anchorsApi, reviewApi } from '../api/modules'
 import { signed } from '../utils/scores'
+import { useTradingCalendar } from '../utils/tradingCalendar'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
 import DimIntroTip from '../components/DimIntroTip.vue'
 import MonitorHeatmap from '../components/MonitorHeatmap.vue'
+
+const { disabledDate, loadTradingDays } = useTradingCalendar()
 
 const route = useRoute()
 
@@ -350,6 +353,7 @@ onMounted(async () => {
       // 拿不到最近记录就停在今天
     }
   }
+  loadTradingDays()
   load()
 })
 

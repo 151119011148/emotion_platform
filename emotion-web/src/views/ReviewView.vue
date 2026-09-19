@@ -14,7 +14,7 @@
           <span class="fp-help">?</span>
         </el-tooltip></h2>
       <el-date-picker v-model="form.tradeDate" type="date" value-format="YYYY-MM-DD"
-        :disabled-date="disableDate" placeholder="选择交易日" style="width: 160px" />
+        :disabled-date="disabledDate" placeholder="选择交易日" style="width: 160px" />
       <span class="header-spacer"></span>
       <el-tag v-if="fetchOverall" :type="overallTag" effect="dark">{{ overallText }}</el-tag>
       <el-button type="primary" :loading="fetching" @click="handleFetch">🔄 一键拉取行情</el-button>
@@ -514,6 +514,7 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { recordApi, importApi, reviewApi, prdApi, d5Api } from '../api/modules'
+import { useTradingCalendar } from '../utils/tradingCalendar'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import EditableStatCard from '../components/EditableStatCard.vue'
 
@@ -623,30 +624,21 @@ const savedRecord = ref(null)
 const formReady = ref(false)
 const saving = ref(false)
 
-/* 可复盘交易日集合（降序，[0]=最近交易日）：非交易日/未拉取日置灰不可选 */
-const tradingDays = ref([])
-const disableDate = (d) => {
-  if (!tradingDays.value.length) return false // 从未拉取时放开选择，允许手动输入后一键拉取
-  const p = (n) => String(n).padStart(2, '0')
-  const key = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
-  return !tradingDays.value.includes(key)
-}
-async function loadTradingDays() {
-  try {
-    const r = await reviewApi.tradingDays()
-    tradingDays.value = r?.data || []
-    // 从仪表盘「去处理」跳入：query.date 指定决策日，优先定位到它（在交易日集合里才采纳）
-    const route = useRoute()
-    const q = route.query?.date
-    if (q && tradingDays.value.includes(q)) {
-      form.tradeDate = q   // 触发下方 watch → handleDateChange
-      return
-    }
-    // 进入页面优先选最近交易日：当前选中日不在交易日集合里就切到集合第一个（最近交易日）
-    if (tradingDays.value.length && !tradingDays.value.includes(form.tradeDate)) {
-      form.tradeDate = tradingDays.value[0]   // 触发下方 watch → handleDateChange
-    }
-  } catch (e) { tradingDays.value = [] }
+/* 可复盘交易日集合（降序，[0]=最近交易日）：共享工具统一「周末+官方休市日」置灰 */
+const { tradingDays, loadTradingDays, disabledDate, isNonTrading } = useTradingCalendar()
+async function initTradingDay() {
+  await loadTradingDays()
+  // 从仪表盘「去处理」跳入：query.date 指定决策日，优先定位到它（在交易日集合里才采纳）
+  const route = useRoute()
+  const q = route.query?.date
+  if (q && tradingDays.value.includes(q)) {
+    form.tradeDate = q   // 触发下方 watch → handleDateChange
+    return
+  }
+  // 进入页面优先选最近交易日：当前选中日不在交易日集合里就切到集合第一个（最近交易日）
+  if (tradingDays.value.length && !tradingDays.value.includes(form.tradeDate)) {
+    form.tradeDate = tradingDays.value[0]   // 触发下方 watch → handleDateChange
+  }
 }
 const ebbActive = computed(() => savedRecord.value?.forcedEbb === 1)
 const ebbReason = computed(() => savedRecord.value?.forcedEbbReason || '')
@@ -738,6 +730,7 @@ async function loadThemes(date) {
 async function handleFetch() {
   const date = form.tradeDate
   if (!date) { ElMessage.warning('请先选择交易日期'); return }
+  if (isNonTrading(date)) { ElMessage.warning('请选择交易日，非交易日不可拉取'); return }
   fetching.value = true
   fetchTasks.value = []
   fetchOverall.value = 'RUNNING'
@@ -753,12 +746,30 @@ async function handleFetch() {
     if (s.data) fetchOverall.value = s.data.overall || 'DONE'
     await loadDashboard(date)   // 落库后按最新数据刷新 D1-D5 + 就绪度
     loadReuse(date)             // T4 三池已回写，刷新内联的天梯/首板/高位
+    autoScore(date)             // 当天还没有复盘记录时，用拉到的客观数据自动算分落库，让顶部五维评分回显
     ElMessage.success('拉取完成，五维数据已刷新')
   } catch (e) {
     fetchOverall.value = 'FAILED'
   } finally {
     fetching.value = false
   }
+}
+
+/**
+ * 拉取只落原始数据；但顶部「五维评分」读的是已保存记录的派生列。
+ * 拉取完成后用当天客观指标重算落库，让分数/温度/阶段拉完即可见。
+ * body 只带 tradeDate：createOrUpdate 只重算派生列，不覆盖任何人手填的字段，
+ * 所以即便当天已有记录（用户手填到一半）也安全，语义等价于「重新落一版」。
+ */
+async function autoScore(date) {
+  if (!date) return
+  try {
+    const res = await reviewApi.save({ tradeDate: date })
+    savedRecord.value = res.data
+    recordId.value = res.data?.id || null
+    formReady.value = true
+    await loadDashboard(date)
+  } catch (e) { /* 自动落库失败不阻塞拉取流程 */ }
 }
 
 function fillForm(data) {
@@ -929,7 +940,7 @@ const statusClass = (s) => s && /涨停|核按钮/.test(s) ? 'st-danger' : (/断
 const topIndustries = computed(() => (d2.value.industries || []).slice(0, 5))
 
 onMounted(async () => {
-  await loadTradingDays()
+  await initTradingDay()
   handleDateChange(form.tradeDate)
 })
 </script>

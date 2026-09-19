@@ -16,10 +16,12 @@ import java.util.List;
 public interface IndustrySnapshotMapper extends BaseMapper<IndustrySnapshot> {
 
     /**
-     * 当日涨停池按 industry 聚合出板块快照。
+     * 当日涨停池按「通达信二级行业」聚合出板块快照。
      *
-     * <p>大面来自炸板池（big_loss 只在炸板池置位），而 zt 相关来自涨停池，所以是两张子查询
-     * LEFT JOIN——涨停池里的行 big_loss 恒为 0，直接 SUM 捞不出板块真的大面数。
+     * <p>行业不再用东财 hybk（t_market_stock.industry），改经 {@code t_industry_stock}（个股→通达信
+     * 二级行业映射，来源海王星 tdxhy.cfg + incon.dat #TDXNHY）关联到二级行业名称后分组。涨停池里
+     * 没映射到的个股归入「未分类」而不丢行。大面来自炸板池（big_loss 只在炸板池置位），而 zt 相关
+     * 来自涨停池，所以仍是两张子查询 LEFT JOIN——涨停池里的行 big_loss 恒为 0，直接 SUM 捞不出板块真的大面数。
      */
     @Select("<script>"
             + "SELECT i.industry AS industry,"
@@ -30,21 +32,23 @@ public interface IndustrySnapshotMapper extends BaseMapper<IndustrySnapshot> {
             + "       i.tier_levels AS tierLevels,"
             + "       COALESCE(b.big_loss_cnt,0) AS bigLossCnt "
             + "FROM ("
-            + "  SELECT industry,"
+            + "  SELECT COALESCE(tis.industry_name,'未分类') AS industry,"
             + "         COUNT(*) AS zt_count,"
-            + "         MAX(consecutive) AS max_board,"
-            + "         COALESCE(SUM(seal_amount),0) AS seal_sum,"
-            + "         SUM(CASE WHEN first_seal_time&lt;=93000 AND COALESCE(break_count,0)=0 THEN 1 ELSE 0 END) AS yizi_cnt,"
-            + "         GROUP_CONCAT(DISTINCT consecutive ORDER BY consecutive DESC) AS tier_levels "
-            + "  FROM t_market_stock "
-            + "  WHERE trade_date=#{date} AND pool='ZT' AND industry IS NOT NULL AND TRIM(industry)&lt;&gt;'' "
-            + "  GROUP BY industry"
+            + "         MAX(ms.consecutive) AS max_board,"
+            + "         COALESCE(SUM(ms.seal_amount),0) AS seal_sum,"
+            + "         SUM(CASE WHEN ms.first_seal_time&lt;=93000 AND COALESCE(ms.break_count,0)=0 THEN 1 ELSE 0 END) AS yizi_cnt,"
+            + "         GROUP_CONCAT(DISTINCT ms.consecutive ORDER BY ms.consecutive DESC) AS tier_levels "
+            + "  FROM t_market_stock ms "
+            + "  LEFT JOIN t_industry_stock tis ON tis.code = ms.code "
+            + "  WHERE ms.trade_date=#{date} AND ms.pool='ZT' "
+            + "  GROUP BY COALESCE(tis.industry_name,'未分类')"
             + ") i "
             + "LEFT JOIN ("
-            + "  SELECT industry, COUNT(*) AS big_loss_cnt "
-            + "  FROM t_market_stock "
-            + "  WHERE trade_date=#{date} AND pool='ZB' AND big_loss=1 "
-            + "  GROUP BY industry"
+            + "  SELECT COALESCE(tis.industry_name,'未分类') AS industry, COUNT(*) AS big_loss_cnt "
+            + "  FROM t_market_stock ms "
+            + "  LEFT JOIN t_industry_stock tis ON tis.code = ms.code "
+            + "  WHERE ms.trade_date=#{date} AND ms.pool='ZB' AND ms.big_loss=1 "
+            + "  GROUP BY COALESCE(tis.industry_name,'未分类')"
             + ") b ON b.industry=i.industry "
             + "ORDER BY i.zt_count DESC, i.max_board DESC"
             + "</script>")

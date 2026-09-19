@@ -6,7 +6,7 @@
           body="1进2晋级率 / 首板溢价 / 1进2大面是 T-1→T 的兑现口径，已归入连板生态低位层（连板页 2 板层）。封住/未封住名单默认收起，点击展开。" />
       </h2>
       <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" :clearable="false"
-        :disabled-date="notBeforeToday" style="width: 168px" />
+        :disabled-date="disabledDate" style="width: 168px" />
     </div>
 
     <!-- 首板生态打分明细（score-detail first 维 eval 树，纯 T 日），默认折叠 -->
@@ -176,9 +176,12 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { prdApi, recordApi } from '../api/modules'
 import { signed, fiveDimBandClassOf } from '../utils/scores'
+import { useTradingCalendar } from '../utils/tradingCalendar'
 import { useScoringStore } from '../stores/scoring'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
 import DimIntroTip from '../components/DimIntroTip.vue'
+
+const { disabledDate, loadTradingDays } = useTradingCalendar()
 
 const route = useRoute()
 const scoring = useScoringStore()
@@ -335,6 +338,7 @@ onMounted(async () => {
       if (latest && latest.tradeDate < todayStr) date.value = latest.tradeDate
     } catch (e) { /* 停在今天 */ }
   }
+  loadTradingDays()
   load()
 })
 watch(date, load)

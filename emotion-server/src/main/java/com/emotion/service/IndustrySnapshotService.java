@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -22,6 +23,9 @@ import java.util.List;
 public class IndustrySnapshotService {
 
     private static final Logger log = LoggerFactory.getLogger(IndustrySnapshotService.class);
+
+    /** 行业板块快照只持久化当日 Top N（前 N 名），避免把全部二级行业都落库。 */
+    private static final int TOP_N = 5;
 
     private final IndustrySnapshotMapper mapper;
 
@@ -39,16 +43,17 @@ public class IndustrySnapshotService {
             log.info("{} 涨停池无行业可聚合，行业快照不写", date);
             return -1;
         }
-        for (IndustrySnapshot row : rows) {
+        // aggregate 已按涨停数/最高板降序，取前 TOP_N 落库即可
+        List<IndustrySnapshot> top = rows.size() <= TOP_N ? rows
+                : new ArrayList<>(rows.subList(0, TOP_N));
+        for (IndustrySnapshot row : top) {
             row.setTradeDate(date);
         }
         mapper.delete(new LambdaQueryWrapper<IndustrySnapshot>()
                 .eq(IndustrySnapshot::getTradeDate, date));
-        for (int from = 0; from < rows.size(); from += 400) {
-            mapper.insertBatch(rows.subList(from, Math.min(from + 400, rows.size())));
-        }
-        log.info("{} 行业板块快照写入 {} 个板块", date, rows.size());
-        return rows.size();
+        mapper.insertBatch(top);
+        log.info("{} 行业板块快照写入前 {} 个板块", date, top.size());
+        return top.size();
     }
 
     public List<IndustrySnapshot> list(LocalDate date) {

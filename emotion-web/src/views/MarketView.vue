@@ -6,7 +6,7 @@
           body="指数与盘面读数全部来自本地表（复盘 md 导入或行情回补）；打分明细与仪表盘第 1 维同源，改权重刷新即变。" />
       </h2>
       <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" :clearable="false"
-        :disabled-date="notBeforeToday" style="width: 168px" />
+        :disabled-date="disabledDate" style="width: 168px" />
     </div>
 
     <!-- D1 打分明细 -->
@@ -109,8 +109,11 @@ import { useRoute } from 'vue-router'
 import { marketApi, recordApi } from '../api/modules'
 import { useScoringStore } from '../stores/scoring'
 import { signed, fiveDimBandClassOf } from '../utils/scores'
+import { useTradingCalendar } from '../utils/tradingCalendar'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
 import DimIntroTip from '../components/DimIntroTip.vue'
+
+const { disabledDate, loadTradingDays } = useTradingCalendar()
 
 const route = useRoute()
 const scoring = useScoringStore()
@@ -221,6 +224,7 @@ async function load() {
 }
 
 onMounted(async () => {
+  loadTradingDays()
   // 没带日期且今天没有记录时，回落到最近一个复盘日（与其他页同口径）
   if (!route.query.date) {
     try {

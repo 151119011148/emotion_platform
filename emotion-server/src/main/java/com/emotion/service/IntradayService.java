@@ -53,13 +53,16 @@ public class IntradayService {
     private final ThemeStockMapper themeStockMapper;
     private final MarketStockMapper marketStockMapper;
     private final StockConceptMapper stockConceptMapper;
+    private final ThemeSnapshotService themeSnapshotService;
 
     public IntradayService(ThemeMapper themeMapper, ThemeStockMapper themeStockMapper,
-                           MarketStockMapper marketStockMapper, StockConceptMapper stockConceptMapper) {
+                           MarketStockMapper marketStockMapper, StockConceptMapper stockConceptMapper,
+                           ThemeSnapshotService themeSnapshotService) {
         this.themeMapper = themeMapper;
         this.themeStockMapper = themeStockMapper;
         this.marketStockMapper = marketStockMapper;
         this.stockConceptMapper = stockConceptMapper;
+        this.themeSnapshotService = themeSnapshotService;
     }
 
     // ================= 自动回填 =================
@@ -68,7 +71,10 @@ public class IntradayService {
     @Transactional(rollbackFor = Exception.class)
     public IntradayVO themeTable(Long userId, LocalDate date) {
         backfill(userId, date);
-        return aggregate(userId, date);
+        IntradayVO vo = aggregate(userId, date);
+        // 题材榜已排好序，顺手把当日 Top5 沉降到快照表（已有则跳过）
+        themeSnapshotService.snapshotTop5(userId, date, vo.getThemes());
+        return vo;
     }
 
     /**

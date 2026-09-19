@@ -6,7 +6,7 @@
           body="一字=开盘前封死且全天 0 炸板；T字=开盘封死但盘中开过又回封；其余为换手板。同层个股按封单金额从大到小排序。" />
       </h2>
       <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" :clearable="false"
-        :disabled-date="notBeforeToday" style="width: 168px" />
+        :disabled-date="disabledDate" style="width: 168px" />
     </div>
 
     <!-- 连板生态打分：完整 eval 树（读数→命中阶梯→层/子加权→维分），可折叠 -->
@@ -279,9 +279,12 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { prdApi, leaderApi, recordApi } from '../api/modules'
 import { signed, fiveDimBandClassOf } from '../utils/scores'
+import { useTradingCalendar } from '../utils/tradingCalendar'
 import { useScoringStore } from '../stores/scoring'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
 import DimIntroTip from '../components/DimIntroTip.vue'
+
+const { disabledDate, loadTradingDays } = useTradingCalendar()
 
 const route = useRoute()
 const scoring = useScoringStore()
@@ -576,6 +579,7 @@ onMounted(async () => {
       if (latest && latest.tradeDate < todayStr) date.value = latest.tradeDate
     } catch (e) { /* 停在今天 */ }
   }
+  loadTradingDays()
   load()
 })
 watch(date, load)
