@@ -39,20 +39,31 @@ function latestTradingDay(dstr) {
   return tradingDays.value.find((d) => d <= dstr) || tradingDays.value[0] || null
 }
 
-/** 加载交易日历（幂等，only once）。返回 promise<ref>，失败时集合为空、仅周末置灰。 */
+/** 本地兜底：即便交易日集合未加载成功，也返回 ≤传入日(默认今天) 的最近一个非周末工作日。 */
+function fallbackRecentTradingDay(dstr) {
+  let d = dstr ? new Date(dstr + 'T00:00:00') : new Date()
+  if (isNaN(d.getTime())) d = new Date()
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1)
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+}
+
+/** 加载交易日历。成功则单例缓存；失败不置 loaded，避免「空集合」被永久缓存污染全局。
+ *  失败时返回空集合（仅周末置灰），并允许下次调用重试恢复。 */
 function loadTradingDays() {
   if (loaded) return Promise.resolve(tradingDays)
   if (loading) return loading
   loading = reviewApi
     .tradingDays()
     .then((r) => {
-      tradingDays.value = r?.data || []
-      loaded = true
+      const list = r?.data || []
+      tradingDays.value = list
+      loaded = !!list.length // 有真数据才缓存成功，空结果不缓存（下轮重试）
       return tradingDays
     })
     .catch(() => {
       tradingDays.value = []
-      loaded = true
+      loaded = false
+      loading = null // 失败不缓存，允许下次重试
       return tradingDays
     })
   return loading
@@ -65,5 +76,6 @@ export function useTradingCalendar() {
     disabledDate,
     isNonTrading,
     latestTradingDay,
+    fallbackRecentTradingDay,
   }
 }
