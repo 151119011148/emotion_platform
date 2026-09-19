@@ -625,20 +625,31 @@ const formReady = ref(false)
 const saving = ref(false)
 
 /* 可复盘交易日集合（降序，[0]=最近交易日）：共享工具统一「周末+官方休市日」置灰 */
-const { tradingDays, loadTradingDays, disabledDate, isNonTrading } = useTradingCalendar()
-async function initTradingDay() {
-  await loadTradingDays()
-  // 从仪表盘「去处理」跳入：query.date 指定决策日，优先定位到它（在交易日集合里才采纳）
+const { tradingDays, loadTradingDays, disabledDate, isNonTrading, fallbackRecentTradingDay } = useTradingCalendar()
+function initTradingDay() {
   const route = useRoute()
   const q = route.query?.date
-  if (q && tradingDays.value.includes(q)) {
-    form.tradeDate = q   // 触发下方 watch → handleDateChange
-    return
+  // 本地归一：交易日集合在手→必须落到集合内(不在则取最近交易日)；
+  // 集合未就绪(接口慢/挂起/失败)→先兜底到最近一个工作日，避免默认值停在“今天”的休市日。
+  const normalize = (d) => {
+    if (!d) return d
+    if (tradingDays.value.length) return tradingDays.value.includes(d) ? d : tradingDays.value[0]
+    return fallbackRecentTradingDay(d)
   }
-  // 进入页面优先选最近交易日：当前选中日不在交易日集合里就切到集合第一个（最近交易日）
-  if (tradingDays.value.length && !tradingDays.value.includes(form.tradeDate)) {
-    form.tradeDate = tradingDays.value[0]   // 触发下方 watch → handleDateChange
+  // 同步设默认值：绝不 await 异步交易日历（否则接口慢/挂起时默认会停在今天的休市日）。
+  if (q) {
+    const norm = normalize(q)
+    if (norm) form.tradeDate = norm
+  } else {
+    form.tradeDate = normalize(form.tradeDate) || form.tradeDate
   }
+  // 异步加载完成后，用真实交易日集合精确回校（集合已就绪时随即便命中）。
+  loadTradingDays().then(() => {
+    if (!tradingDays.value.length) return
+    if (!tradingDays.value.includes(form.tradeDate)) {
+      form.tradeDate = tradingDays.value[0]   // 触发下方 watch → handleDateChange
+    }
+  })
 }
 const ebbActive = computed(() => savedRecord.value?.forcedEbb === 1)
 const ebbReason = computed(() => savedRecord.value?.forcedEbbReason || '')
