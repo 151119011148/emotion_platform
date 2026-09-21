@@ -50,15 +50,18 @@ public class ReviewLedgerService {
     private final PredictionStore predictionStore;
     private final StockMapper stockMapper;
     private final MarketStockMapper marketStockMapper;
+    private final IndustryClassifyService industryClassifyService;
 
     public ReviewLedgerService(PositionStore positionStore,
                                PredictionStore predictionStore,
                                StockMapper stockMapper,
-                               MarketStockMapper marketStockMapper) {
+                               MarketStockMapper marketStockMapper,
+                               IndustryClassifyService industryClassifyService) {
         this.positionStore = positionStore;
         this.predictionStore = predictionStore;
         this.stockMapper = stockMapper;
         this.marketStockMapper = marketStockMapper;
+        this.industryClassifyService = industryClassifyService;
     }
 
     /**
@@ -138,55 +141,107 @@ public class ReviewLedgerService {
     /** 读取某日持仓台账（含三段式扩展列 + 次日决策分档/外溢列），日期切换时前端回填编辑表。 */
     public List<Position> readPositions(Long userId, LocalDate date) {
         List<Position> rows = positionStore.read(userId, date);
-        fillClosePrice(date, rows);
+        backfill(rows);
         return rows;
     }
 
-    /** 现价为空时，从当日行情明细表回填收盘价（方案 P1：现价自动取行情，不手填）。 */
+    /** 跨日/跨行回填：按每行各自 tradeDate 走 {@link #fillClosePrice}（单日行数少，直接复用）。 */
+    private void backfill(List<Position> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        Map<LocalDate, List<Position>> byDate = new HashMap<>();
+        for (Position p : rows) {
+            LocalDate d = p.getTradeDate();
+            if (d == null) {
+                continue;
+            }
+            byDate.computeIfAbsent(d, k -> new ArrayList<>()).add(p);
+        }
+        for (Map.Entry<LocalDate, List<Position>> e : byDate.entrySet()) {
+            fillClosePrice(e.getKey(), e.getValue());
+        }
+    }
+
+    /** 现价/行业/板数为空时自动回填（方案 P1：现价自动取行情，不手填；行业/板数同理不让页面留白）。
+     * 优先取当日涨停池行——industry 与连板数都是当日口径；池里没有（非涨停股）则行业走全市场字典。 */
     private void fillClosePrice(LocalDate date, List<Position> rows) {
         if (rows.isEmpty()) {
             return;
         }
         for (Position p : rows) {
-            if (p.getCurrentPrice() != null) {
-                continue;
-            }
             if (p.getStockCode() == null || p.getStockCode().isEmpty()) {
                 continue;
             }
-            // t_market_stock 一天一行池内记录，同一只股可能出现在涨停/炸板池；按 code 取当日任一池收盘价
+            boolean needPrice = p.getCurrentPrice() == null;
+            boolean needIndustry = p.getIndustry() == null || p.getIndustry().isEmpty();
+            boolean needBoard = p.getBoardNum() == null;
+            if (!needPrice && !needIndustry && !needBoard) {
+                continue;
+            }
+            // t_market_stock 一天一行池内记录，同一只股可能出现在涨停/炸板池；涨停池行信息最全
             List<MarketStock> hits = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
                     .eq(MarketStock::getTradeDate, date)
                     .eq(MarketStock::getCode, p.getStockCode())
+                    .eq(MarketStock::getPool, MarketStock.POOL_LIMIT_UP)
                     .last("LIMIT 1"));
-            if (!hits.isEmpty() && hits.get(0).getClosePrice() != null) {
-                BigDecimal close = hits.get(0).getClosePrice();
+            if (hits.isEmpty() && needPrice) {
+                // 非涨停股没有涨停池行，退而取任一池行补收盘价
+                hits = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
+                        .eq(MarketStock::getTradeDate, date)
+                        .eq(MarketStock::getCode, p.getStockCode())
+                        .last("LIMIT 1"));
+            }
+            MarketStock ms = hits.isEmpty() ? null : hits.get(0);
+            if (ms != null && needPrice && ms.getClosePrice() != null) {
+                BigDecimal close = ms.getClosePrice();
                 p.setCurrentPrice(close);
                 // 顺带补算浮动%（原 Supplier 语义：手记值是 final，这里只在确实有空档时反推）
                 if (p.getFloatPct() == null) {
                     p.setFloatPct(floatPctOf(p.getCostPrice(), close));
                 }
             }
+            if (needIndustry) {
+                String ind = ms != null && ms.getIndustry() != null ? ms.getIndustry() : null;
+                if (ind == null || ind.isEmpty()) {
+                    ind = industryClassifyService.of(p.getStockCode());
+                }
+                if (ind != null && !ind.isEmpty()) {
+                    p.setIndustry(ind);
+                }
+            }
+            if (needBoard && ms != null && ms.getConsecutive() != null) {
+                p.setBoardNum(ms.getConsecutive());
+            }
         }
     }
 
     /** 最近待裁决持仓（外溢点①：仪表盘「待裁决」卡）。 */
     public Position latestPendingPosition(Long userId, LocalDate beforeOrEqual) {
-        return positionStore.latestPending(userId, beforeOrEqual);
+        Position p = positionStore.latestPending(userId, beforeOrEqual);
+        if (p != null) {
+            backfill(Collections.singletonList(p));
+        }
+        return p;
     }
 
     /** 次日页顶部「昨日遗留决策」：最近一批未执行决策。 */
     public List<Position> pendingPositions(Long userId, LocalDate beforeOrEqual, int limit) {
-        return positionStore.pendingList(userId, beforeOrEqual, limit);
+        List<Position> rows = positionStore.pendingList(userId, beforeOrEqual, limit);
+        backfill(rows);
+        return rows;
     }
 
     /**
      * 跨日全量台账（持仓与台账页）：days 缺省=365 自然日，0=不限。
      * 行是各日快照原样返回，按标的聚合生命周期/纪律统计放在页面做——
      * 聚合口径跟着页面改时不用每次都动接口。
+     * 多日混合，行情/行业/板数回填按每行各自的 tradeDate 做。
      */
     public List<Position> allPositions(Long userId, Integer days) {
-        return positionStore.readAll(userId, days);
+        List<Position> rows = positionStore.readAll(userId, days);
+        backfill(rows);
+        return rows;
     }
 
     /** 标记某持仓已执行，闭环：回填真实动作，executed 置 1。 */

@@ -36,24 +36,24 @@
     </div>
 
     <!-- 外溢①：🔔 待裁决持仓——昨晚写的次日决策，今天一早先看它 -->
-    <div v-if="pendingPos" class="pending-card">
-      <div class="pending-head">🔔 待裁决持仓</div>
-      <div class="pending-body">
+    <div v-if="pendingList.length" class="pending-card">
+      <div class="pending-head">🔔 待裁决持仓 <span class="pending-count">{{ pendingList.length }} 条</span></div>
+      <div v-for="p in pendingList" :key="p.id" class="pending-body">
         <div class="pending-title">
-          <b>{{ pendingPos.stockName }}</b> <span class="muted">{{ pendingPos.stockCode }}</span>
-          <span v-if="pendingPos.boardNum" class="pending-board">{{ pendingPos.boardNum }}板</span>
-          <span v-if="pendingPos.industry" class="pending-ind">{{ pendingPos.industry }}</span>
-          <span class="pending-date">决策日 {{ (pendingPos.tradeDate || '').slice(5) }}</span>
+          <b>{{ p.stockName }}</b> <span class="muted">{{ p.stockCode }}</span>
+          <span v-if="p.boardNum" class="pending-board">{{ p.boardNum }}板</span>
+          <span v-if="p.industry" class="pending-ind">{{ p.industry }}</span>
+          <span class="pending-date">决策日 {{ (p.tradeDate || '').slice(5) }}</span>
         </div>
         <div class="pending-plan">
-          <span v-if="pendingPos.planOpen" class="pend-tier">高开→{{ pendingPos.planOpen }}</span>
-          <span v-if="pendingPos.planBreak" class="pend-tier">炸板→{{ pendingPos.planBreak }}</span>
-          <span v-if="pendingPos.planLow" class="pend-tier">平开/低开→{{ pendingPos.planLow }}</span>
-          <span v-if="pendingPos.planFall" class="pend-tier">跌停→{{ pendingPos.planFall }}</span>
-          <span v-if="!pendingPos.planOpen && !pendingPos.planBreak && !pendingPos.planLow && !pendingPos.planFall && pendingPos.nextDayPlan"
-                class="pend-tier">{{ pendingPos.nextDayPlan }}</span>
+          <span v-if="p.planOpen" class="pend-tier">高开→{{ p.planOpen }}</span>
+          <span v-if="p.planBreak" class="pend-tier">炸板→{{ p.planBreak }}</span>
+          <span v-if="p.planLow" class="pend-tier">平开/低开→{{ p.planLow }}</span>
+          <span v-if="p.planFall" class="pend-tier">跌停→{{ p.planFall }}</span>
+          <span v-if="!p.planOpen && !p.planBreak && !p.planLow && !p.planFall && p.nextDayPlan"
+                class="pend-tier">{{ p.nextDayPlan }}</span>
         </div>
-        <el-button type="primary" plain size="small" @click="goReview">去处理 →</el-button>
+        <el-button type="primary" plain size="small" @click="goReview(p)">去处理 →</el-button>
       </div>
     </div>
 
@@ -226,26 +226,26 @@ async function loadAdvice() {
   } catch (e) { /* ignore */ }
 }
 
-/* 外溢①：🔔 待裁决持仓——最近一条未执行决策，早上第一眼看到 */
-const pendingPos = ref(null)
+/* 外溢①：🔔 待裁决持仓——最近未执行决策列表（最多 5 条），早上第一眼看到 */
+const pendingList = ref([])
 const router = useRouter()
 async function loadPending() {
   try {
-    const res = await recordApi.latestPendingPosition()
-    pendingPos.value = res.data || null
-  } catch (e) { pendingPos.value = null }
+    const res = await recordApi.pendingPositions(null, 5)
+    pendingList.value = res?.data || []
+  } catch (e) { pendingList.value = [] }
 }
-function goReview() {
-  // 决策在 T 日晚上写、T+1 竞价时执行——跳到决策次日的复盘页，页面顶部才会把该裁决「带出」供执行。
-  // 落决策当天(T)页顶部只会带出更早的遗留，不会带出它自己；这正是「决策不能躺在 T 页」的核心。
-  const d = pendingPos.value?.tradeDate
+function goReview(p) {
+  // 决策在 T 日晚上写、T+1 竞价时执行——跳到决策次日的复盘页，页面底部持仓台账供执行；
+  // to=ledger 让复盘页数据加载完自动滚到持仓台账，不再停在页面顶部。
+  const d = p?.tradeDate
   let target = d
   if (d) {
     const dt = new Date(d + 'T12:00:00')
     const nd = new Date(dt.getTime() + 24 * 60 * 60 * 1000)
     target = `${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}-${String(nd.getDate()).padStart(2, '0')}`
   }
-  router.push({ name: 'Review', query: { date: target } })
+  router.push({ name: 'Review', query: { date: target, to: 'ledger' } })
 }
 
 /** 点击曲线点：整页切到那天（页头温度、五维卡、阶段定位都跟着换）。 */
@@ -424,7 +424,9 @@ onMounted(() => {
 
 .pending-card { background: linear-gradient(135deg, rgba(245,158,11,.14), rgba(245,158,11,.05)); border: 1px solid #d97706; border-radius: 12px; padding: 14px 16px; margin-bottom: 18px; }
 .pending-head { color: #fbbf24; font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+.pending-count { color: #f59e0b; font-size: 12px; font-weight: 400; margin-left: 4px; }
 .pending-body { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.pending-card .pending-body + .pending-body { border-top: 1px dashed rgba(217,119,6,.28); padding-top: 10px; margin-top: 10px; }
 .pending-title { color: #fff; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pending-board { color: #f59e0b; font-size: 12px; }
 .pending-ind { color: #94a3b8; font-size: 12px; }

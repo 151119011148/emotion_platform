@@ -276,7 +276,9 @@ public class IntradayService {
                     globalH, maxZt, maxSeal));
         }
 
-        rows.sort(Comparator.comparingDouble(IntradayVO.ThemeRow::getStrength).reversed()
+        // 排序：涨停家数降序 → 最高板降序 → 名称升序（2026-09-21 起题材表按涨停数排，与板块表一致）
+        rows.sort(Comparator.comparingInt((IntradayVO.ThemeRow r) -> r.getZtCount())
+                        .reversed()
                 .thenComparing(IntradayVO.ThemeRow::getMaxBoard, Comparator.reverseOrder())
                 .thenComparing(IntradayVO.ThemeRow::getName));
         for (int i = 0; i < rows.size(); i++) {

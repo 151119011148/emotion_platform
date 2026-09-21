@@ -537,7 +537,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { recordApi, importApi, reviewApi, prdApi, d5Api, marketApi, anchorsApi } from '../api/modules'
 import { useTradingCalendar } from '../utils/tradingCalendar'
@@ -654,7 +654,6 @@ const saving = ref(false)
 /* 可复盘交易日集合（降序，[0]=最近交易日）：共享工具统一「周末+官方休市日」置灰 */
 const { tradingDays, loadTradingDays, disabledDate, cellClass, isNonTrading, fallbackRecentTradingDay } = useTradingCalendar()
 function initTradingDay() {
-  const route = useRoute()
   const q = route.query?.date
   // 本地归一：交易日集合在手→必须落到集合内(不在则取最近交易日)；
   // 集合未就绪(接口慢/挂起/失败)→先兜底到最近一个工作日，避免默认值停在“今天”的休市日。
@@ -735,6 +734,8 @@ async function loadDashboard(date) {
 }
 
 function handleDateChange(date) {
+  // 仪表盘「待裁决 → 去处理」跳来时带着 to=ledger：等台账行渲染完直接滚到持仓台账，不停页面顶部
+  const wantLedger = route.query?.to === 'ledger'
   dashboard.value = null
   fetchTasks.value = []
   fetchOverall.value = ''
@@ -742,7 +743,9 @@ function handleDateChange(date) {
   loadRecord(date)
   loadDashboard(date)
   loadReuse(date)
-  loadPositions(date).catch(() => {})
+  loadPositions(date).then(() => {
+    if (wantLedger) nextTick(() => setTimeout(scrollToLedger, 100))
+  }).catch(() => {})
   loadPendingCarry(date)
   loadPoolIndex(date)   // 台账选股时自动带出板块/板数的索引
 }
