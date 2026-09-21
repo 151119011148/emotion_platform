@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>持仓与台账 · 页面原型</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0D1117;color:#E6EDF3;font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;font-size:13px;line-height:1.5}
+.wrap{max-width:1400px;margin:0 auto;padding:16px}
+/* 顶部 */
+.hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px}
+.hd h1{font-size:18px;font-weight:600}
+.hd .sub{color:#8B949E;font-size:12px;margin-top:2px}
+.tabs{display:flex;gap:6px}
+.tab{padding:5px 12px;border-radius:6px;background:#161B22;border:1px solid #30363D;color:#8B949E;cursor:pointer;font-size:12px}
+.tab.on{background:#1F6FEB;border-color:#1F6FEB;color:#fff}
+/* 卡片 */
+.cards{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}
+.card{background:#161B22;border:1px solid #30363D;border-radius:8px;padding:11px 13px}
+.card .k{color:#8B949E;font-size:11px;margin-bottom:5px}
+.card .v{font-size:19px;font-weight:600}
+.card .x{font-size:11px;color:#6E7681;margin-top:3px}
+.red{color:#F85149}.grn{color:#3FB950}.yel{color:#D29922}.blu{color:#58A6FF}.org{color:#FF9F45}
+/* 区块 */
+.sec{background:#161B22;border:1px solid #30363D;border-radius:8px;margin-bottom:14px;overflow:hidden}
+.sec-hd{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #30363D;background:#1C2128}
+.sec-hd h2{font-size:14px;font-weight:600}
+.sec-hd .note{font-size:11px;color:#8B949E}
+.sec-bd{padding:12px 14px}
+/* 表格 */
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;color:#8B949E;font-weight:500;padding:7px 8px;border-bottom:1px solid #30363D;font-size:11px}
+td{padding:8px;border-bottom:1px solid #21262D}
+tr:last-child td{border-bottom:none}
+.tag{display:inline-block;padding:1px 7px;border-radius:10px;font-size:10px;margin-right:4px}
+.t-red{background:rgba(248,81,73,.15);color:#F85149;border:1px solid rgba(248,81,73,.3)}
+.t-grn{background:rgba(63,185,80,.15);color:#3FB950;border:1px solid rgba(63,185,80,.3)}
+.t-yel{background:rgba(210,153,34,.15);color:#D29922;border:1px solid rgba(210,153,34,.3)}
+.t-blu{background:rgba(88,166,255,.15);color:#58A6FF;border:1px solid rgba(88,166,255,.3)}
+.t-gry{background:rgba(139,148,158,.12);color:#8B949E;border:1px solid rgba(139,148,158,.25)}
+.t-org{background:rgba(255,159,69,.15);color:#FF9F45;border:1px solid rgba(255,159,69,.3)}
+/* 决策卡 */
+.dec{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}
+.dec-i{background:#0D1117;border:1px solid #30363D;border-radius:6px;padding:9px}
+.dec-i .c{font-size:11px;color:#8B949E;margin-bottom:4px}
+.dec-i .a{font-size:12px;font-weight:600}
+/* 提示条 */
+.alert{background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.25);border-left:3px solid #F85149;border-radius:6px;padding:9px 12px;margin-bottom:12px;font-size:12px}
+.alert.y{background:rgba(210,153,34,.08);border-color:rgba(210,153,34,.25);border-left-color:#D29922}
+.alert b{color:#F85149}.alert.y b{color:#D29922}
+/* 抽屉生命周期 */
+.life{display:flex;gap:0;margin:10px 0 4px}
+.life-i{flex:1;text-align:center;position:relative;padding:6px 4px}
+.life-i .d{font-size:10px;color:#6E7681}
+.life-i .e{font-size:12px;margin-top:3px}
+.life-i .p{font-size:10px;color:#8B949E;margin-top:2px}
+.bar{height:3px;background:#30363D;margin:6px 0}
+.bar span{display:block;height:100%;background:#1F6FEB}
+/* 纪律分环 */
+.sc{display:inline-flex;align-items:center;gap:6px}
+.sc .n{font-weight:600;font-size:14px}
+.foot{color:#6E7681;font-size:11px;padding:8px 14px;border-top:1px solid #30363D;background:#1C2128}
+.btn{padding:4px 10px;border-radius:5px;background:#21262D;border:1px solid #30363D;color:#C9D1D9;cursor:pointer;font-size:11px}
+.btn.p{background:#1F6FEB;border-color:#1F6FEB;color:#fff}
+.mini{font-size:11px;color:#6E7681}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="hd">
+  <div>
+    <h1>持仓与台账</h1>
+    <div class="sub">2026-09-16 收盘 · 主入口=每日复盘页 · 本页=标的维度全生命周期</div>
+  </div>
+  <div class="tabs">
+    <div class="tab on">持仓中</div>
+    <div class="tab">已清仓</div>
+    <div class="tab">全部</div>
+    <div class="tab">纪律统计</div>
+  </div>
+</div>
+
+<!-- 统计卡 -->
+<div class="cards">
+  <div class="card"><div class="k">当前持仓市值</div><div class="v">— </div><div class="x">2 只（1套牢/1被埋）</div></div>
+  <div class="card"><div class="k">浮动盈亏</div><div class="v red">-8.2%</div><div class="x">国芳套牢 + 吉鑫浮亏</div></div>
+  <div class="card"><div class="k">本周已实现</div><div class="v grn">+6.4%</div><div class="x">闽东/中闽 兑现</div></div>
+  <div class="card"><div class="k">平均纪律分</div><div class="v yel">62</div><div class="x">卖出 90 / 买入 42</div></div>
+  <div class="card"><div class="k">本周胜率</div><div class="v">40%</div><div class="x">5 笔：2 盈 3 亏</div></div>
+</div>
+
+<!-- 外溢提醒 -->
+<div class="alert y">
+  <b>⚠ 待裁决（同步至仪表盘）：</b>国芳集团（跌停未出）· 吉鑫科技（排板被埋）· 闽东电力（待确认是否持仓）→ 9/17 竞价裁决，见下方「次日处理决策」
+</div>
+
+<!-- ① 当前持仓 -->
+<div class="sec">
+  <div class="sec-hd">
+    <h2>🏷 当前持仓（2 只）</h2>
+    <div class="note">T日收盘快照 · 现价自动取行情表</div>
+  </div>
+  <div class="sec-bd">
+    <table>
+      <tr><th>代码/名称</th><th>板块</th><th>板数</th><th>买入日</th><th>成本</th><th>现价</th><th>浮动</th><th>持有</th><th>状态</th><th>次日决策</th><th>操作</th></tr>
+      <tr>
+        <td><b>国芳集团</b><br><span class="mini">601086</span></td>
+        <td>零售</td><td>2板</td><td>09/14</td><td>—</td><td>—</td><td class="red">套牢</td><td>3天</td>
+        <td><span class="tag t-red">跌停封死</span></td>
+        <td class="org">开板即逃</td>
+        <td><span class="btn">详情</span></td>
+      </tr>
+      <tr>
+        <td><b>吉鑫科技</b><br><span class="mini">601218</span></td>
+        <td>风电</td><td>首板</td><td>09/16</td><td>—</td><td>—</td><td class="red">-6.1%</td><td>1天</td>
+        <td><span class="tag t-yel">排板被埋</span></td>
+        <td class="org">反抽减亏/止损</td>
+        <td><span class="btn">详情</span></td>
+      </tr>
+    </table>
+    <div class="alert" style="margin:10px 0 0">
+      <b>⚠ 闽东电力待确认：</b>9/14「竞价出半仓+炸板出半仓」已记录；若仍有剩余仓位，按「破 15.53 清 / 低开核按钮竞价清」处理 → <span class="btn p">确认状态</span>
+    </div>
+  </div>
+</div>
+
+<!-- ② 今日清仓 -->
+<div class="sec">
+  <div class="sec-hd"><h2>📋 今日清仓 / 交易流水</h2><div class="note">09/16</div></div>
+  <div class="sec-bd">
+    <table>
+      <tr><th>名称</th><th>动作</th><th>板数</th><th>盈亏</th><th>预案</th><th>实际</th><th>延迟</th><th>纪律分</th><th>评价</th></tr>
+      <tr>
+        <td><b>中闽能源</b></td><td>09/16 平盘走</td><td>首板</td><td class="grn">0.0%</td>
+        <td>闽东弱→补涨走</td><td>平盘走</td><td class="grn">0天</td>
+        <td><span class="sc"><span class="n grn">90</span></span></td>
+        <td><span class="tag t-grn">✅ 补涨纪律到位</span></td>
+      </tr>
+      <tr>
+        <td><b>国芳集团</b></td><td>09/16 挂单未成交</td><td>2板</td><td class="red">-10%+</td>
+        <td>跌停首日必排</td><td>未排出去</td><td class="red">2天</td>
+        <td><span class="sc"><span class="n red">30</span></span></td>
+        <td><span class="tag t-red">🔴 流动性消失</span></td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+<!-- ③ 次日处理决策 -->
+<div class="sec">
+  <div class="sec-hd"><h2>📅 次日处理决策（09/17）</h2><div class="note">★ 自动外溢 → 仪表盘待办 + 次日复盘页顶部</div></div>
+  <div class="sec-bd">
+    <table>
+      <tr><th>标的</th><th>面临</th><th>情形与动作</th></tr>
+      <tr>
+        <td><b>国芳集团</b><br><span class="mini">跌停套牢</span></td><td>出逃</td>
+        <td><div class="dec">
+          <div class="dec-i"><div class="c">开板/撬板</div><div class="a org">立刻市价逃</div></div>
+          <div class="dec-i"><div class="c">继续封死</div><div class="a">继续排单</div></div>
+          <div class="dec-i"><div class="c">反抽 17+</div><div class="a">逃命不加仓</div></div>
+          <div class="dec-i"><div class="c">铁律</div><div class="a red">不补/不等回本</div></div>
+        </div></td>
+      </tr>
+      <tr>
+        <td><b>吉鑫科技</b><br><span class="mini">排板被埋</span></td><td>减亏</td>
+        <td><div class="dec">
+          <div class="dec-i"><div class="c">反抽成本附近</div><div class="a org">减亏走</div></div>
+          <div class="dec-i"><div class="c">平开震荡</div><div class="a">无资金则走</div></div>
+          <div class="dec-i"><div class="c">低开继续杀</div><div class="a red">硬止损割</div></div>
+          <div class="dec-i"><div class="c">铁律</div><div class="a red">不摊平</div></div>
+        </div></td>
+      </tr>
+    </table>
+    <div style="margin-top:8px"><span class="btn p">同步到 09/17 盘前</span> <span class="btn">加入仪表盘待办</span></div>
+  </div>
+</div>
+
+<!-- 生命周期抽屉 -->
+<div class="sec">
+  <div class="sec-hd"><h2>📁 标的全生命周期（点击展开）</h2><div class="note">标的维度 · 买入→持有→卖出→纪律评分</div></div>
+  <div class="sec-bd">
+    <table>
+      <tr><th>标的</th><th>买入日</th><th>卖出日</th><th>板数</th><th>盈亏</th><th>持有</th><th>纪律分</th><th>状态</th><th></th></tr>
+      <tr><td><b>闽东电力</b></td><td>09/11</td><td>09/14</td><td>3板</td><td class="grn">+（分批）</td><td>3天</td><td><span class="n grn">90</span></td><td><span class="tag t-grn">已清</span></td><td><span class="btn">展开</span></td></tr>
+      <tr><td><b>中闽能源</b></td><td>09/15</td><td>09/16</td><td>首板</td><td>0.0%</td><td>1天</td><td><span class="n grn">90</span></td><td><span class="tag t-grn">已清</span></td><td><span class="btn">展开</span></td></tr>
+      <tr><td><b>金正大</b></td><td>09/09</td><td>09/11</td><td>4板</td><td class="yel">回吐1板</td><td>2天</td><td><span class="n yel">60</span></td><td><span class="tag t-yel">延迟清</span></td><td><span class="btn">展开</span></td></tr>
+      <tr><td><b>亚盛集团</b></td><td>09/09</td><td>09/11</td><td>5板</td><td class="yel">回吐大半</td><td>2天</td><td><span class="n red">40</span></td><td><span class="tag t-red">违背铁律</span></td><td><span class="btn">展开</span></td></tr>
+      <tr><td><b>国芳集团</b></td><td>09/14</td><td>—</td><td>2板</td><td class="red">套牢</td><td>3天</td><td><span class="n red">30</span></td><td><span class="tag t-red">持仓</span></td><td><span class="btn">展开</span></td></tr>
+      <tr><td><b>吉鑫科技</b></td><td>09/16</td><td>—</td><td>首板</td><td class="red">-6.1%</td><td>1天</td><td><span class="n red">40</span></td><td><span class="tag t-yel">持仓</span></td><td><span class="btn">展开</span></td></tr>
+    </table>
+
+    <!-- 展开示例 -->
+    <div style="margin-top:12px;border:1px solid #30363D;border-radius:6px;padding:11px;background:#0D1117">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <b>闽东电力 000993 · 全生命周期</b>
+        <span class="mini">预案：3板死亡交叉点，炸板走｜实际：竞价半仓+炸板半仓｜延迟 0 天</span>
+      </div>
+      <div class="life">
+        <div class="life-i"><div class="d">09/11</div><div class="e blu">打板买入</div><div class="p">3板·电力</div></div>
+        <div class="life-i"><div class="d">09/12-13</div><div class="e">持有</div><div class="p">分歧</div></div>
+        <div class="life-i"><div class="d">09/14</div><div class="e org">竞价出半仓</div><div class="p">3板减半</div></div>
+        <div class="life-i"><div class="d">09/14</div><div class="e grn">炸板出清</div><div class="p">纪律执行</div></div>
+      </div>
+      <div class="bar"><span style="width:100%"></span></div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px">
+        <div class="dec-i"><div class="c">预案执行度</div><div class="a grn">100</div></div>
+        <div class="dec-i"><div class="c">止损纪律</div><div class="a grn">100</div></div>
+        <div class="dec-i"><div class="c">开仓时机</div><div class="a red">40（退潮日打板）</div></div>
+        <div class="dec-i"><div class="c">综合纪律分</div><div class="a grn">90</div></div>
+      </div>
+      <div class="mini" style="margin-top:7px">教训：方向对、时机错——退潮日打板（红盘率11.8%）；但卖出端完整执行，是本周标杆。</div>
+    </div>
+  </div>
+</div>
+
+<!-- 纪律统计 -->
+<div class="sec">
+  <div class="sec-hd"><h2>📊 纪律统计与认知沉淀</h2><div class="note">本周 5 笔</div></div>
+  <div class="sec-bd">
+    <div class="cards" style="margin-bottom:0">
+      <div class="card"><div class="k">卖出纪律分</div><div class="v grn">90</div><div class="x">闽东/中闽 达标</div></div>
+      <div class="card"><div class="k">买入纪律分</div><div class="v red">42</div><div class="x">3次退潮期开仓</div></div>
+      <div class="card"><div class="k">最频失误</div><div class="v" style="font-size:14px">该走没走 ×3</div><div class="x">金正大/亚盛/国芳</div></div>
+      <div class="card"><div class="k">环境胜率</div><div class="v" style="font-size:14px">退潮期 0/3</div><div class="x">打板/半路/排板全亏</div></div>
+      <div class="card"><div class="k">新增铁律</div><div class="v" style="font-size:14px org">跌停首日必排</div><div class="x">国芳换来的教训</div></div>
+    </div>
+  </div>
+  <div class="foot">核心结论：卖出端已过关（90），问题 100% 在买入端——退潮期连续 3 次逆势开仓，且打板/半路/排板三种手法全亏 → 证明「环境 &gt; 手法」。</div>
+</div>
+
+</div>
+</body>
+</html>
