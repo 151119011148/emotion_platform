@@ -144,13 +144,24 @@
               <h4>③ 监管压制 <span class="sub">家数40 / 高位占比35 / 扩散25</span></h4>
               <div class="head-right">
                 <span v-if="vo.pressure?.score != null" class="sub-score">得分 {{ vo.pressure.score }}</span>
-                <el-tag v-if="vo.pressure.adjust" type="danger" size="small" effect="dark" class="guard-tag">{{ vo.pressure.adjust }}</el-tag>
+                <el-tag v-if="vo.pressure?.adjust" type="danger" size="small" effect="dark" class="guard-tag">{{ vo.pressure.adjust }}</el-tag>
               </div>
             </div>
+            <!-- 未评（score=null，事件窗为空/名单未回补）时数字一律印 —：
+                 后端 survCount/survNuke 是 int，未评时回落 0，直印会把「不知道」显示成「0 家」的事实。 -->
             <div class="stat-grid">
-              <div class="stat"><span class="stat-label">SEVERE/EXCH 在列</span><span class="stat-value">{{ vo.pressure?.survCount ?? '—' }}</span></div>
-              <div class="stat"><span class="stat-label">高位监管</span><span class="stat-value">{{ vo.pressure?.highSurvCount ?? '—' }} / {{ vo.pressure?.highSurvRatio == null ? '—' : pct(vo.pressure.highSurvRatio) }}</span></div>
-              <div class="stat"><span class="stat-label">板块扩散(最多)</span><span class="stat-value">{{ vo.pressure?.maxSectorSurv ?? '—' }}<span class="stat-mini" v-if="vo.pressure?.maxSectorName"> {{ vo.pressure.maxSectorName }}</span></span></div>
+              <div class="stat"><span class="stat-label">SEVERE/EXCH 在列</span><span class="stat-value">{{ statVal(vo.pressure, 'survCount') }}</span></div>
+              <div class="stat">
+                <span class="stat-label">高位监管</span>
+                <span class="stat-value">
+                  <template v-if="isRated(vo.pressure)">{{ vo.pressure.highSurvCount }} / {{ vo.pressure.highSurvRatio == null ? '—' : pct(vo.pressure.highSurvRatio) }}</template>
+                  <template v-else>—</template>
+                </span>
+              </div>
+              <div class="stat">
+                <span class="stat-label">板块扩散(最多)</span>
+                <span class="stat-value">{{ statVal(vo.pressure, 'maxSectorSurv') }}<span class="stat-mini" v-if="isRated(vo.pressure) && vo.pressure.maxSectorName"> {{ vo.pressure.maxSectorName }}</span></span>
+              </div>
             </div>
           </div>
           <div class="half-block">
@@ -160,10 +171,62 @@
             </div>
             <div class="stat-grid">
               <div class="stat"><span class="stat-label">监管股均涨</span><span class="stat-value" :class="pctClass(vo.feedback?.survAvgChg)">{{ vo.feedback?.survAvgChg == null ? '—' : signed(vo.feedback.survAvgChg) + '%' }}</span></div>
-              <div class="stat"><span class="stat-label">核按钮/跌停</span><span class="stat-value" :class="vo.feedback?.survNuke ? 'down' : ''">{{ vo.feedback?.survNuke ?? '—' }} 只</span></div>
+              <div class="stat"><span class="stat-label">核按钮/跌停</span><span class="stat-value" :class="vo.feedback?.survNuke ? 'down' : ''">{{ nukeText(vo.feedback) }}</span></div>
             </div>
           </div>
         </div>
+
+        <!-- 在列监管股：③ 的家数与 ④ 的均涨/核按钮就是由这批票算出来的。
+             后端一直在返回 monitorPool，但这一页此前只印了汇总数字，数字没有对账的地方。
+             在列十几只的日子会把页面顶得很长，所以默认收起；展开后还能只看高位那几只。 -->
+        <div v-if="monitored.length" class="surv-pool">
+          <div class="surv-pool-head" @click="monitorOpen = !monitorOpen">
+            <span class="sp-title">在列监管股</span>
+            <span class="fold-tag">{{ monitorOpen ? '收起 ▲' : '展开 ▼' }}</span>
+            <span class="sub">③ 家数来源 · 按连板降序 · 共 {{ monitored.length }} 家</span>
+          </div>
+          <div v-show="monitorOpen">
+            <div class="sp-toolbar">
+              <el-checkbox v-if="vo.coalition?.highThreshold != null" v-model="monitorHighOnly" size="small">
+                只看高位（≥{{ vo.coalition.highThreshold }} 板）
+              </el-checkbox>
+              <span class="sub">当前列出 {{ monitorRows.length }} / {{ monitored.length }} 家</span>
+            </div>
+            <!-- 有在列股才会渲染本表，所以空表只可能是「只看高位」筛出来的，空态文案照这个写 -->
+            <el-table :data="monitorRows" size="small" :empty-text="'当前筛选下无在列监管股，勾掉「只看高位」看全部 ' + monitored.length + ' 家'">
+              <el-table-column label="股票" min-width="132">
+                <template #default="{ row }">
+                  <span class="sp-name">{{ row.name }}</span><span class="sp-code">{{ row.code }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="行业" min-width="100">
+                <template #default="{ row }">{{ row.industry || '—' }}</template>
+              </el-table-column>
+              <el-table-column label="连板" width="70" align="center">
+                <template #default="{ row }">{{ row.consecutive == null ? '—' : row.consecutive + ' 板' }}</template>
+              </el-table-column>
+              <el-table-column label="类型" width="126">
+                <template #default="{ row }">
+                  <el-tag :type="kindTag(row.kind)" size="small" effect="plain" class="sp-kind">{{ kindLabel(row.kind) }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="公告日" width="92" align="center">
+                <template #default="{ row }">{{ row.annDate ? fmtDate(row.annDate) : '—' }}</template>
+              </el-table-column>
+              <el-table-column label="当日状态" width="120">
+                <template #default="{ row }"><span :class="statusClass(row.status)">{{ row.status || '—' }}</span></template>
+              </el-table-column>
+              <el-table-column label="涨幅" width="88" align="right">
+                <template #default="{ row }">
+                  <span :class="pctClass(row.chg)">{{ row.chg == null ? '—' : signed(row.chg) + '%' }}</span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </div>
+        <p v-else-if="isRated(vo.pressure) && vo.pressure.survCount === 0" class="surv-empty">
+          当日 SEVERE/EXCH 在列 0 家（例行异动 ZD 不进此表）
+        </p>
       </section>
 
       <!-- 监管池 · 全生命周期轨迹 -->
@@ -244,7 +307,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { d5Api, recordApi, anchorsApi, reviewApi } from '../api/modules'
 import { signed } from '../utils/scores'
@@ -256,6 +319,7 @@ import MonitorHeatmap from '../components/MonitorHeatmap.vue'
 const { disabledDate, cellClass, loadTradingDays } = useTradingCalendar()
 
 const route = useRoute()
+const router = useRouter()
 
 const LEVEL_TAG = { 健康: 'success', 可控: 'primary', 警戒: 'warning', 危险: 'danger', 崩塌: 'danger' }
 const ACTION_TYPE = {
@@ -312,14 +376,33 @@ function levelTag(l) { return LEVEL_TAG[l] || 'info' }
 function actionType(a) { return ACTION_TYPE[a] || 'info' }
 function signalType(l) { return SIGNAL_TYPE[l] || 'info' }
 function kindLabel(k) { return KIND_LABEL[k] || k || '—' }
+/** 监管股当日状态配色（涨停红 / 核按钮·断板·绿盘蓝 / 其余黄），在列监管股明细表在用。 */
 function statusClass(s) {
   if (!s) return ''
   if (s.includes('涨停')) return 'up'
   if (s.includes('核按钮') || s.includes('断板') || s.includes('绿盘')) return 'down'
   return 'warn'
 }
-function notBeforeToday(d) {
-  return d.getTime() > Date.now()
+/** 监管类型标签配色：严重异常波动 > 交易所监管 > 其它。 */
+function kindTag(k) {
+  if (!k) return 'info'
+  if (String(k).includes('SEVERE')) return 'danger'
+  if (String(k).includes('EXCH')) return 'warning'
+  return 'info'
+}
+/** 子项是否已评：score 为 null 表示整支未评（事件窗为空），不等于「0 家」。 */
+function isRated(block) {
+  return block != null && block.score != null
+}
+/** 未评子项的统计值一律印 —，避免把「不知道」印成 0 被当成事实。 */
+function statVal(block, field) {
+  if (!isRated(block)) return '—'
+  const v = block[field]
+  return v == null ? '—' : v
+}
+function nukeText(block) {
+  if (!isRated(block)) return '—'
+  return (block.survNuke ?? 0) + ' 只'
 }
 
 /** 补 T00:00:00 按本地时区解析，否则 new Date('2026-09-04') 走 UTC 会少一天。 */
@@ -342,21 +425,53 @@ const anchorItems = computed(() => {
   })
 })
 
+/** 在列监管股：按连板降序（缺价的排最后）。高位股摆最上面，才和「高位监管」那格口径对得上。 */
+const monitored = computed(() => {
+  const list = [...(vo.value?.monitorPool || [])]
+  return list.sort((a, b) => (b.consecutive || 0) - (a.consecutive || 0))
+})
+// 明细默认收起（在列十几只的日子会把页面顶很长）；两个开关在切日期时保留，看盘连续翻页不用反复点
+const monitorOpen = ref(false)
+const monitorHighOnly = ref(false)
+/** 只看高位：连板达到抱团口径的高位阈值；当天没有抱团块（H<2）时不筛，避免把整表筛空。 */
+const monitorRows = computed(() => {
+  const th = vo.value?.coalition?.highThreshold
+  if (!monitorHighOnly.value || th == null) return monitored.value
+  return monitored.value.filter((m) => (m.consecutive || 0) >= th)
+})
+
+/** 递增请求号：在曲线上连点日期会叠请求，只认最后一次发出的结果，
+ *  否则先发的慢请求后到，会把新那天的数据盖回旧日期（日期与内容对不上）。 */
+let loadSeq = 0
+
 async function load() {
+  const seq = ++loadSeq
+  const day = date.value
   loading.value = true
   try {
-    const res = await d5Api.high(date.value)
-    vo.value = res?.data || null
+    // VO 与曲线两个取数口互不依赖，并行发（串行等于白等一次往返）。
+    // 曲线失败只空掉走势图，不该连带把整页判成取数失败。
+    const [voRes, rangeRes] = await Promise.all([
+      d5Api.high(day),
+      recordApi.getRange(shiftDays(day, LOOKBACK_DAYS), day).catch(() => null)
+    ])
+    if (seq !== loadSeq) return
+    vo.value = voRes?.data || null
     // 曲线与异动监管页同一取数口：range 返回按日升序，切出最近一段直接喂图
     // 现行 D5 是融合版，score_high 从 9/10 才开始落值；9/10 前回退旧版 score_anchor，
     // 否则曲线在融合边界前整段空白。
-    const rangeRes = await recordApi.getRange(shiftDays(date.value, LOOKBACK_DAYS), date.value).catch(() => null)
     curveRows.value = ((rangeRes && rangeRes.data) || []).slice(-CURVE_ROWS).map((r) => ({
       date: r.tradeDate,
       score: r.scoreHigh ?? r.scoreAnchor
     }))
+  } catch (e) {
+    if (seq !== loadSeq) return
+    // d5Api 走 skipErrorToast，失败要在这里讲清楚，否则页面只剩一句「无数据」让人以为是真没行情
+    vo.value = null
+    curveRows.value = []
+    ElMessage.error('高位生态取数失败：' + (e?.message || e))
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -375,6 +490,16 @@ onMounted(async () => {
 })
 
 watch(date, load)
+
+/**
+ * 日期同步到地址栏：刷新 / 收藏 / 把链接发给别人时都还停在同一天。
+ * 用 replace 不用 push——在曲线上一天点一下，若都进历史栈，后退键就变成「退回上一天」而不是「离开本页」。
+ */
+watch(date, (d) => {
+  if (d && d !== route.query.date) {
+    router.replace({ query: { ...route.query, date: d } })
+  }
+})
 
 // ---------------- 阵眼个体 增删改查 ----------------
 const ANCHOR_ROLE_OPTIONS = [
@@ -486,17 +611,61 @@ async function removeAnchor(a) {
   font-weight: 400;
   margin-left: 6px;
 }
-.intro {
-  margin-bottom: 16px;
+/* 在列监管股（③④ 块的数字口径来源）：头部可点折叠，hover 反馈与「子项明细」同款 */
+.surv-pool {
+  margin-top: 16px;
 }
-.intro-body p {
-  margin: 6px 0 0;
-  font-size: 12px;
-  line-height: 1.6;
-  color: #8899a6;
+.surv-pool-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin: 0 0 8px -8px;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: background .15s;
 }
-.intro-body code {
+.surv-pool-head:hover {
+  background: rgba(255, 255, 255, .025);
+}
+.surv-pool-head:hover .sp-title {
+  color: #fff;
+}
+.sp-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+/* Element 的 checkbox 文案默认 #606266，深底上偏暗；这里只压本页工具栏这一处，不动全局 */
+.sp-toolbar :deep(.el-checkbox__label) {
   color: #cbd5e1;
+}
+.sp-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+.sp-name {
+  color: #e1e8ed;
+  font-weight: 600;
+}
+.sp-code {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #6b7c8c;
+}
+/* 类型标签可能带组合串（EXCH+SEVERE），固定高度会截断，允许换成两行 */
+.sp-kind {
+  height: auto;
+  line-height: 1.5;
+  white-space: normal;
+}
+.surv-empty {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: #8899a6;
 }
 /* 总分横幅 */
 .score-banner {

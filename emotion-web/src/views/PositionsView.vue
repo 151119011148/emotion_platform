@@ -90,9 +90,13 @@
           <el-table-column label="现价" width="80">
             <template #default="{ row }">{{ row.currentPrice ?? '—' }}</template>
           </el-table-column>
+          <el-table-column label="股数" width="82">
+            <template #default="{ row }">{{ qtyText(row.quantity) }}</template>
+          </el-table-column>
           <el-table-column label="浮动" width="86">
             <template #default="{ row }">
               <span :class="pctClass(row.floatPct)">{{ fmtPct(row.floatPct) }}</span>
+              <div v-if="pnlOf(row)" class="mini" :class="pctClass(pnlOf(row).amount)">{{ yuan(pnlOf(row).amount) }}</div>
             </template>
           </el-table-column>
           <el-table-column label="状态" min-width="110">
@@ -126,8 +130,14 @@
           <el-table-column label="板数" width="70">
             <template #default="{ row }">{{ row.boardNum ? (row.boardNum > 1 ? row.boardNum + '板' : '首板') : '—' }}</template>
           </el-table-column>
+          <el-table-column label="股数" width="82">
+            <template #default="{ row }">{{ qtyText(row.quantity) }}</template>
+          </el-table-column>
           <el-table-column label="盈亏" width="86">
-            <template #default="{ row }"><span :class="pctClass(row.floatPct)">{{ fmtPct(row.floatPct) }}</span></template>
+            <template #default="{ row }">
+              <span :class="pctClass(row.floatPct)">{{ fmtPct(row.floatPct) }}</span>
+              <div v-if="pnlOf(row)" class="mini" :class="pctClass(pnlOf(row).amount)">{{ yuan(pnlOf(row).amount) }}</div>
+            </template>
           </el-table-column>
           <el-table-column prop="plannedAction" label="预案" min-width="130" show-overflow-tooltip>
             <template #default="{ row }">{{ row.plannedAction || '—' }}</template>
@@ -282,6 +292,7 @@ import { ref, computed, onMounted } from 'vue'
 import { recordApi } from '../api/modules'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useTradingCalendar } from '../utils/tradingCalendar'
+import { pnlOf, yuan, qtyText } from '../utils/money'
 
 const { loadTradingDays } = useTradingCalendar()
 

@@ -25,6 +25,11 @@ class ReviewImportParserTest {
 
     private static final LocalDate TODAY = LocalDate.of(2026, 9, 4);
 
+    /** 只喂一行持仓时的最小 meta 外壳：持仓/题材这些多行键必须写在 meta 围栏块里才认。 */
+    private static String meta() {
+        return "```meta\ndate: 2026-09-03\n";
+    }
+
     // ---- 正常路径 ----
 
     @Test
@@ -58,6 +63,32 @@ class ReviewImportParserTest {
         assertEquals("违约", hongbo.getDiscipline());
 
         assertEquals(new BigDecimal("-6.7"), doc.getPositions().get(1).getFloatPct());
+    }
+
+    @Test
+    void positionQuantitySurvivesMdRoundTrip() {
+        String line = "持仓: 002229 鸿博股份 成本11.17 现价12.12 数量1000 浮动+8.5 动作未动 应做竞价清仓 纪律违约";
+        ReviewDoc doc = ReviewImportParser.parse(meta() + line + "\n```", TODAY);
+        assertFalse(doc.hasErrors(), doc.errorsText());
+        assertEquals(Integer.valueOf(1000), doc.getPositions().get(0).getQuantity());
+
+        // 导出成 md 再解析回来股数不能掉：掉一次，下一次整表替换就把金额口径打回原形。
+        ReviewDoc back = ReviewImportParser.parse(ReviewMdFormatter.render(doc, null, null), TODAY);
+        assertFalse(back.hasErrors(), back.errorsText());
+        assertEquals(Integer.valueOf(1000), back.getPositions().get(0).getQuantity());
+    }
+
+    @Test
+    void positionQuantityZeroIsRejectedWhileOmittedStaysNull() {
+        // 0 股是「一股没买」，和「不知道买了多少」不是一回事：写 0 要报错，不写才是 null。
+        ReviewDoc zero = ReviewImportParser.parse(meta()
+                + "持仓: 002229 鸿博股份 成本11.17 现价12.12 数量0 动作未动 应做竞价清仓 纪律违约" + "\n```", TODAY);
+        assertTrue(zero.hasErrors(), zero.errorsText());
+
+        ReviewDoc omitted = ReviewImportParser.parse(meta()
+                + "持仓: 002229 鸿博股份 成本11.17 现价12.12 动作未动 应做竞价清仓 纪律违约" + "\n```", TODAY);
+        assertFalse(omitted.hasErrors(), omitted.errorsText());
+        assertNull(omitted.getPositions().get(0).getQuantity());
     }
 
     @Test

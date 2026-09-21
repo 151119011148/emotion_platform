@@ -295,7 +295,7 @@ public class ReviewExportService {
     private void fillRows(ReviewDoc doc, Long userId, LocalDate date, ReviewDoc stored, ReviewExportVO vo) {
         for (Position p : positionStore.read(userId, date)) {
             doc.getPositions().add(new ReviewDoc.PositionRow(0, p.getStockCode(), p.getStockName(),
-                    p.getCostPrice(), p.getCurrentPrice(), p.getFloatPct(),
+                    p.getCostPrice(), p.getCurrentPrice(), p.getQuantity(), p.getFloatPct(),
                     p.getAction(), p.getPlannedAction(), p.getDiscipline()));
         }
         if (doc.getPositions().isEmpty()) {

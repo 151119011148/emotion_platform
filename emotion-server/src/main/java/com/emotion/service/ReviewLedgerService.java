@@ -100,6 +100,7 @@ public class ReviewLedgerService {
             p.setStockName(names.get(code));
             p.setCostPrice(money(errors, at, "成本", r.getCostPrice()));
             p.setCurrentPrice(money(errors, at, "现价", r.getCurrentPrice()));
+            p.setQuantity(qty(errors, at, r.getQuantity()));
             p.setFloatPct(r.getFloatPct() != null
                     ? round(r.getFloatPct()) : floatPctOf(p.getCostPrice(), p.getCurrentPrice()));
             p.setAction(emptyToNull(r.getAction()));
@@ -274,6 +275,25 @@ public class ReviewLedgerService {
             names.put(s.getCode(), s.getName());
         }
         return names;
+    }
+
+    /**
+     * 股数：要么不填（NULL，该行不进金额类汇总），要么是个正整数。
+     * 0 不收——它表示「一股没买」，和「不知道买了多少」不是一回事，混在一起市值会平白少一块。
+     */
+    private static Integer qty(List<String> errors, String at, Integer value) {
+        if (value == null) {
+            return null;
+        }
+        if (value <= 0) {
+            errors.add(at + "股数要是正整数，收到：" + value);
+            return null;
+        }
+        if (value > 100000000) {
+            errors.add(at + "股数大得离谱，收到：" + value + "（上限 1 亿）");
+            return null;
+        }
+        return value;
     }
 
     private static BigDecimal money(List<String> errors, String at, String label, BigDecimal value) {

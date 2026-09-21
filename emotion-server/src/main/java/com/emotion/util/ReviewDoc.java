@@ -56,7 +56,7 @@ public class ReviewDoc {
         }
     }
 
-    /** `持仓: 002229 鸿博股份 成本11.17 现价12.12 浮动+8.5 动作未动 应做竞价清仓 纪律违约` */
+    /** `持仓: 002229 鸿博股份 成本11.17 现价12.12 数量1000 浮动+8.5 动作未动 应做竞价清仓 纪律违约` */
     @Getter
     public static class PositionRow {
         private final int line;
@@ -64,18 +64,22 @@ public class ReviewDoc {
         private final String name;
         private final BigDecimal cost;
         private final BigDecimal current;
+        /** 持仓股数；null = md 里没写「数量」。 */
+        private final Integer quantity;
         private final BigDecimal floatPct;
         private final String action;
         private final String plannedAction;
         private final String discipline;
 
         public PositionRow(int line, String code, String name, BigDecimal cost, BigDecimal current,
-                           BigDecimal floatPct, String action, String plannedAction, String discipline) {
+                           Integer quantity, BigDecimal floatPct, String action, String plannedAction,
+                           String discipline) {
             this.line = line;
             this.code = code;
             this.name = name;
             this.cost = cost;
             this.current = current;
+            this.quantity = quantity;
             this.floatPct = floatPct;
             this.action = action;
             this.plannedAction = plannedAction;

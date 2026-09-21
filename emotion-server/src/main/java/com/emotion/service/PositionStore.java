@@ -75,6 +75,7 @@ public class PositionStore {
             h.setStockName(p.getStockName());
             h.setCostPrice(p.getCostPrice());
             h.setCurrentPrice(p.getCurrentPrice());
+            h.setQuantity(p.getQuantity());
             h.setFloatPct(p.getFloatPct());
             h.setAction(p.getAction());
             h.setPlannedAction(p.getPlannedAction());

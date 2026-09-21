@@ -1,0 +1,1335 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WaveRider 短线连板周期选股策略引擎 · 产品需求文档 v1.1</title>
+<style>
+:root{
+  --bg:#f5f6f8; --panel:#ffffff; --ink:#111827; --ink2:#374151; --muted:#6b7280;
+  --line:#e5e7eb; --line2:#eef1f5;
+  --brand:#4f46e5; --brand-soft:#eef2ff; --brand-line:#c7d2fe;
+  --blue:#2563eb; --blue-soft:#eff6ff;
+  --green:#047857; --green-soft:#ecfdf5; --green-line:#a7f3d0;
+  --amber:#b45309; --amber-soft:#fffbeb; --amber-line:#fde68a;
+  --red:#b91c1c;  --red-soft:#fef2f2;   --red-line:#fecaca;
+  --code-bg:#f8fafc;
+  --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+  font-size:14px;line-height:1.75;-webkit-font-smoothing:antialiased}
+a{color:var(--brand);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{display:flex;max-width:1440px;margin:0 auto}
+.side{width:262px;flex:0 0 262px;position:sticky;top:0;height:100vh;overflow-y:auto;
+  background:var(--panel);border-right:1px solid var(--line);padding:22px 0 60px}
+.side h4{margin:0 0 10px;padding:0 22px;font-size:12px;letter-spacing:.08em;color:var(--muted);text-transform:uppercase}
+.side a{display:block;padding:6px 22px;color:var(--ink2);font-size:13px;line-height:1.5;border-left:3px solid transparent}
+.side a:hover{background:var(--brand-soft);text-decoration:none}
+.side a.on{color:var(--brand);border-left-color:var(--brand);background:var(--brand-soft);font-weight:600}
+.side .grp{margin-top:16px}
+main{flex:1;min-width:0;padding:0 46px 120px}
+.masthead{background:linear-gradient(135deg,#4f46e5 0%,#4338ca 55%,#3730a3 100%);color:#fff;
+  padding:34px 46px;margin:0 -46px 30px}
+.masthead .kicker{font-size:12px;letter-spacing:.16em;opacity:.8;text-transform:uppercase}
+.masthead h1{margin:6px 0 10px;font-size:27px;line-height:1.3;font-weight:700}
+.masthead .desc{opacity:.9;font-size:13.5px;max-width:840px}
+.chips{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px}
+.chip{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.24);
+  border-radius:999px;padding:3px 11px;font-size:12px}
+section{margin:0 0 34px;scroll-margin-top:16px}
+h2{font-size:19px;margin:34px 0 12px;padding-bottom:9px;border-bottom:2px solid var(--line)}
+h3{font-size:15.5px;margin:22px 0 9px;color:#1f2937}
+h4{font-size:13.5px;margin:16px 0 7px;color:#374151}
+p{margin:9px 0}
+ul,ol{margin:9px 0;padding-left:22px}
+li{margin:4px 0}
+.small{font-size:12.5px;color:var(--muted)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:14px 0}
+.callout{border-radius:10px;padding:13px 16px;margin:14px 0;border:1px solid;font-size:13.5px}
+.callout .ttl{font-weight:700;margin-bottom:5px}
+.c-info{background:var(--blue-soft);border-color:#bfdbfe;color:#1e3a8a}
+.c-warn{background:var(--amber-soft);border-color:var(--amber-line);color:#78350f}
+.c-bad{background:var(--red-soft);border-color:var(--red-line);color:#7f1d1d}
+.c-ok{background:var(--green-soft);border-color:var(--green-line);color:#065f46}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:1080px){.grid2,.grid3{grid-template-columns:1fr}}
+.tw{overflow-x:auto;margin:12px 0;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{border-bottom:1px solid var(--line2);padding:9px 12px;text-align:left;vertical-align:top}
+thead th{background:#f9fafb;color:#374151;font-weight:600;font-size:12.5px;white-space:nowrap;border-bottom:1px solid var(--line)}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:#fafbfc}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+td.ctr,th.ctr{text-align:center}
+code{font-family:var(--mono);font-size:12.5px;background:var(--code-bg);border:1px solid var(--line);
+  border-radius:4px;padding:1px 5px;color:#9333ea;white-space:nowrap}
+.b{display:inline-block;border-radius:5px;padding:1px 7px;font-size:11.5px;font-weight:600;line-height:1.7;white-space:nowrap}
+.b-red{background:var(--red-soft);color:var(--red);border:1px solid var(--red-line)}
+.b-green{background:var(--green-soft);color:var(--green);border:1px solid var(--green-line)}
+.b-amber{background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)}
+.b-blue{background:var(--blue-soft);color:var(--blue);border:1px solid #bfdbfe}
+.b-gray{background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb}
+.b-brand{background:var(--brand-soft);color:var(--brand);border:1px solid var(--brand-line)}
+pre{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:14px 16px;overflow-x:auto;
+  font-family:var(--mono);font-size:12.5px;line-height:1.7;margin:12px 0}
+pre.light{background:var(--code-bg);color:#334155;border:1px solid var(--line)}
+pre .k{color:#93c5fd}pre .s{color:#86efac}pre .c{color:#94a3b8}pre .n{color:#fdba74}
+.kv{display:grid;grid-template-columns:88px 1fr;gap:4px 12px;font-size:13px}
+.kv>div:nth-child(odd){color:var(--muted)}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 15px}
+.stat .lab{font-size:12px;color:var(--muted)}
+.stat .val{font-size:22px;font-weight:700;letter-spacing:-.02em;margin-top:2px}
+.formula{background:var(--panel);border:1px dashed var(--brand-line);border-radius:8px;
+  padding:12px 14px;font-family:var(--mono);font-size:13px;color:#312e81;margin:10px 0;white-space:pre-wrap}
+figure{margin:14px 0}
+figcaption{font-size:12.5px;color:var(--muted);text-align:center;margin-top:6px}
+footer{margin-top:40px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px}
+.chart{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:16px 18px 10px;margin:12px 0}
+.cbars{display:flex;align-items:flex-end;gap:6px;height:150px;border-bottom:1px solid var(--line)}
+.cbar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%}
+.cbar i{display:block;width:100%;background:#c7d2fe;border-radius:3px 3px 0 0}
+.cbar.hl i{background:#4f46e5}
+.cbar b{font-size:10px;color:#374151;margin-bottom:3px}
+.cbar span{font-size:9.5px;color:var(--muted);transform:rotate(-58deg);margin-top:8px;white-space:nowrap}
+.legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-top:26px;flex-wrap:wrap}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;background:#4f46e5;margin-right:5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav class="side">
+    <h4>产品需求文档</h4>
+    <a href="#s0" class="on">修订说明（务必先读）</a>
+    <a href="#s1">1 · 文档概述</a>
+    <a href="#s2">2 · 术语定义</a>
+    <a href="#s3">3 · 系统定位与数据源</a>
+    <div class="grp"><h4>核心原则</h4></div>
+    <a href="#s4">4 · 原则一：身位板</a>
+    <a href="#s5">5 · 原则二：节点票</a>
+    <a href="#s6">6 · 跨原则统一评分</a>
+    <div class="grp"><h4>系统设计</h4></div>
+    <a href="#s7">7 · 策略配置中心</a>
+    <a href="#s8">8 · 计算引擎</a>
+    <a href="#s9">9 · 规则 DSL 与执行</a>
+    <a href="#s10">10 · 数据模型草案</a>
+    <a href="#s11">11 · API 与调度设计</a>
+    <a href="#s12">12 · 结果展示与复盘</a>
+    <div class="grp"><h4>质量与落地</h4></div>
+    <a href="#s13">13 · 异常分支与边界</a>
+    <a href="#s14">14 · 验收用例</a>
+    <a href="#s15">15 · 非功能需求</a>
+    <a href="#s16">16 · 里程碑与开放问题</a>
+    <a href="#s17">17 · 附录：配置全表</a>
+  </nav>
+
+  <main>
+    <div class="masthead">
+      <div class="kicker">PRODUCT REQUIREMENT DOCUMENT</div>
+      <h1>WaveRider 短线连板周期选股策略引擎</h1>
+      <div class="desc">将「身位板」与「节点票」两条短线审美原则产品化：可配置规则、可回溯回测、可每日自动产出候选池。
+        v1.1 已使用 emotion_platform 生产库真实数据对全部默认阈值完成回归标定。</div>
+      <div class="chips">
+        <span class="chip">版本 v1.1</span>
+        <span class="chip">2026-09-21</span>
+        <span class="chip">状态：待评审</span>
+        <span class="chip">宿主：emotion_platform 策略层模块</span>
+        <span class="chip">数据基准：2026-08-20 ~ 2026-09-21 / 19 个交易日</span>
+      </div>
+    </div>
+
+    <section id="s0">
+      <h2>修订说明（务必先读）</h2>
+      <p>本文在 v1.0 基础上做了一次<strong>基于真实数据的阈值回归</strong>：用生产库 <code>emotion_dashboard</code>
+        中 2026-08-20 至 2026-09-21 共 <strong>19 个交易日</strong>的涨停 / 炸板 / 跌停三池数据，
+        把 v1.0 里每一条默认规则原样执行，统计其<strong>命中率</strong>与节点票的<strong>选拔率</strong>。</p>
+
+      <div class="callout c-bad">
+        <div class="ttl">结论：v1.0 的默认参数在本轮市场环境下「三条节点规则，两条从不触发、一条天天触发」</div>
+        <ul style="margin:6px 0 0">
+          <li><strong>启动日 0 / 18 命中</strong>：条件写死「昨日涨停数 &lt; 30」，而样本内昨日涨停家数的<strong>最小值是 35</strong>，该分支永远进不去。</li>
+          <li><strong>分歧日 0 / 18 命中</strong>：条件写死「今日高位股（&gt;3板）跌停数 &gt; 3」，而样本内该数值<strong>取值只有 0 和 1</strong>，同样恒不成立。</li>
+          <li><strong>切换日 17 / 18 命中（94% 误报）</strong>：「今日新题材涨停数 &gt; 10」<strong>几乎天天满足</strong>——行业口径太细，一个题材昨天没涨停是常态。</li>
+        </ul>
+      </div>
+
+      <h3>0.1 阈值回归结果总表</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:90px">规则</th><th style="width:200px">v1.0 默认阈值</th><th class="ctr" style="width:90px">真实命中</th><th style="width:250px">失效根因</th><th>v1.1 建议默认</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>启动日</strong></td>
+              <td>昨日涨停数 &lt; 30<br>今日涨停数 &gt; 50<br>昨日连板晋级率 &lt; 30%</td>
+              <td class="ctr"><span class="b b-red">0 / 18</span></td>
+              <td>绝对值阈值脱离市场量级：样本内昨日涨停家数最小 35、中位数 60</td>
+              <td>改为<strong>动态基准</strong>：昨日涨停家数 &lt; 近 20 日中位数 × 0.7，且今日 &gt; 昨日 × 1.5，且昨日连板晋级率 &lt; 30%</td>
+            </tr>
+            <tr>
+              <td><strong>分歧日</strong></td>
+              <td>昨日连板晋级率 &gt; 50%<br>今日炸板数 &gt; 20<br>今日高位股跌停数 &gt; 3</td>
+              <td class="ctr"><span class="b b-red">0 / 18</span></td>
+              <td>「高位股跌停」在当前环境几乎不出现（样本最大值 1）；且跌停是<strong>事后极端</strong>信号，用作<strong>当日</strong>判据已经太晚</td>
+              <td>改用 <code>t_zt_perf</code> 口径：昨日 ≥3 板个股<strong>今日平均涨幅 &lt; 0</strong> 且今日炸板率 &gt; 25%</td>
+            </tr>
+            <tr>
+              <td><strong>切换日</strong></td>
+              <td>今日新题材涨停数 &gt; 10<br>昨日第一主线今日涨停数 &lt; 5</td>
+              <td class="ctr"><span class="b b-amber">17 / 18</span></td>
+              <td>只有<strong>绝对家数</strong>、没有占比约束；东财行业（hybk）粒度太细，94% 的交易日都能凑出「昨日无涨停的题材」</td>
+              <td>新题材涨停数 ≥ 20 且<strong>占今日涨停 ≥ 30%</strong> 且昨日第一主线今日涨停 ≤ 1</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>0.2 节点票筛选条件同样需要重做</h3>
+      <p>不只是节点<em>识别</em>，节点票的<strong>筛选</strong>条件在真实数据上也被证明没有区分度。判断它是否有效的唯一硬指标是<strong>选拔率</strong>（节点票候选 ÷ 当日涨停家数）：</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:90px">节点类型</th><th class="ctr" style="width:110px">验证日</th><th>v1.0 筛选条件</th><th class="ctr" style="width:130px">候选 / 当日涨停</th><th class="ctr" style="width:80px">选拔率</th><th style="width:220px">评价</th></tr></thead>
+          <tbody>
+            <tr><td>启动日</td><td class="ctr">2026-09-07</td><td>当日首板 OR 1 进 2 成功</td><td class="ctr num">89 / 93</td><td class="ctr"><span class="b b-red">96%</span></td><td>等于「全部涨停股」，没有筛选意义</td></tr>
+            <tr><td>分歧日</td><td class="ctr">2026-09-14</td><td>当日换手板（非一字）AND 题材非昨日最强主线</td><td class="ctr num">49 / 55</td><td class="ctr"><span class="b b-red">89%</span></td><td>「非主线」覆盖面太广，等于没过滤</td></tr>
+            <tr><td>切换日</td><td class="ctr">2026-09-21</td><td>题材为今日新题材 AND 连板高度 ≥ 2</td><td class="ctr num">0 / 96</td><td class="ctr"><span class="b b-red">0%</span></td><td>新题材第一天只可能产生首板，「≥2 板」不可能成立</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">选拔率的合理目标区间：<strong>5% ~ 15%</strong>。低于它候选池形同虚设，高于它则失去聚焦能力。修正方案见 <a href="#s5">§5.4</a>。</p>
+
+      <div class="callout c-warn">
+        <div class="ttl">另一个必须一并修正的设计缺陷：两条原则在现实中是互斥的</div>
+        <p style="margin:4px 0 0">2026-09-21 当日，身位候选（≥2 板）共 <strong>20 只</strong>，切换日节点票 <strong>2 只</strong>（均为首板），
+          <strong>交集为空</strong>。这意味着 v1.0 把 <code>sort_by</code> 默认定为「按命中原则数量排序」是失效的——
+          绝大多数交易日所有候选的命中数都恒等于 1。解决方案见 <a href="#s6">§6 跨原则统一评分</a>。</p>
+      </div>
+
+      <h3>0.3 v1.1 相对 v1.0 的变更清单</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th class="ctr" style="width:60px">编号</th><th style="width:430px">变更</th><th class="ctr" style="width:80px">类型</th><th>依据</th></tr></thead>
+          <tbody>
+            <tr><td class="ctr">C1</td><td>三类节点的默认阈值改为标定值，并支持「绝对 / 动态基准」两种模式</td><td class="ctr"><span class="b b-amber">修改</span></td><td>§0.1 回归结果</td></tr>
+            <tr><td class="ctr">C2</td><td>节点票筛选条件增加「按题材收敛」与「选拔率上限」约束</td><td class="ctr"><span class="b b-amber">修改</span></td><td>§0.2 选拔率实测</td></tr>
+            <tr><td class="ctr">C3</td><td>排序规则由「命中原则数量」改为统一加权评分</td><td class="ctr"><span class="b b-amber">修改</span></td><td>§0.2 原则互斥性</td></tr>
+            <tr><td class="ctr">C4</td><td><code>topic_source</code> 枚举由「申万行业+概念」改为平台实际持有的四种口径</td><td class="ctr"><span class="b b-amber">修改</span></td><td>库内无申万数据，见 <a href="#s3">§3.3</a></td></tr>
+            <tr><td class="ctr">C5</td><td>自定义 Python 脚本能力从 v1 范围降级为「延后 + 外部 Webhook 替代」</td><td class="ctr"><span class="b b-red">移除</span></td><td>任意代码执行等同服务端提权，见 <a href="#s9">§9.4</a></td></tr>
+            <tr><td class="ctr">C6</td><td>新增数据模型、API、调度、异常分支、验收用例章节</td><td class="ctr"><span class="b b-green">新增</span></td><td>工程落地所需</td></tr>
+            <tr><td class="ctr">C7</td><td>所有示例数据替换为生产库真实数据</td><td class="ctr"><span class="b b-green">新增</span></td><td>可复算、可验收</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="s1">
+      <h2>1 · 文档概述</h2>
+      <div class="grid2">
+        <div class="card">
+          <div class="kv">
+            <div>产品名称</div><div>连板周期选股策略引擎（WaveRider）</div>
+            <div>文档版本</div><div>v1.1（数据回归版）</div>
+            <div>创建日期</div><div>2026-08-31（v1.0）／ 2026-09-21（v1.1）</div>
+            <div>目标用户</div><div>短线交易者、量化研究员、交易团队负责人</div>
+            <div>宿主系统</div><div>emotion_platform（Spring Boot + Vue 3）</div>
+            <div>目标数据库</div><div>MySQL 5.7.29（192.168.123.18 / emotion_dashboard）</div>
+          </div>
+        </div>
+        <div class="card">
+          <h4 style="margin-top:0">核心目标</h4>
+          <ol style="margin:0;padding-left:20px">
+            <li><strong>原则产品化</strong>：把「身位」「节点」从盘感变成可计算、可复现的算法。</li>
+            <li><strong>配置化运维</strong>：阈值、权重、过滤条件全部可视化配置，改市场不用改代码。</li>
+            <li><strong>自动化输出</strong>：收盘后自动产出候选池并落到复盘链路里。</li>
+            <li><strong>可验收</strong>：每条规则都能用真实历史数据回算，命中与落选都对得上账。</li>
+          </ol>
+        </div>
+      </div>
+
+      <h3>1.1 背景与痛点</h3>
+      <p>连板周期博弈的收益核心在于识别<strong>主线龙头</strong>与<strong>穿越品种</strong>。经实盘验证，两条审美原则具有较高的盈亏比：</p>
+      <ul>
+        <li><strong>同题材身位板</strong>——主线与分支明确后，资金倾向于抱团最高身位，享受题材发展的全部溢价。</li>
+        <li><strong>节点票</strong>——周期启动、分歧、切换日逆势涨停的个股，代表新旧周期交替时的资金选择。</li>
+      </ul>
+      <p>当前痛点在于：依赖人工复盘（主观性强、耗时长）、身位与节点定义模糊（无法标准化）、经验无法固化传承、
+        市场环境变化时需要手动调整整套标准。</p>
+
+      <h3>1.2 非目标（明确边界）</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:230px">不做</th><th>原因</th></tr></thead>
+          <tbody>
+            <tr><td>不接入柜台、不自动下单</td><td>本系统是<strong>决策辅助</strong>工具；交易执行涉及合规与资金安全，由独立系统承载</td></tr>
+            <tr><td>不做投资建议输出</td><td>候选池只陈述「按某套配置命中了某条原则」，不做买卖指令与盈亏承诺</td></tr>
+            <tr><td>v1 不支持自定义 Python 脚本</td><td>服务端任意代码执行等同提权漏洞；改用受限的规则 DSL（<a href="#s9">§9</a>）</td></tr>
+            <tr><td>不自建行情采集</td><td>行情三池、题材字典、日 K 全部复用现有 <code>MarketDataService</code>，避免双份数据源打架</td></tr>
+            <tr><td>不重构现有节点 / 天梯页面</td><td>WaveRider 是<em>新增策略层</em>，与 <code>NodeService</code> / <code>TiantiService</code> 共存，读写各自独立</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="s2">
+      <h2>2 · 术语定义</h2>
+      <p>下列术语在整个系统（配置界面、候选池表头、规则 DSL、数据库列名）中使用同一套口径，不得各自解释。</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:110px">术语</th><th style="width:170px">英文 / Key</th><th>定义</th><th style="width:200px">数据来源</th></tr></thead>
+          <tbody>
+            <tr><td>涨停池</td><td><code>ZT</code></td><td>当日收盘仍封住涨停的个股集合</td><td><code>t_market_stock.pool</code></td></tr>
+            <tr><td>炸板池</td><td><code>ZB</code></td><td>当日曾触及涨停但收盘未封住的个股</td><td><code>t_market_stock.pool</code></td></tr>
+            <tr><td>跌停池</td><td><code>DT</code></td><td>当日收盘封住跌停的个股</td><td><code>t_market_stock.pool</code></td></tr>
+            <tr><td>连板数</td><td><code>board</code></td><td>连续涨停板数，首板 = 1</td><td><code>t_market_stock.consecutive</code></td></tr>
+            <tr><td><strong>身位板</strong></td><td><code>position_stock</code></td><td>某题材内连板高度最高（或最早启动）的个股，是该题材的旗帜</td><td>WaveRider 计算</td></tr>
+            <tr><td>中位股</td><td><code>mid_position</code></td><td>与身位板同题材、同高度但不在允许并列名额内的票；资金不聚焦，主动放弃</td><td>WaveRider 计算</td></tr>
+            <tr><td><strong>节点日</strong></td><td><code>node_day</code></td><td>市场情绪发生关键转折的交易日，分启动 / 分歧 / 切换三类</td><td><code>t_node_detect</code></td></tr>
+            <tr><td><strong>节点票</strong></td><td><code>node_stock</code></td><td>在节点日按筛选条件命中的个股</td><td>WaveRider 计算</td></tr>
+            <tr><td>连板晋级率</td><td><code>lb_promote_rate</code></td><td>昨日 N 板（N ≥ 2）个股中，今日仍收盘涨停的比例</td><td>三池跨日自连接</td></tr>
+            <tr><td>全体晋级率</td><td><code>promote_rate</code></td><td>昨日涨停池（含首板）个股中，今日仍收盘涨停的比例</td><td>三池跨日自连接</td></tr>
+            <tr><td>炸板率</td><td><code>zb_rate</code></td><td>炸板家数 ÷（涨停家数 + 炸板家数）</td><td>三池当日聚合</td></tr>
+            <tr><td>一字板</td><td><code>yizi</code></td><td>首封时间 ≤ 09:25:00 且当日换手率 &lt; 2%（竞价即封、无量）</td><td><code>first_seal_time</code> + <code>turnover_rate</code></td></tr>
+            <tr><td>换手板</td><td><code>huanshou</code></td><td>非一字板的涨停，即盘中有真实换手的封板</td><td>同上取反</td></tr>
+            <tr><td>总龙头</td><td><code>dragon</code></td><td>用户在某交易日人工指定的全市场龙头身份</td><td><code>t_manual_leader</code></td></tr>
+            <tr><td>空间板</td><td><code>space_board</code></td><td>当日全市场最高连板，自动识别</td><td>三池当日最大 <code>consecutive</code></td></tr>
+            <tr><td>题材热度</td><td><code>theme_heat</code></td><td>某题材当日涨停家数</td><td>三池按 <code>topic_source</code> 分组</td></tr>
+            <tr><td><strong>选拔率</strong></td><td><code>select_rate</code></td><td>节点票候选数 ÷ 当日涨停家数。规则的<strong>健康指标</strong>，目标 5% ~ 15%</td><td>WaveRider 统计</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="s3">
+      <h2>3 · 系统定位与数据源</h2>
+      <p>WaveRider 是 emotion_platform 的<strong>策略层</strong>，垂直位于现有行情与复盘能力之上。职责边界一句话概括：</p>
+      <div class="callout c-info">
+        <div class="ttl">WaveRider 不采行情、不存行情，只做三件事</div>
+        <p style="margin:4px 0 0"><strong>管配置</strong>（多套策略 + 版本）· <strong>跑计算</strong>（节点 → 身位 → 候选 → 评分）· <strong>留痕迹</strong>（每次运行的全量快照 + T+1 复盘）</p>
+      </div>
+
+      <h3>3.1 分层结构</h3>
+      <div class="card">
+        <pre class="light">┌───────────────────────────────────────────────────────────────┐
+│ 前端展示层   策略配置中心 / 候选池看板 / 复盘视图（Vue 3）        │
+├───────────────────────────────────────────────────────────────┤
+│ ★ WaveRider 策略层（本次新增，唯一职责：配置 + 计算 + 留痕）★     │
+│   StrategyService · NodeDetectService · PositionService         │
+│   RuleEngine(AST) · ScoringService · WaveRiderRunService        │
+├───────────────────────────────────────────────────────────────┤
+│ 现有能力层（复用，不改动）                                       │
+│   MarketDataService（三池/溢价/指数） · NodeService（人工节点）   │
+│   TiantiService（天梯） · AnchorService（阵眼） · ReviewService  │
+├───────────────────────────────────────────────────────────────┤
+│ 数据层   t_market_stock / t_zt_perf / t_premium_tier / t_stock   │
+│          t_stock_concept / t_industry_stock / t_node_event ...   │
+└───────────────────────────────────────────────────────────────┘</pre>
+      </div>
+
+      <h3>3.2 数据源映射（全部为现有表，WaveRider 只读不写）</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:160px">WaveRider 需要的输入</th><th style="width:230px">来源表 / 服务</th><th>关键字段</th><th class="ctr" style="width:100px">就绪度</th></tr></thead>
+          <tbody>
+            <tr><td>当日三池名单</td><td><code>t_market_stock</code></td><td><code>trade_date, pool, code, name, consecutive, industry, amount, turnover_rate, first_seal_time, seal_amount, float_mv</code></td><td class="ctr"><span class="b b-green">就绪</span></td></tr>
+            <tr><td>连板数 / 身位计算</td><td><code>t_market_stock.consecutive</code></td><td>仅涨停池有值</td><td class="ctr"><span class="b b-green">就绪</span></td></tr>
+            <tr><td>昨日涨停今日表现</td><td><code>t_zt_perf</code></td><td><code>prev_consecutive, change_pct</code>（含首板，<code>t_premium_tier</code> 不含）</td><td class="ctr"><span class="b b-red">仅 3 天</span></td></tr>
+            <tr><td>晋级率</td><td>三池跨日自连接</td><td>昨日涨停池 ∩ 今日涨停池</td><td class="ctr"><span class="b b-green">就绪</span></td></tr>
+            <tr><td>连板档位溢价</td><td><code>t_premium_tier</code></td><td><code>board, avg_pct, stock_count</code></td><td class="ctr"><span class="b b-green">就绪</span></td></tr>
+            <tr><td>股票名称 / 板块归属</td><td><code>t_stock</code></td><td><code>code, name, board</code>（沪主板 / 创业板 / 科创板 / 北交所）</td><td class="ctr"><span class="b b-green">就绪</span></td></tr>
+            <tr><td>概念题材（东财口径）</td><td><code>t_stock_concept</code></td><td><code>code → concept_code / concept</code>，低频重建</td><td class="ctr"><span class="b b-amber">需确认时效</span></td></tr>
+            <tr><td>通达信二级行业</td><td><code>t_industry_stock</code> + <code>t_industry</code></td><td>V23 字典，脚本导入</td><td class="ctr"><span class="b b-green">就绪</span></td></tr>
+            <tr><td>通达信概念板块</td><td><code>t_concept_board</code></td><td>V23 字典</td><td class="ctr"><span class="b b-green">就绪</span></td></tr>
+            <tr><td>交易日历</td><td><code>t_trading_holidays</code> + <code>utils/tradingCalendar.js</code></td><td>交易日 = 周一~周五 且 不在休市表</td><td class="ctr"><span class="b b-green">就绪</span></td></tr>
+            <tr><td>人工节点标记（对照）</td><td><code>t_node_event</code> + <code>NodeService</code></td><td>现有复盘链路的人工节点，作为策略的对照与覆盖输入</td><td class="ctr"><span class="b b-green">就绪</span></td></tr>
+            <tr><td>总龙头 / 周期阵眼</td><td><code>t_manual_leader</code> / <code>t_anchor</code></td><td><code>degrade_on_dragon_death</code> 判据</td><td class="ctr"><span class="b b-green">就绪</span></td></tr>
+            <tr><td>上市日期（新股过滤）</td><td><span class="b b-red">缺</span></td><td><code>t_stock</code> 无 <code>listed_at</code> 字段</td><td class="ctr"><span class="b b-red">需补列</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout c-warn">
+        <div class="ttl">两个必须先解决的数据缺口</div>
+        <ol style="margin:6px 0 0">
+          <li><strong><code>t_zt_perf</code> 历史覆盖不足</strong>：该表目前仅有 2026-09-14 / 09-18 / 09-21 三天数据。
+            它是「昨日高位股今日表现」的唯一来源，也是 v1.1 分歧日判据的基础。上线前必须补一次历史回填（建议自 2026-08-20 起），
+            否则分歧日规则无法回测标定，历史区间会全部漏判。</li>
+          <li><strong>缺少上市日期</strong>：<code>filter_new_stock_days</code>（默认剔除上市 &lt; 30 天）当前无数据支撑。
+            方案 A：给 <code>t_stock</code> 补 <code>listed_at DATE</code> 列，在 <code>StockDictService</code> 同步时写入（推荐）；
+            方案 B：降级为「最近 N 个交易日内是否出现过三池 / 日 K 记录」近似。</li>
+        </ol>
+      </div>
+
+      <h3>3.3 题材分组口径修正（变更 C4）</h3>
+      <p>v1.0 的 <code>topic_source</code> 枚举含「申万行业 + 概念」，但库内<strong>并没有申万数据</strong>。修正为平台实际持有的四种口径：</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:140px">枚举值</th><th style="width:150px">含义</th><th style="width:230px">来源</th><th class="ctr" style="width:70px">粒度</th><th>适用建议</th></tr></thead>
+          <tbody>
+            <tr><td><code>em_industry</code></td><td>东财行业板块</td><td><code>t_market_stock.industry</code>（随三池直落，无需 join）</td><td class="ctr">细</td><td><strong>默认</strong>。取数最快；但粒度偏细 → 新题材易误判，必须配合占比阈值</td></tr>
+            <tr><td><code>tdx_industry</code></td><td>通达信二级行业</td><td><code>t_industry_stock</code> join <code>t_industry</code></td><td class="ctr">中</td><td>寻找「同一个大行业」下的主线</td></tr>
+            <tr><td><code>em_concept</code></td><td>东财概念板块</td><td><code>t_stock_concept</code></td><td class="ctr">题材级</td><td><strong>最贴近「题材」语义</strong>，推荐用于切换日判定</td></tr>
+            <tr><td><code>tdx_concept</code></td><td>通达信概念板块</td><td><code>t_concept_board</code> 字典 + 成分</td><td class="ctr">题材级</td><td>备选；成分表需先落地</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">注：一只票可同时属于多个<strong>概念</strong>，只属于一个<strong>行业</strong>。因此题材分组需支持「多归属」：
+        候选行的 <code>concepts_json</code> 记录全部命中题材，但<strong>身位计算按主归属唯一化</strong>，避免同一只票被重复计入多个题材。</p>
+    </section>
+
+    <section id="s4">
+      <h2>4 · 原则一：同题材身位板</h2>
+      <h3>4.1 业务定义</h3>
+      <p>在特定题材（板块 / 概念）内部，<strong>连板高度最高</strong>或<strong>启动时间最早</strong>的个股。它是该题材的旗帜，享受题材发展的全部溢价。</p>
+
+      <h3>4.2 可配置参数</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:170px">配置项</th><th style="width:200px">Key</th><th style="width:70px">类型</th><th style="width:150px">默认值</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>身位判定模式</td><td><code>position_mode</code></td><td>enum</td><td><code>highest_board</code></td><td><code>highest_board</code>=最高连板数优先（默认）／<code>earliest_start</code>=最早启动日优先／<code>score</code>=综合评分（首封时间 + 成交额 + 换手）</td></tr>
+            <tr><td>最小连板阈值</td><td><code>min_board_count</code></td><td>int</td><td><code>2</code></td><td>低于此连板数不参与身位计算，过滤首板杂毛</td></tr>
+            <tr><td>同身位数量限制</td><td><code>max_same_position</code></td><td>int</td><td><code>2</code></td><td>同一题材内允许并列的最大数量，超出者降级为「中位股」</td></tr>
+            <tr><td>题材分组来源</td><td><code>topic_source</code></td><td>enum</td><td><code>em_industry</code></td><td>见 <a href="#s3">§3.3</a> 四种口径</td></tr>
+            <tr><td>总龙头断板降级</td><td><code>degrade_on_dragon_death</code></td><td>bool</td><td><code>true</code></td><td>开启后，若当日总龙头（<code>t_manual_leader</code>）今日未涨停，则高位身位板标记 <code>risk=DRAGON_DEAD</code></td></tr>
+            <tr><td>高位降级阈值 <span class="b b-blue">新增</span></td><td><code>degrade_board_threshold</code></td><td>int</td><td><code>4</code></td><td>v1.0 未定义「高位」为何物，无法落地；补此参数明确边界</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>4.3 判定流程</h3>
+      <div class="card">
+        <ol style="margin:0">
+          <li><strong>取池</strong>：取 <code>trade_date</code> 当日 <code>pool='ZT'</code> 全部个股。</li>
+          <li><strong>过滤</strong>：<code>consecutive &lt; min_board_count</code> 的剔除 → 得到「参选集」。</li>
+          <li><strong>分组</strong>：按 <code>topic_source</code> 指定口径分组（多归属时按主归属唯一化）。</li>
+          <li><strong>排序</strong>：组内按 <code>position_mode</code> 排序 —— <code>highest_board</code> 为 <code>consecutive DESC, first_seal_time ASC</code>；<code>earliest_start</code> 按起爆日 ASC（需回溯连板起点）；<code>score</code> 用配置内的加权公式。</li>
+          <li><strong>取名额</strong>：组内≤ <code>max_same_position</code> 只标记为身位板，超出者标记中位股。</li>
+          <li><strong>降级校验</strong>：启用 <code>degrade_on_dragon_death</code> 且当日总龙头未涨停时，给 <code>consecutive ≥ degrade_board_threshold</code> 的身位板打风险标记。</li>
+        </ol>
+      </div>
+
+      <h3>4.4 真实样例：2026-09-21 身位计算结果</h3>
+      <p class="small">配置：<code>position_mode=highest_board, min_board_count=2, max_same_position=2, topic_source=em_industry</code>。
+        当日涨停 <strong>96 只</strong>，其中 ≥2 板 <strong>20 只</strong>，触发身位板判定。</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th class="ctr" style="width:40px">#</th><th style="width:110px">题材（东财行业）</th><th class="ctr" style="width:70px">题材内最高板</th><th class="ctr" style="width:80px">题材内≥2板家数</th><th style="width:150px">身位板</th><th class="ctr" style="width:80px">成交额</th><th class="ctr" style="width:80px">首封</th><th class="ctr" style="width:100px">标记</th></tr></thead>
+          <tbody>
+            <tr><td class="ctr">1</td><td>家居用品</td><td class="ctr">5 板</td><td class="ctr">1</td><td>001216 华瓷股份</td><td class="ctr num">0.49 亿</td><td class="ctr">09:25:00</td><td class="ctr"><span class="b b-amber">一字缩量</span></td></tr>
+            <tr><td class="ctr">2</td><td>出版</td><td class="ctr">4 板</td><td class="ctr">2</td><td>603230 内蒙新华</td><td class="ctr num">5.54 亿</td><td class="ctr">09:25:02</td><td class="ctr"><span class="b b-amber">准一字</span></td></tr>
+            <tr><td class="ctr">3</td><td>房地产服务</td><td class="ctr">4 板</td><td class="ctr">1</td><td>002285 世联行</td><td class="ctr num">8.45 亿</td><td class="ctr">13:17:06</td><td class="ctr">—</td></tr>
+            <tr><td class="ctr">4</td><td>医疗服务</td><td class="ctr">3 板</td><td class="ctr">1</td><td>000504 南华生物</td><td class="ctr num">0.58 亿</td><td class="ctr">09:25:00</td><td class="ctr"><span class="b b-amber">一字缩量</span></td></tr>
+            <tr><td class="ctr">5</td><td>服装家纺</td><td class="ctr">3 板</td><td class="ctr">2</td><td>600630 龙头股份</td><td class="ctr num">4.11 亿</td><td class="ctr">09:25:01</td><td class="ctr"><span class="b b-amber">准一字</span></td></tr>
+            <tr><td class="ctr">6</td><td>化学制品</td><td class="ctr">3 板</td><td class="ctr">1</td><td>002453 华软科技</td><td class="ctr num">2.49 亿</td><td class="ctr">09:30:00</td><td class="ctr">—</td></tr>
+            <tr><td class="ctr">7</td><td>纺织制造</td><td class="ctr">3 板</td><td class="ctr">1</td><td>600448 华纺股份</td><td class="ctr num">9.05 亿</td><td class="ctr">09:31:00</td><td class="ctr"><span class="b b-blue">换手 38%</span></td></tr>
+            <tr><td class="ctr">8</td><td>农产品加工</td><td class="ctr">3 板</td><td class="ctr">1</td><td>600127 金健米业</td><td class="ctr num">27.29 亿</td><td class="ctr">10:24:45</td><td class="ctr">—</td></tr>
+            <tr><td class="ctr">9</td><td>半导体</td><td class="ctr">2 板</td><td class="ctr">2</td><td>603316 诚邦股份</td><td class="ctr num">4.11 亿</td><td class="ctr">09:30:17</td><td class="ctr">—</td></tr>
+            <tr><td class="ctr">10</td><td>冶钢原料</td><td class="ctr">2 板</td><td class="ctr">1</td><td>601123 马矿股份</td><td class="ctr num">2.93 亿</td><td class="ctr">09:30:03</td><td class="ctr">—</td></tr>
+            <tr><td class="ctr">…</td><td colspan="7" class="small">其余 10 个题材各有 1 只 ≥2 板身位股（电力、一般零售、铁路公路、医药商业等），此处略</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="grid2">
+        <div class="callout c-warn" style="margin:0">
+          <div class="ttl">观察一：最高身位股会被成交额过滤器误杀</div>
+          <p style="margin:4px 0 0">华瓷股份是当日全市场空间板（5 板），但成交额仅 <strong>0.49 亿</strong>、换手 <strong>0.83%</strong>——典型一字锁仓。
+            若按默认 <code>filter_min_amount = 1.0 亿</code> 直接剔除，<strong>最高身位股会被候选池丢掉</strong>。
+            处置见 <a href="#s13">§13 异常分支 F1</a>：原则命中与过滤器冲突时，降级为「标记风险」而非「直接剔除」。</p>
+        </div>
+        <div class="callout c-info" style="margin:0">
+          <div class="ttl">观察二：<code>max_same_position</code> 当日触发 0 次</div>
+          <p style="margin:4px 0 0">20 只 ≥2 板个股分散在 14 个题材里，同题材并列最高板的情形当天一次也没出现，
+            该参数当日未产生任何中位股降级。属「低频但必要」的护栏，因此配置界面应展示它的历史触发次数
+            （见 <a href="#s7">§7.1</a>），避免用户误以为参数在起作用。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="s5">
+      <h2>5 · 原则二：节点票</h2>
+      <h3>5.1 业务定义</h3>
+      <p>在市场情绪转折的关键交易日（节点日），逆势涨停或率先涨停的个股，代表新旧周期交替时的资金选择。</p>
+
+      <h3>5.2 抽样总览：19 个交易日的真实盘面</h3>
+      <figure>
+        <div class="chart">
+          <div class="cbars" id="bars"></div>
+          <div class="legend">
+            <span><i></i>标定后命中的节点日（09-07 启动 / 09-14 分歧 / 09-21 切换）</span>
+            <span><i style="background:#c7d2fe"></i>普通交易日</span>
+            <span>柱高 = 当日涨停家数</span>
+          </div>
+        </div>
+        <figcaption>图 1 · 2026-08-20 ~ 2026-09-21 每日涨停家数与 v1.1 规则下的节点命中</figcaption>
+      </figure>
+      <div class="grid3" style="margin-top:12px">
+        <div class="stat"><div class="lab">涨停家数（最低 / 中位 / 最高）</div><div class="val">35 / 65 / 96</div></div>
+        <div class="stat"><div class="lab">连板晋级率（最低 / 中位 / 最高）</div><div class="val">11% / 39% / 67%</div></div>
+        <div class="stat"><div class="lab">炸板家数（最低 / 中位 / 最高）</div><div class="val">6 / 22 / 48</div></div>
+      </div>
+      <p class="small">这三条分布是阈值标定的直接依据：<strong>任何写死的绝对值阈值都必须落在这三个区间里才有机会被触发</strong>，
+        否则就是永久死分支。这也是 v1.1 引入「动态基准」模式的原因——让阈值随市场量级自适应。</p>
+
+      <h3>5.3 v1.1 节点识别规则（标定后）</h3>
+      <h4>类型一：启动日（冰点转暖）</h4>
+      <pre><span class="c">// v1.0（失效：0/18 命中）</span>
+昨日涨停数 &lt; 30  AND  今日涨停数 &gt; 50  AND  昨日连板晋级率 &lt; 30%
+
+<span class="c">// v1.1（动态基准模式，推荐默认）</span>
+昨日涨停家数   &lt;  近20日中位数 × 0.7        <span class="c">// 自适应：昨日处于地量涨停</span>
+今日涨停家数   &gt;  昨日涨停家数 × 1.5         <span class="c">// 今日爆发式放大</span>
+昨日连板晋级率 &lt;  30%                      <span class="c">// 昨日处于冰点</span></pre>
+      <div class="callout c-ok">
+        <div class="ttl">验证命中：2026-09-07（样本内唯一命中，教科书式启动日）</div>
+        <p style="margin:4px 0 0">昨日（09-04）涨停 <strong>39 家</strong>、连板晋级率 <strong>11.1%</strong>（冰点） →
+          今日（09-07）涨停 <strong>93 家</strong>，放大 2.4 倍，最高板回到 6 板。</p>
+      </div>
+
+      <h4>类型二：分歧日（高位炸板潮）</h4>
+      <pre><span class="c">// v1.0（失效：0/18 命中，因「高位股跌停 &gt; 3」样本内取值只有 0 / 1）</span>
+昨日连板晋级率 &gt; 50%  AND  今日炸板数 &gt; 20  AND  今日高位股(&gt;3板)跌停数 &gt; 3
+
+<span class="c">// v1.1（改用 t_zt_perf 口径：看高位股的「实际赚钱效应」而非「极端跌停」）</span>
+昨日 ≥3 板个股今日平均涨幅  &lt;  0%     <span class="c">// 高位失去赚钱效应（核心判据）</span>
+今日炸板率                  &gt;  25%   <span class="c">// ZB / (ZT + ZB)</span>
+其中翻绿个股数              ≥  1</pre>
+      <div class="callout c-ok">
+        <div class="ttl">验证命中：2026-09-14</div>
+        <p style="margin:4px 0 0">昨日 3 只 ≥3 板个股今日<strong>平均 −2.15%</strong>（其中 2 只翻绿），当日炸板率 <strong>35.3%</strong>，
+          符合分歧特征。</p>
+      </div>
+      <div class="callout c-warn">
+        <div class="ttl">前置依赖（阻断项）</div>
+        <p style="margin:4px 0 0">本规则依赖 <code>t_zt_perf</code>，而该表目前仅 3 天数据。上线前须完成历史回填，
+          否则此规则只能对未来生效、无法回测标定，历史区间内的分歧日会全部漏判。见 <a href="#s16">§16 风险 R2</a>。</p>
+      </div>
+
+      <h4>类型三：切换日（新题材爆发 / 旧主线熄火）</h4>
+      <pre><span class="c">// v1.0（失效：17/18 误报，94%）</span>
+今日新题材(昨日无涨停)涨停数 &gt; 10  AND  旧主线(昨日第一)今日涨停数 &lt; 5
+
+<span class="c">// v1.1（加占比约束 + 主线熄火判据加严 + 去噪窗口）</span>
+今日新题材涨停家数       ≥  20       <span class="c">// 绝对量：要有成规模资金</span>
+  且 占今日涨停总数比例   ≥  30%      <span class="c">// 相对量：必须是当日主导力量（关键修正）</span>
+  且 昨日第一主线今日涨停 ≤  1       <span class="c">// 旧主线彻底熄火</span>
+  且 5 个交易日内同一新题材簇不重复计  <span class="c">// 去噪窗口，避免连续误判</span></pre>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:340px">阈值方案</th><th class="ctr" style="width:100px">命中 / 样本</th><th class="ctr" style="width:90px">误报率</th><th>评价</th></tr></thead>
+          <tbody>
+            <tr><td>v1.0 原文：new &gt; 10 且 old &lt; 5</td><td class="ctr num">17 / 18</td><td class="ctr"><span class="b b-red">94%</span></td><td>不可用</td></tr>
+            <tr><td>收紧 A：new ≥ 15 且 ratio ≥ 25% 且 old ≤ 2</td><td class="ctr num">13 / 18</td><td class="ctr"><span class="b b-red">72%</span></td><td>仍偏松</td></tr>
+            <tr><td><strong>收紧 B（v1.1 建议）：new ≥ 20 且 ratio ≥ 30% 且 old ≤ 1</strong></td><td class="ctr num">6 / 18</td><td class="ctr"><span class="b b-amber">33%</span></td><td><strong>可用</strong>，配合去噪窗口与人工确认</td></tr>
+            <tr><td>收紧 C：new ≥ 25 且 ratio ≥ 35% 且 old = 0</td><td class="ctr num">0 / 18</td><td class="ctr"><span class="b b-gray">0%</span></td><td>过严，退化为新的死分支</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">保留一定误报率是刻意选择：节点识别宁可召回偏高、由人工确认环节收敛，也不要漏掉真切换。
+        人工确认结果会回流（<code>source=MANUAL</code>），作为后续重标定的训练样本。</p>
+
+      <h3>5.4 节点票筛选条件重做（变更 C2）</h3>
+      <p>v1.0 的三条筛选条件选拔率分别为 96% / 89% / 0%，全部不可用。v1.1 引入两个通用收敛机制：</p>
+      <ol>
+        <li><strong>题材内收敛</strong>（<code>node_stock_limit_per_theme</code>，默认 1）：同一题材只保留「规定维度排序最靠前」的 N 只。
+          默认维度是<strong>首封时间最早</strong>——这是盘面唯一可验证的「资金优先级」证据。</li>
+        <li><strong>选拔率上限</strong>（<code>max_select_rate</code>，默认 15%）：候选数 ÷ 当日涨停家数 超过上限时，
+          按权重截断剩余名额，并在运行记录写 <code>warning=CANDIDATE_TRUNCATED</code>。</li>
+      </ol>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:100px">节点类型</th><th>v1.1 筛选条件</th><th class="ctr" style="width:130px">真实候选 / 涨停</th><th class="ctr" style="width:80px">选拔率</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>启动日<br><span class="small">09-07</span></td>
+              <td>① <strong>1 进 2 成功者优先</strong>（晋级的确定性高于全新首板）<br>② 名额不足时补题材内首封最早的首板<br>③ 每题材 ≤ 1 只，且成交额 ≥ <code>filter_min_amount</code></td>
+              <td class="ctr num">9 / 93<br><span class="small">（若含首板则为 41）</span></td>
+              <td class="ctr"><span class="b b-green">9.7%</span></td>
+            </tr>
+            <tr>
+              <td>分歧日<br><span class="small">09-14</span></td>
+              <td>当日<strong>换手板</strong>（非一字）AND 题材非昨日最强主线 AND <strong>该题材今日涨停 ≥ 2 家</strong>（有板块效应）AND 每题材 ≤ 1 只</td>
+              <td class="ctr num">9 / 55</td>
+              <td class="ctr"><span class="b b-green">16.4%</span></td>
+            </tr>
+            <tr>
+              <td>切换日<br><span class="small">09-21</span></td>
+              <td>题材为今日新题材 AND <strong>该题材今日涨停 ≥ 3 家</strong> AND <strong>放宽到 ≥1 板</strong>（v1.0 的 ≥2 板在真实数据上恒不成立）AND 每题材取首发 1 只</td>
+              <td class="ctr num">2 / 96</td>
+              <td class="ctr"><span class="b b-amber">2.1%</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">切换日选拔率偏低（2.1%）是<strong>可接受的偏差方向</strong>：宁少勿滥，
+        且它天然被统一评分与多策略并存机制兜底（可另配「激进模板」放宽到 ≥1 板且不限首发名额）。</p>
+
+      <h3>5.5 节点相关配置项与人工干预</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:200px">配置项</th><th style="width:230px">Key</th><th style="width:210px">默认值</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>节点回溯窗口</td><td><code>node_scan_window</code></td><td><code>5</code>（交易日）</td><td>自动扫描最近 N 个交易日内的潜在节点</td></tr>
+            <tr><td>节点类型权重</td><td><code>node_type_weights</code></td><td><code>{"start":1.0,"switch":0.8,"diverge":0.6}</code></td><td>不同类型节点的票在最终评分中的权重</td></tr>
+            <tr><td>每题材取票数 <span class="b b-blue">新增</span></td><td><code>node_stock_limit_per_theme</code></td><td><code>1</code></td><td>收敛机制，控制选拔率</td></tr>
+            <tr><td>选拔率上限 <span class="b b-blue">新增</span></td><td><code>max_select_rate</code></td><td><code>0.15</code></td><td>超过则截断并告警</td></tr>
+            <tr><td>阈值模式 <span class="b b-blue">新增</span></td><td><code>threshold_mode</code></td><td><code>dynamic</code></td><td><code>absolute</code>=写死数值 ／ <code>dynamic</code>=近 20 日分位数自适应</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><strong>人工干预通道</strong>：交易员可在 UI 上手动标记 / 取消节点，写入 <code>t_node_detect(source='MANUAL', confirmed=1)</code>，
+        优先级高于自动识别结果，并被下一次重标定任务采样为训练样本。
+        注意这与现有 <code>t_node_event</code> 是<strong>两套独立数据</strong>——后者服务于人工复盘页面，前者服务于策略计算，互不写入。</p>
+    </section>
+
+    <section id="s6">
+      <h2>6 · 跨原则统一评分（变更 C3）</h2>
+      <div class="callout c-bad">
+        <div class="ttl">为什么必须重做排序</div>
+        <p style="margin:4px 0 0">v1.0 默认 <code>sort_by = principle_count</code>（按命中原则数量排序，命中越多越靠前）。
+          但真实数据显示：身位板要求 <code>≥ min_board_count</code>（默认 2 板），而节点票多为首板——
+          2026-09-21 身位候选 20 只与切换日节点票 2 只<strong>完全不相交</strong>，
+          当日所有候选的「命中原则数量」恒等于 1。该排序规则在多数交易日退化为「无排序」。</p>
+      </div>
+
+      <h3>6.1 设计取舍</h3>
+      <p>放弃「按命中数量」这种离散排序，改为<strong>连续加权评分</strong>：把「身位」与「节点」两条信号都折算成分数叠加，
+        这样既能表达「某只票既是身位又在节点日」，也不会在没有双命中的日子里失效。</p>
+
+      <h3>6.2 评分公式（v1.1 建议）</h3>
+      <div class="formula">score = W_board   × (board / max_board_of_day)          // 身位高度分
+     + W_position × is_position_stock                   // 身位身份分：是=1，否=0
+     + W_node     × node_type_weight                    // 节点分：启动1.0 / 切换0.8 / 分歧0.6
+     + W_timing   × (first_seal_time ≤ 10:00 ? 1 : 0)   // 封板时序加成
+     − W_risk     × risk_penalty                        // 风险扣分
+
+默认权重：W_board=0.50, W_position=0.30, W_node=0.20, W_timing=0.10, W_risk=0.20
+
+risk_penalty：一字缩量（换手&lt;2% 且成交额&lt;filter_min_amount）=1
+              高位过度换手（&gt;30%）=1   龙头断板降级=1
+              可叠加，上限 1
+
+suggest_position = max_position_per_stock × (score / 当日最高分) × (存在风险标记时 × 0.5)</div>
+      <p class="small">所有 W_* 均为可配置项。v1.1 先把「与原配置项一一对应」的结构立起来，权重初值取经验值；
+        上线运行 20 个交易日后，用 <code>t_candidate_t1</code> 的实际收益数据回归修订。</p>
+
+      <h3>6.3 真实样例：2026-09-21 候选池</h3>
+      <p class="small">当日标定为<strong>切换日</strong>；<code>max_board_of_day = 5</code>；基准分（当日最高分）= 0.80；单票上限 5%。</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th class="ctr" style="width:45px">排名</th><th style="width:70px">代码</th><th style="width:90px">名称</th><th class="ctr" style="width:50px">连板</th><th style="width:100px">题材</th><th style="width:130px">命中原则</th><th class="ctr" style="width:70px">节点</th><th class="ctr" style="width:60px">评分</th><th class="ctr" style="width:80px">建议仓位</th><th class="ctr" style="width:100px">风险标记</th></tr></thead>
+          <tbody>
+            <tr><td class="ctr">1</td><td>603230</td><td>内蒙新华</td><td class="ctr">4</td><td>出版</td><td><span class="b b-brand">身位板</span></td><td class="ctr">—</td><td class="ctr num">0.80</td><td class="ctr num">5.0%</td><td class="ctr">准一字</td></tr>
+            <tr><td class="ctr">2</td><td>002285</td><td>世联行</td><td class="ctr">4</td><td>房地产服务</td><td><span class="b b-brand">身位板</span></td><td class="ctr">—</td><td class="ctr num">0.70</td><td class="ctr num">4.4%</td><td class="ctr">—</td></tr>
+            <tr><td class="ctr">3</td><td>001216</td><td>华瓷股份</td><td class="ctr">5</td><td>家居用品</td><td><span class="b b-brand">身位板</span></td><td class="ctr">—</td><td class="ctr num">0.70</td><td class="ctr num">2.2%</td><td class="ctr"><span class="b b-amber">一字缩量</span></td></tr>
+            <tr><td class="ctr">4</td><td>600127</td><td>金健米业</td><td class="ctr">3</td><td>农产品加工</td><td><span class="b b-brand">身位板</span></td><td class="ctr">—</td><td class="ctr num">0.60</td><td class="ctr num">3.8%</td><td class="ctr">—</td></tr>
+            <tr><td class="ctr">5</td><td>600448</td><td>华纺股份</td><td class="ctr">3</td><td>纺织制造</td><td><span class="b b-brand">身位板</span></td><td class="ctr">—</td><td class="ctr num">0.60</td><td class="ctr num">3.8%</td><td class="ctr"><span class="b b-blue">换手 38%</span></td></tr>
+            <tr><td class="ctr">6</td><td>000504</td><td>南华生物</td><td class="ctr">3</td><td>医疗服务</td><td><span class="b b-brand">身位板</span></td><td class="ctr">—</td><td class="ctr num">0.50</td><td class="ctr num">1.6%</td><td class="ctr"><span class="b b-amber">一字缩量</span></td></tr>
+            <tr><td class="ctr">7</td><td>000756</td><td>新华制药</td><td class="ctr">1</td><td>化学制药</td><td><span class="b b-green">切换日节点票</span></td><td class="ctr">09-21</td><td class="ctr num">0.36</td><td class="ctr num">2.3%</td><td class="ctr">—</td></tr>
+            <tr><td class="ctr">8</td><td>688026</td><td>洁特生物</td><td class="ctr">1</td><td>医疗器械</td><td><span class="b b-green">切换日节点票</span></td><td class="ctr">09-21</td><td class="ctr num">0.26</td><td class="ctr num">1.6%</td><td class="ctr">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout c-info">
+        <div class="ttl">注意第 1 与第 3 名的位次</div>
+        <p style="margin:4px 0 0">华瓷股份是当日空间板（5 板）却排在 4 板的内蒙新华之后，这正是 §4.4「观察一」的直接后果：
+          一字缩量触发风险扣分并折半仓位。<strong>这是设计意图，不是缺陷</strong>——T+1 承接不了的一字板不应给出满仓建议。
+          若交易团队不接受该取舍，把 <code>W_risk</code> 调为 0 即可关闭此行为。</p>
+      </div>
+    </section>
+
+    <section id="s7">
+      <h2>7 · 策略配置中心</h2>
+      <h3>7.1 界面结构</h3>
+      <div class="card">
+        <pre class="light">┌──────────────────────────────────────────────────────────────────┐
+│ 策略名称：[我的身位节点策略 v1]      启用状态：[✅ 启用]            │
+│ 当前版本：v7（2026-09-21 16:02 保存）              [版本历史 ▾]     │
+├──────────────────────────────────────────────────────────────────┤
+│ 【原则一：同题材身位板】                            ☑ 启用         │
+│   身位判定模式  [最高连板数 ▾]      最小连板阈值  [2]              │
+│   同身位数量限制 [2]               题材分组      [东财行业 ▾]      │
+│   ☑ 总龙头断板时降级高位身位   降级阈值 [4] 板                     │
+│   ℹ 近20日：本组参数触发中位股降级 3 次（最近 09-08）              │
+├──────────────────────────────────────────────────────────────────┤
+│ 【原则二：节点票】                                  ☑ 启用         │
+│   节点识别 [默认算法 v1.1 ▾]       节点回溯窗口 [5] 交易日         │
+│   阈值模式 [动态基准 ▾]                                            │
+│     ⓘ 近20日「昨日涨停家数」中位=60 → 启动日触发线=42（昨日实际=78，未触发）│
+│   节点票条件 [默认算法 v1.1 ▾]     每题材取票 [1] 只               │
+│   选拔率上限 [15] %   ⓘ 上次运行实际选拔率 9.7%                    │
+│   节点类型权重  启动 [1.0]  切换 [0.8]  分歧 [0.6]                │
+├──────────────────────────────────────────────────────────────────┤
+│ 【过滤与排序】                                                     │
+│   过滤条件 ☑剔除ST  ☐剔除上市&lt;30天  ☑剔除成交额&lt;[1.0]亿          │
+│   ⚠ 冲突策略（原则命中 vs 过滤器）[标记风险保留 ▾]                 │
+│   排序规则 [统一加权评分 ▾]  评分权重见「高级」抽屉                │
+│   单票最大仓位 [5] %                                               │
+├──────────────────────────────────────────────────────────────────┤
+│ [保存为新版本] [另存为模板] [参数对比] [试运行(T-1)] [立即运行]    │
+└──────────────────────────────────────────────────────────────────┘</pre>
+      </div>
+      <p class="small">相比 v1.0 原型新增三处：<strong>①参数历史触发提示</strong>（让用户知道某个阈值是否真的在起作用，回应 §4.4 观察二）、
+        <strong>②试运行 (T-1)</strong>（用上一交易日数据即时验证改配置的效果，不必等到 15:30）、
+        <strong>③冲突策略选择</strong>（解决 §4.4 观察一）。</p>
+
+      <h3>7.2 内置策略模板</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:110px">模板</th><th style="width:220px">适用环境</th><th>关键参数差异</th></tr></thead>
+          <tbody>
+            <tr><td><strong>主升浪</strong></td><td>涨停家数持续 &gt; 70、连板晋级率 &gt; 45%</td><td><code>min_board_count=3</code>、<code>max_same_position=1</code>（只要最强）、<code>node_type_weights.start=1.2</code>、单票上限 8%</td></tr>
+            <tr><td><strong>退潮期</strong></td><td>炸板率 &gt; 35%、连板晋级率 &lt; 30%</td><td><code>min_board_count=2</code>、<code>max_same_position=3</code>、<code>degrade_on_dragon_death=true</code>、<code>W_risk=0.3</code>、单票上限 2%</td></tr>
+            <tr><td><strong>震荡市</strong></td><td>涨停家数 40~70 且晋级率 30%~45%</td><td>默认参数 + <code>topic_source=em_concept</code>（题材级粒度）、<code>max_select_rate=0.10</code>、单票上限 4%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">模板只是一份预置参数 JSON，落在 <code>t_strategy_template</code>；套用模板 = 创建新版本并复制模板参数，不产生新策略实体。</p>
+
+      <h3>7.3 版本管理</h3>
+      <ul>
+        <li><strong>版本不可变</strong>：<code>t_strategy_version</code> append-only，任何修改产生新版本号，历史版本只读。</li>
+        <li><strong>配置哈希</strong>：每次写入计算 <code>config_hash</code>，内容相同的保存动作复用已有版本，避免空版本堆积。</li>
+        <li><strong>Diff</strong>：前端对 <code>config_json</code> 做 key 级 diff，输出「配置项 / 旧值 / 新值 / 是否影响历史回算」。</li>
+        <li><strong>回滚</strong>：回滚 = 以目标版本内容为内容创建一个新版本并设为 current，<strong>历史链条完整保留</strong>。</li>
+        <li><strong>运行结果绑定版本</strong>：<code>t_strategy_run.version_id</code> 落快照，保证「当初用什么参数算出这批候选」永远可查——这是回测与复盘可信的前提。</li>
+      </ul>
+    </section>
+
+    <section id="s8">
+      <h2>8 · 计算引擎</h2>
+      <h3>8.1 触发时机</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:110px">触发方式</th><th>说明</th><th style="width:300px">记录</th></tr></thead>
+          <tbody>
+            <tr><td>定时</td><td>每交易日 15:30 由 Quartz 触发（见 <a href="#s11">§11.2</a>）</td><td><code>trigger=SCHEDULE</code></td></tr>
+            <tr><td>手动</td><td>配置中心「立即运行」，可指定交易日</td><td><code>trigger=MANUAL</code></td></tr>
+            <tr><td>试运行</td><td>用指定历史交易日 dry-run，不写候选表</td><td><code>trigger=BACKTEST</code>，不落 <code>t_candidate_stock</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>8.2 流水线</h3>
+      <figure>
+        <svg viewBox="0 0 960 215" width="100%" style="max-width:960px;background:#fff;border:1px solid #e5e7eb;border-radius:10px">
+          <defs><marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L7,3 z" fill="#6366f1"/></marker>
+            <marker id="ag" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L7,3 z" fill="#16a34a"/></marker>
+            <marker id="ay" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L0,6 L7,3 z" fill="#f59e0b"/></marker>
+          </defs>
+          <g font-family="system-ui,Microsoft YaHei,sans-serif">
+            <rect x="6" y="42" width="140" height="66" rx="8" fill="#eef2ff" stroke="#6366f1"/>
+            <text x="76" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="#312e81">① 数据装载</text>
+            <text x="76" y="88" text-anchor="middle" font-size="11" fill="#4b5563">三池 + 题材映射</text>
+            <text x="76" y="103" text-anchor="middle" font-size="10" fill="#94a3b8">含就绪度校验</text>
+
+            <rect x="166" y="42" width="140" height="66" rx="8" fill="#eef2ff" stroke="#6366f1"/>
+            <text x="236" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="#312e81">② 节点扫描</text>
+            <text x="236" y="88" text-anchor="middle" font-size="11" fill="#4b5563">回溯窗口 N 日</text>
+            <text x="236" y="103" text-anchor="middle" font-size="10" fill="#94a3b8">启动 / 分歧 / 切换</text>
+
+            <rect x="326" y="42" width="140" height="66" rx="8" fill="#eef2ff" stroke="#6366f1"/>
+            <text x="396" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="#312e81">③ 身位计算</text>
+            <text x="396" y="88" text-anchor="middle" font-size="11" fill="#4b5563">按题材分组取名额</text>
+            <text x="396" y="103" text-anchor="middle" font-size="10" fill="#94a3b8">标记中位股</text>
+
+            <rect x="486" y="42" width="140" height="66" rx="8" fill="#eef2ff" stroke="#6366f1"/>
+            <text x="556" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="#312e81">④ 候选生成</text>
+            <text x="556" y="88" text-anchor="middle" font-size="11" fill="#4b5563">身位 ∪ 节点</text>
+            <text x="556" y="103" text-anchor="middle" font-size="10" fill="#94a3b8">记录命中明细</text>
+
+            <rect x="646" y="42" width="140" height="66" rx="8" fill="#eef2ff" stroke="#6366f1"/>
+            <text x="716" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="#312e81">⑤ 过滤与评分</text>
+            <text x="716" y="88" text-anchor="middle" font-size="11" fill="#4b5563">冲突降级 + 统一评分</text>
+            <text x="716" y="103" text-anchor="middle" font-size="10" fill="#94a3b8">选拔率截断</text>
+
+            <rect x="806" y="42" width="146" height="66" rx="8" fill="#dcfce7" stroke="#16a34a"/>
+            <text x="879" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="#065f46">⑥ 落库输出</text>
+            <text x="879" y="88" text-anchor="middle" font-size="11" fill="#065f46">候选池 + 运行留痕</text>
+            <text x="879" y="103" text-anchor="middle" font-size="10" fill="#65a30d">幂等 upsert</text>
+
+            <g stroke="#6366f1" stroke-width="1.6" marker-end="url(#ar)">
+              <line x1="146" y1="75" x2="164" y2="75"/>
+              <line x1="306" y1="75" x2="324" y2="75"/>
+              <line x1="466" y1="75" x2="484" y2="75"/>
+              <line x1="626" y1="75" x2="644" y2="75"/>
+            </g>
+            <line x1="786" y1="75" x2="804" y2="75" stroke="#16a34a" stroke-width="1.6" marker-end="url(#ag)"/>
+
+            <rect x="6" y="146" width="946" height="50" rx="8" fill="#fffbeb" stroke="#f59e0b" stroke-dasharray="4 3"/>
+            <text x="479" y="167" text-anchor="middle" font-size="12" font-weight="700" fill="#78350f">T+1 复盘回流（下一交易日同一任务的前置步骤）</text>
+            <text x="479" y="184" text-anchor="middle" font-size="11" fill="#92400e">读 t_zt_perf / 次日三池 → 写 t_candidate_t1 → 重算命中率与盈亏比 → 供评分权重回归</text>
+            <line x1="879" y1="108" x2="879" y2="144" stroke="#f59e0b" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ay)"/>
+          </g>
+        </svg>
+        <figcaption>图 2 · WaveRider 计算引擎流水线与 T+1 复盘回流</figcaption>
+      </figure>
+
+      <h3>8.3 步骤职责与产物</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th class="ctr" style="width:50px">步骤</th><th style="width:200px">输入</th><th style="width:270px">输出</th><th>失败行为</th></tr></thead>
+          <tbody>
+            <tr><td class="ctr">①</td><td>交易日 + <code>topic_source</code></td><td>内存数据集：当日三池、昨日三池、题材映射</td><td>缺昨日前值 → <code>skip</code>（首次运行无对比基数）</td></tr>
+            <tr><td class="ctr">②</td><td>回溯窗口内市场指标序列</td><td><code>t_node_detect</code> 行（含 <code>hit_expr</code>）</td><td>未命中属正常，无节点行即可，继续向下</td></tr>
+            <tr><td class="ctr">③</td><td>当日涨停池 + 题材映射</td><td>身位集合（含中位股标记）</td><td>题材表为空 → 降级为 <code>em_industry</code> 并告警</td></tr>
+            <tr><td class="ctr">④</td><td>身位集合 + 节点集合</td><td>候选行（<code>hit_principles_json</code>）</td><td>候选为空 → 运行标记 <code>EMPTY</code>，仍写运行记录</td></tr>
+            <tr><td class="ctr">⑤</td><td>候选行 + 过滤 / 评分配置</td><td>排序候选 + 建议仓位</td><td>选拔率超限 → 截断 + <code>warning</code></td></tr>
+            <tr><td class="ctr">⑥</td><td>排序候选</td><td><code>t_candidate_stock</code> + <code>t_strategy_run</code></td><td>整体事务回滚，运行标记 <code>FAILED</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout c-warn">
+        <div class="ttl">两个必须遵守的工程约束</div>
+        <ol style="margin:6px 0 0">
+          <li><strong>非 HTTP 调用必须自己补 <code>t_market_daily</code> 的 upsert。</strong>
+            <code>MarketDataService.snapshot(date, true)</code> 只写三池与溢价表，<code>t_market_daily</code> 的 upsert 目前挂在 <code>MarketController</code> 里。
+            定时任务不走 HTTP，必须在 task 内自行补这一步，否则全局客观九数为空、动态基准取不到中位数。</li>
+          <li><strong>「这次不用做」用 <code>TaskResult.skip(原因)</code> 表达，不要抛异常。</strong>
+            非交易日 / 数据未就绪 / 候选为空都是正常分支，抛异常会让 <code>t_scheduler_run</code> 记成失败并掩盖真实故障。</li>
+        </ol>
+      </div>
+
+      <h3>8.4 幂等与重跑</h3>
+      <ul>
+        <li>同一 <code>(strategy_id, trade_date)</code> 重复运行：<strong>先删当日候选行再重插</strong>，版本号随当前 <code>current_version_id</code> 更新。</li>
+        <li>每次运行产出独立 <code>t_strategy_run</code> 行并保留历史，不覆盖上一次执行记录。</li>
+        <li><code>BACKTEST</code> 类型不写候选表，只返回预览结果。</li>
+      </ul>
+    </section>
+
+    <section id="s9">
+      <h2>9 · 规则 DSL 与执行设计</h2>
+      <h3>9.1 为什么不用裸 JSON 字符串</h3>
+      <p>v1.0 把节点规则写成「JSON / 脚本」，落到实现上如果直接存字符串再 <code>eval</code>，会带来三个硬伤：</p>
+      <div class="grid3">
+        <div class="stat"><div class="lab">不可校验</div><div style="font-size:13px;margin-top:4px">保存时无法静态校验语法与变量合法性，错误只能在运行中暴露</div></div>
+        <div class="stat"><div class="lab">不可对比</div><div style="font-size:13px;margin-top:4px">版本 diff 退化成整段文本 diff，看不出到底改了哪个阈值</div></div>
+        <div class="stat"><div class="lab">不可视化</div><div style="font-size:13px;margin-top:4px">无法生成「拖拽式」配置界面，最终还是回到手改 JSON</div></div>
+      </div>
+      <p style="margin-top:10px">因此 v1.1 采用<strong>受限 AST（JSON 结构树）</strong>：配置仍是 JSON，但 schema 固定、可静态校验、可渲染成表单。</p>
+
+      <h3>9.2 DSL 结构示例（v1.1 启动日规则）</h3>
+      <pre>{
+  <span class="k">"kind"</span>: <span class="s">"node_rule"</span>,                     <span class="c">// node_rule | node_stock_rule | filter_rule</span>
+  <span class="k">"node_type"</span>: <span class="s">"START"</span>,                     <span class="c">// START | SWITCH | DIVERGE</span>
+  <span class="k">"expr"</span>: {
+    <span class="k">"op"</span>: <span class="s">"and"</span>,                          <span class="c">// and|or|not|gt|gte|lt|lte|eq|between|mul|div</span>
+    <span class="k">"args"</span>: [
+      { <span class="k">"op"</span>: <span class="s">"lt"</span>, <span class="k">"left"</span>: { <span class="k">"var"</span>: <span class="s">"market.prev_zt_count"</span> },
+                     <span class="k">"right"</span>: { <span class="k">"dyn"</span>: <span class="s">"median20:prev_zt_count*0.7"</span> } },
+      { <span class="k">"op"</span>: <span class="s">"gt"</span>, <span class="k">"left"</span>: { <span class="k">"var"</span>: <span class="s">"market.zt_count"</span> },
+                     <span class="k">"right"</span>: { <span class="k">"op"</span>: <span class="s">"mul"</span>, <span class="k">"args"</span>: [
+                                   { <span class="k">"var"</span>: <span class="s">"market.prev_zt_count"</span> }, { <span class="k">"lit"</span>: <span class="n">1.5</span> } ] } },
+      { <span class="k">"op"</span>: <span class="s">"lt"</span>, <span class="k">"left"</span>: { <span class="k">"var"</span>: <span class="s">"market.prev_lb_promote_rate"</span> },
+                     <span class="k">"right"</span>: { <span class="k">"lit"</span>: <span class="n">30</span> } }
+    ]
+  }
+}</pre>
+      <p class="small"><code>dyn</code> 节点实现动态基准：<code>median20</code> / <code>p25_20</code> / <code>mean20</code> 三种统计量，在求值时按回溯窗口现算，避免了把绝对阈值写死。</p>
+
+      <h3>9.3 变量命名空间（白名单）</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:120px">作用域</th><th style="width:280px">变量</th><th>含义</th></tr></thead>
+          <tbody>
+            <tr><td rowspan="7"><code>market.*</code></td><td><code>zt_count</code></td><td>今日涨停家数</td></tr>
+            <tr><td><code>zb_count</code> / <code>zb_rate</code></td><td>今日炸板家数 / 炸板率</td></tr>
+            <tr><td><code>dt_count</code></td><td>今日跌停家数</td></tr>
+            <tr><td><code>prev_zt_count</code></td><td>昨日涨停家数</td></tr>
+            <tr><td><code>promote_rate</code> / <code>prev_promote_rate</code></td><td>全体晋级率（今日 / 昨日）</td></tr>
+            <tr><td><code>lb_promote_rate</code> / <code>prev_lb_promote_rate</code></td><td>连板晋级率（今日 / 昨日）</td></tr>
+            <tr><td><code>prev_high_avg_chg</code></td><td>昨日 ≥3 板个股今日平均涨幅（<code>t_zt_perf</code>）</td></tr>
+            <tr><td rowspan="4"><code>theme.*</code></td><td><code>zt_count</code> / <code>prev_zt_count</code></td><td>该题材今日 / 昨日涨停家数</td></tr>
+            <tr><td><code>max_board</code></td><td>该题材最高连板</td></tr>
+            <tr><td><code>is_new</code></td><td>是否为今日新题材（昨日无涨停）</td></tr>
+            <tr><td><code>is_prev_mainline</code></td><td>该题材是否为昨日第一主线</td></tr>
+            <tr><td rowspan="7"><code>stock.*</code></td><td><code>board</code> / <code>prev_board</code></td><td>今日连板数 / 昨日连板数（1 进 2 判定用）</td></tr>
+            <tr><td><code>amount</code> / <code>turnover_rate</code></td><td>成交额（亿） / 换手率%</td></tr>
+            <tr><td><code>float_mv</code></td><td>流通市值（亿）</td></tr>
+            <tr><td><code>first_seal_time</code></td><td>首封时间（HHMMSS）</td></tr>
+            <tr><td><code>is_yizi</code> / <code>is_huanshou</code></td><td>是否一字板 / 换手板（§2 口径）</td></tr>
+            <tr><td><code>is_position</code> / <code>is_space_board</code></td><td>是否身位板 / 是否空间板</td></tr>
+            <tr><td><code>is_st</code> / <code>listed_days</code></td><td>是否 ST / 上市天数</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">引擎只接受上表变量与 §9.2 列出的算子，任何未登记标识符在<strong>保存配置时</strong>即被拒绝。
+        全部求值在 JVM 内完成，无反射、无脚本引擎、无网络与文件访问。</p>
+
+      <h3>9.4 关于「自定义 Python 脚本」（变更 C5）</h3>
+      <div class="callout c-bad">
+        <div class="ttl">v1 明确不做，且不建议长期做</div>
+        <p style="margin:4px 0 0">允许用户在服务端写 Python 并执行，等同于开放一个持久化的远程代码执行入口，
+          沙箱加固（进程隔离、资源限额、网络禁用）成本远超本功能收益。建议替代方案：</p>
+        <ul style="margin:6px 0 0">
+          <li><strong>Webhook 外部策略服务</strong>：WaveRider 把当日标准化数据包 POST 到用户自建服务，后者返回候选列表。
+            计算在用户自己的环境里跑，安全边界清晰。</li>
+          <li><strong>AST 扩展点</strong>：确有内置算子表达不了的逻辑时，走「提需求 → 新增受审算子」的迭代链路，而不是开放脚本。</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="s10">
+      <h2>10 · 数据模型草案</h2>
+      <p>新增 7 张表，落在 Flyway 迁移 <code>V29__waverider_strategy.sql</code>；定时任务种子放在 <code>V30__waverider_scheduler_job.sql</code>。
+        版本号说明：V28 已被 <code>V28__position_quantity.sql</code> 占用，新增脚本必须从 V29 起。
+        命名与现有表同构：<code>t_</code> 前缀、<code>snake_case</code>、公开结果不绑 <code>user_id</code>、用户配置必绑。</p>
+
+      <div class="callout c-warn">
+        <div class="ttl">工程约束（必须遵守）</div>
+        <ul style="margin:6px 0 0">
+          <li>当前依赖 Flyway <strong>6.5.7</strong> + MySQL <strong>5.7.29</strong>：解析器按分号切语句，<strong>不认 <code>BEGIN...END</code> / <code>CREATE PROCEDURE</code></strong>。
+            补列一律用 V1 已有的幂等套路：<code>SET @v=(SELECT COUNT(*) FROM information_schema...)</code> →
+            <code>SET @ddl=IF(@v=0,'ALTER...','SELECT 0')</code> → <code>PREPARE/EXECUTE/DEALLOCATE</code>。</li>
+          <li><strong>已应用的迁移严禁修改</strong>（<code>validate-on-migrate</code> 会对 checksum），新变更写下一个版本号。</li>
+          <li>生产库存量库基线为 <code>baseline-version: 24</code>，V25 之后的脚本都会在特定环境下真实执行，必须具备幂等保护。</li>
+          <li>迁移失败会留 <code>success=0</code> 脏行导致拒启；修复 = 删掉该失败行，<strong>并确认脚本已幂等</strong>，否则下次启动只会再插一条失败行。</li>
+        </ul>
+      </div>
+
+      <h3>10.1 表清单</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:180px">表</th><th style="width:80px">绑定用户</th><th>职责</th></tr></thead>
+          <tbody>
+            <tr><td><code>t_strategy</code></td><td class="ctr"><span class="b b-blue">是</span></td><td>策略主实体：名称、启用状态、当前版本指针</td></tr>
+            <tr><td><code>t_strategy_version</code></td><td class="ctr"><span class="b b-blue">是</span></td><td>配置版本快照（append-only），存完整 <code>config_json</code> 与哈希</td></tr>
+            <tr><td><code>t_strategy_template</code></td><td class="ctr"><span class="b b-gray">否</span></td><td>内置模板（主升浪 / 退潮期 / 震荡市）</td></tr>
+            <tr><td><code>t_strategy_run</code></td><td class="ctr"><span class="b b-blue">是</span></td><td>每次运行的留痕：触发方式、版本、耗时、状态、告警</td></tr>
+            <tr><td><code>t_node_detect</code></td><td class="ctr"><span class="b b-blue">是</span></td><td>自动识别 / 人工标记的节点日</td></tr>
+            <tr><td><code>t_candidate_stock</code></td><td class="ctr"><span class="b b-gray">否</span></td><td>候选池明细（按 run 隔离，可重算）</td></tr>
+            <tr><td><code>t_candidate_t1</code></td><td class="ctr"><span class="b b-gray">否</span></td><td>T+1 表现与晋级结果，供复盘与权重回归</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>10.2 表结构草案</h3>
+      <h4>t_strategy / t_strategy_version / t_strategy_template</h4>
+      <pre><span class="k">CREATE TABLE IF NOT EXISTS</span> t_strategy (
+  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id         BIGINT NOT NULL COMMENT '归属账号',
+  name            VARCHAR(60) NOT NULL COMMENT '策略名称',
+  enabled         TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用',
+  current_version_id BIGINT DEFAULT NULL COMMENT '当前生效版本(t_strategy_version.id)',
+  description     VARCHAR(300) DEFAULT NULL,
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_user_name (user_id, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='WaveRider 策略主表';
+
+<span class="k">CREATE TABLE IF NOT EXISTS</span> t_strategy_version (
+  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+  strategy_id     BIGINT NOT NULL,
+  version_no      INT NOT NULL COMMENT '版本序号，同一策略内递增',
+  config_json     LONGTEXT NOT NULL COMMENT '完整配置快照(JSON)',
+  config_hash     CHAR(32) NOT NULL COMMENT '配置MD5，内容相同可复用版本',
+  change_note     VARCHAR(300) DEFAULT NULL COMMENT '本次改了什么',
+  created_by      BIGINT DEFAULT NULL,
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_strategy_version (strategy_id, version_no),
+  INDEX idx_hash (strategy_id, config_hash)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='WaveRider 策略版本快照(append-only)';
+
+<span class="k">CREATE TABLE IF NOT EXISTS</span> t_strategy_template (
+  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+  template_code   VARCHAR(40) NOT NULL COMMENT 'MAIN_UP / RETREAT / RANGE',
+  template_name   VARCHAR(60) NOT NULL,
+  config_json     LONGTEXT NOT NULL,
+  sort_no         INT DEFAULT 0,
+  UNIQUE KEY uk_code (template_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='WaveRider 内置策略模板';</pre>
+
+      <h4>t_strategy_run / t_node_detect</h4>
+      <pre><span class="k">CREATE TABLE IF NOT EXISTS</span> t_strategy_run (
+  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+  strategy_id     BIGINT NOT NULL,
+  version_id      BIGINT NOT NULL COMMENT '本次运行使用的版本快照，保证可复算',
+  trade_date      DATE NOT NULL,
+  trigger_type    VARCHAR(12) NOT NULL COMMENT 'SCHEDULE/MANUAL/BACKTEST',
+  dry_run         TINYINT NOT NULL DEFAULT 0 COMMENT '1=试运行，不落候选表',
+  status          VARCHAR(12) NOT NULL COMMENT 'RUNNING/SUCCESS/EMPTY/FAILED/SKIPPED',
+  candidate_count INT DEFAULT 0,
+  node_count      INT DEFAULT 0,
+  warning         VARCHAR(120) DEFAULT NULL COMMENT 'CANDIDATE_TRUNCATED / TOPIC_FALLBACK ...',
+  error_msg       VARCHAR(500) DEFAULT NULL,
+  started_at      DATETIME NOT NULL,
+  finished_at     DATETIME DEFAULT NULL,
+  cost_ms         INT DEFAULT NULL,
+  UNIQUE KEY uk_strategy_date_trigger (strategy_id, trade_date, trigger_type, version_id),
+  INDEX idx_date (trade_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='WaveRider 运行留痕';
+
+<span class="k">CREATE TABLE IF NOT EXISTS</span> t_node_detect (
+  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+  user_id         BIGINT NOT NULL,
+  strategy_id     BIGINT DEFAULT NULL COMMENT 'NULL=人工标记，不属于任何策略',
+  trade_date      DATE NOT NULL,
+  node_type       VARCHAR(10) NOT NULL COMMENT 'START/DIVERGE/SWITCH',
+  rule_id         VARCHAR(40) DEFAULT NULL COMMENT '命中的规则标识',
+  hit_expr        TEXT COMMENT '命中的表达式与实测数值，便于事后解释',
+  metrics_json    TEXT COMMENT '当日 market.* 快照，便于复算',
+  source          VARCHAR(8) NOT NULL DEFAULT 'AUTO' COMMENT 'AUTO/MANUAL',
+  confirmed       TINYINT NOT NULL DEFAULT 0 COMMENT '人工确认(1)/人工取消(-1)',
+  confirmed_by    BIGINT DEFAULT NULL,
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_user_date_type (user_id, trade_date, node_type),
+  INDEX idx_date (trade_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='WaveRider 节点识别结果';</pre>
+
+      <h4>t_candidate_stock / t_candidate_t1</h4>
+      <pre><span class="k">CREATE TABLE IF NOT EXISTS</span> t_candidate_stock (
+  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+  run_id          BIGINT NOT NULL,
+  strategy_id     BIGINT NOT NULL,
+  trade_date      DATE NOT NULL,
+  rank_no         INT NOT NULL COMMENT '排名',
+  code            VARCHAR(6) NOT NULL,
+  name            VARCHAR(20) NOT NULL,
+  board           INT COMMENT '连板数',
+  topic           VARCHAR(50) COMMENT '主归属题材',
+  concepts_json   TEXT COMMENT '全部命中题材(多归属)',
+  hit_principles_json VARCHAR(60) NOT NULL COMMENT 'POSITION/NODE，可同时命中',
+  node_type       VARCHAR(10) DEFAULT NULL,
+  node_date       DATE DEFAULT NULL,
+  position_type   VARCHAR(30) DEFAULT NULL COMMENT '如 出版最高板',
+  score           DECIMAL(6,2) DEFAULT NULL,
+  suggest_position DECIMAL(5,4) DEFAULT NULL COMMENT '建议仓位(小数)',
+  risk_flag       VARCHAR(40) DEFAULT NULL COMMENT 'YIZI_THIN/HIGH_TURNOVER/DRAGON_DEAD',
+  filter_detail_json TEXT COMMENT '过滤器逐条判定明细',
+  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_run_code (run_id, code),
+  INDEX idx_date_strategy (trade_date, strategy_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='WaveRider 候选池明细';
+
+<span class="k">CREATE TABLE IF NOT EXISTS</span> t_candidate_t1 (
+  id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+  strategy_id     BIGINT NOT NULL,
+  trade_date      DATE NOT NULL COMMENT '候选产生日 D',
+  code            VARCHAR(6) NOT NULL,
+  board           INT COMMENT 'D 日连板数',
+  t1_date         DATE NOT NULL COMMENT '验证日 D+1',
+  t1_change_pct   DECIMAL(6,2) DEFAULT NULL COMMENT 'D+1 收盘涨幅%',
+  t1_pool         VARCHAR(4) DEFAULT NULL COMMENT 'D+1 所属池 ZT/ZB/DT/NULL',
+  promoted        TINYINT DEFAULT 0 COMMENT '是否晋级(连板+1)',
+  max_chg         DECIMAL(6,2) DEFAULT NULL COMMENT 'D+1 盘中最高涨幅%，算盈利空间用',
+  updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_strategy_date_code (strategy_id, trade_date, code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='WaveRider 候选票 T+1 表现';</pre>
+
+      <p class="small"><strong>补充：</strong><code>t_stock</code> 需追加 <code>listed_at DATE</code> 列（用于 <code>filter_new_stock_days</code>），
+        按 V26 的 information_schema 幂等套路补，不得改用存储过程。</p>
+    </section>
+
+    <section id="s11">
+      <h2>11 · API 与调度设计</h2>
+      <h3>11.1 REST 接口清单</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:80px">方法</th><th style="width:300px">路径</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><span class="b b-green">GET</span></td><td><code>/api/waverider/strategies</code></td><td>策略列表（含启用状态、当前版本、最近运行情况）</td></tr>
+            <tr><td><span class="b b-blue">POST</span></td><td><code>/api/waverider/strategies</code></td><td>新建策略，自动创建 v1 版本</td></tr>
+            <tr><td><span class="b b-green">GET</span></td><td><code>/api/waverider/strategies/{id}</code></td><td>策略详情 + 当前版本配置</td></tr>
+            <tr><td><span class="b b-blue">POST</span></td><td><code>/api/waverider/strategies/{id}/versions</code></td><td>保存为新版本（带 change_note；内容未变则复用旧版本）</td></tr>
+            <tr><td><span class="b b-green">GET</span></td><td><code>/api/waverider/strategies/{id}/versions</code></td><td>版本历史列表</td></tr>
+            <tr><td><span class="b b-green">GET</span></td><td><code>/api/waverider/versions/{v1}/diff/{v2}</code></td><td>两版本 key 级差异</td></tr>
+            <tr><td><span class="b b-blue">POST</span></td><td><code>/api/waverider/strategies/{id}/rollback/{versionId}</code></td><td>以目标版本内容创建新版本并设为 current</td></tr>
+            <tr><td><span class="b b-green">GET</span></td><td><code>/api/waverider/templates</code></td><td>内置模板列表</td></tr>
+            <tr><td><span class="b b-blue">POST</span></td><td><code>/api/waverider/templates/{code}/apply</code></td><td>套用模板到指定策略</td></tr>
+            <tr><td><span class="b b-blue">POST</span></td><td><code>/api/waverider/strategies/{id}/validate</code></td><td>校验 AST 合法性（含变量/算子白名单），返回错误定位</td></tr>
+            <tr><td><span class="b b-blue">POST</span></td><td><code>/api/waverider/run</code></td><td>运行。<code>{strategyId, tradeDate, dryRun}</code>；返回 runId</td></tr>
+            <tr><td><span class="b b-green">GET</span></td><td><code>/api/waverider/runs?strategyId=&amp;date=</code></td><td>运行记录列表（含 status / cost_ms / warning）</td></tr>
+            <tr><td><span class="b b-green">GET</span></td><td><code>/api/waverider/candidates?strategyId=&amp;date=</code></td><td>候选池（含评分、建议仓位、风险标记、命中明细）</td></tr>
+            <tr><td><span class="b b-green">GET</span></td><td><code>/api/waverider/nodes?from=&amp;to=&amp;type=</code></td><td>节点日列表（含自动 / 人工、命中表达式）</td></tr>
+            <tr><td><span class="b b-blue">POST</span></td><td><code>/api/waverider/nodes</code></td><td>人工标记节点（<code>source=MANUAL</code>）</td></tr>
+            <tr><td><span class="b b-red">DEL</span></td><td><code>/api/waverider/nodes/{id}</code></td><td>取消 / 作废节点标记</td></tr>
+            <tr><td><span class="b b-green">GET</span></td><td><code>/api/waverider/review?strategyId=&amp;from=&amp;to=</code></td><td>复盘指标：命中率、平均涨幅、盈亏比、按原则分组统计</td></tr>
+            <tr><td><span class="b b-green">GET</span></td><td><code>/api/waverider/export?strategyId=&amp;date=</code></td><td>导出当日候选（md / csv）</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">复用而不重写的现有接口：<code>/api/market/*</code>（三池取数）、<code>/api/scheduler/reload</code>（重载排班）、
+        <code>/api/review/concepts/build</code>（概念索引重建）、张涨跌用 <code>TencentClient.quotes()</code> 补数。</p>
+
+      <h3>11.2 定时任务</h3>
+      <p>沿用现有<strong>进程内 Quartz + 排班在库</strong>的机制（<code>t_scheduler_job</code> → <code>QRTZ_*</code> → <code>t_scheduler_run</code>）：</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:200px">项</th><th>内容</th></tr></thead>
+          <tbody>
+            <tr><td>Bean 名</td><td><code>WaveRiderDailyScanTask</code>（实现 <code>ManagedTask</code>）</td></tr>
+            <tr><td>Cron</td><td><code>0 30 15 ? * MON-FRI</code>（每交易日 15:30）</td></tr>
+            <tr><td>错过策略</td><td><code>MISFIRE_DO_NOTHING</code>；漏跑由次日的前置补跑步骤兜底</td></tr>
+            <tr><td>排班落地</td><td>写进 <code>V30__waverider_scheduler_job.sql</code>，<strong>不要手工 INSERT</strong></td></tr>
+            <tr><td>生效方式</td><td>重启后端，或调 <code>POST /api/scheduler/reload</code></td></tr>
+            <tr><td>前置检查</td><td>① 交易日校验 ② 当日三池行数为 0 → <code>skip</code> ③ 先执行 <code>MarketDataService.snapshot(date,true)</code> 并补 <code>t_market_daily</code> upsert</td></tr>
+            <tr><td>T+1 复盘</td><td>同一 task 的<strong>前置步骤</strong>：先补写前一交易日的 <code>t_candidate_t1</code>，再算当日候选</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout c-info">
+        <div class="ttl">关于 15:30 这个时间点</div>
+        <p style="margin:4px 0 0">收盘 15:00，东财三池数据通常在 15:10 后稳定。15:30 是一个安全起点，但<strong>必须以上述「前置检查②」为准</strong>：
+          拿不到数据就 skip 并由人工重跑，而不是写一批空候选进去。同时注意：任务在后端进程内运行，<strong>到点时后端必须开着</strong>，
+          上线后需确认宿主机不会休眠。</p>
+      </div>
+    </section>
+
+    <section id="s12">
+      <h2>12 · 结果展示与复盘</h2>
+      <h3>12.1 每日候选池看板</h3>
+      <p>表头即为 <code>t_candidate_stock</code> 的字段直出（样例见 <a href="#s6">§6.3</a>），每一行都必须能<strong>点开追溯</strong>：
+        命中的是哪个题材、节点是哪天、被哪条表达式判定、过滤器逐条结果、为何是这个仓位。</p>
+      <ul>
+        <li><strong>命中原则</strong>以标签渲染：<code>POSITION</code>（紫）、<code>NODE</code>（绿），可双命中。</li>
+        <li><strong>风险标记</strong>以徽标渲染并给出 tooltip：一字缩量 / 高位过度换手 / 龙头断板。</li>
+        <li><strong>节点日回看</strong>：顶部挂当日如果属于某个节点日，则显示「XX 日 切换日」并链接到节点明细。</li>
+        <li><strong>空态</strong>：候选为空时明确显示「当日无命中」+ 命中的失败原因（无节点 / 全部被过滤 / 全部低于 min_board_count），而不是空白表格。</li>
+      </ul>
+
+      <h3>12.2 复盘视图</h3>
+      <p>T+1 复盘由 <code>t_candidate_t1</code> 驱动。真实样例：2026-09-18 产生的 ≥2 板候选共 <strong>12 只</strong>，
+        到 2026-09-21 的验证结果如下：</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:80px">代码</th><th style="width:90px">名称</th><th class="ctr" style="width:60px">D 日连板</th><th>题材</th><th class="ctr" style="width:100px">D+1 涨幅</th><th class="ctr" style="width:110px">结果</th></tr></thead>
+          <tbody>
+            <tr><td>001216</td><td>华瓷股份</td><td class="ctr">4</td><td>家居用品</td><td class="ctr num" style="color:#b91c1c">+10.01%</td><td class="ctr"><span class="b b-red">晋级 5 板</span></td></tr>
+            <tr><td>002285</td><td>世联行</td><td class="ctr">3</td><td>房地产服务</td><td class="ctr num" style="color:#b91c1c">+10.03%</td><td class="ctr"><span class="b b-red">晋级 4 板</span></td></tr>
+            <tr><td>603230</td><td>内蒙新华</td><td class="ctr">3</td><td>出版</td><td class="ctr num" style="color:#b91c1c">+10.01%</td><td class="ctr"><span class="b b-red">晋级 4 板</span></td></tr>
+            <tr><td>000504</td><td>南华生物</td><td class="ctr">2</td><td>医疗服务</td><td class="ctr num" style="color:#b91c1c">+9.99%</td><td class="ctr"><span class="b b-red">晋级 3 板</span></td></tr>
+            <tr><td>002453</td><td>华软科技</td><td class="ctr">2</td><td>化学制品</td><td class="ctr num" style="color:#b91c1c">+9.93%</td><td class="ctr"><span class="b b-red">晋级 3 板</span></td></tr>
+            <tr><td>600127</td><td>金健米业</td><td class="ctr">2</td><td>农产品加工</td><td class="ctr num" style="color:#b91c1c">+9.99%</td><td class="ctr"><span class="b b-red">晋级 3 板</span></td></tr>
+            <tr><td>600448</td><td>华纺股份</td><td class="ctr">2</td><td>纺织制造</td><td class="ctr num" style="color:#b91c1c">+9.89%</td><td class="ctr"><span class="b b-red">晋级 3 板</span></td></tr>
+            <tr><td>600630</td><td>龙头股份</td><td class="ctr">2</td><td>服装家纺</td><td class="ctr num" style="color:#b91c1c">+10.01%</td><td class="ctr"><span class="b b-red">晋级 3 板</span></td></tr>
+            <tr><td>603248</td><td>锡华科技</td><td class="ctr">4</td><td>风电设备</td><td class="ctr num" style="color:#047857">−3.62%</td><td class="ctr"><span class="b b-green">未连板</span></td></tr>
+            <tr><td>002836</td><td>新宏泽</td><td class="ctr">2</td><td>包装印刷</td><td class="ctr num" style="color:#047857">−3.86%</td><td class="ctr"><span class="b b-green">未连板</span></td></tr>
+            <tr><td>301390</td><td>经纬股份</td><td class="ctr">2</td><td>工程咨询</td><td class="ctr num" style="color:#047857">−5.83%</td><td class="ctr"><span class="b b-green">未连板</span></td></tr>
+            <tr><td>603626</td><td>科森科技</td><td class="ctr">2</td><td>消费电子</td><td class="ctr num" style="color:#047857">−0.56%</td><td class="ctr"><span class="b b-green">未连板</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="grid3" style="margin-top:12px">
+        <div class="stat"><div class="lab">晋级成功率</div><div class="val" style="color:#b91c1c">8 / 12 · 66.7%</div></div>
+        <div class="stat"><div class="lab">平均涨幅</div><div class="val">+5.50%</div></div>
+        <div class="stat"><div class="lab">盈亏比（均盈 9.98% / 均亏 3.47%）</div><div class="val">2.88</div></div>
+      </div>
+      <p class="small">失败样本明细：锡华科技 −3.62%、新宏泽 −3.86%、经纬股份 −5.83%、科森科技 −0.56%。
+        注意 4 板高位（锡华科技）与 2 板低位（经纬股份）都有失败案例，说明<strong>单靠身位高度不足以过滤风险</strong>，
+        这也是 §6 引入多因子评分而非仅按连板数排序的原因。</p>
+
+      <h3>12.3 复盘指标定义</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:150px">指标</th><th style="width:280px">定义</th><th>用途</th></tr></thead>
+          <tbody>
+            <tr><td><strong>晋级率</strong></td><td>D+1 仍在涨停池且 <code>board = D 日 board + 1</code> 的占比</td><td>衡量候选池的「连板延续能力」</td></tr>
+            <tr><td><strong>平均涨幅</strong></td><td>D+1 收盘涨幅的算术平均（含失败个股）</td><td>衡量候选池整体强弱</td></tr>
+            <tr><td><strong>盈亏比</strong></td><td>盈利样本平均涨幅 ÷ 亏损样本平均跌幅绝对值</td><td>判断明日有无交易价值</td></tr>
+            <tr><td><strong>分原则统计</strong></td><td>按 POSITION / NODE 分组计算上述三项</td><td>校准 <code>W_position</code> / <code>W_node</code> 权重</td></tr>
+            <tr><td><strong>分节点类型统计</strong></td><td>按 START / SWITCH / DIVERGE 分组</td><td>校准 <code>node_type_weights</code></td></tr>
+            <tr><td><strong>规则触发频次</strong></td><td>各节点规则的历史命中次数、各过滤器的历史剔除次数</td><td>识别「从不触发的死参数」——这是 v1.0 最大的教训</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout c-ok">
+        <div class="ttl">最重要的一条</div>
+        <p style="margin:4px 0 0">把「规则触发频次」做成<strong>常驻功能</strong>而不是一次性分析。v1.0 那三条规则的失效，
+          如果有这个视图，第一周就能被发现。建议在配置界面与周期报里都默认展示 recent 20 日的触发次数。</p>
+      </div>
+    </section>
+
+    <section id="s13">
+      <h2>13 · 异常分支与边界处理</h2>
+      <p>下表每条都是「真实会发生的情形 + 明确处置」，不接受实现时的自由发挥。</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:60px">编号</th><th style="width:180px">场景</th><th style="width:340px">处置</th><th>依据 / 真实样例</th></tr></thead>
+          <tbody>
+            <tr><td>F1</td><td><strong>原则命中 vs 过滤器冲突</strong></td><td>按 <code>filter_conflict_policy</code> 处理，默认 <code>MARK</code>：<strong>保留候选、打风险标记、仓位折半</strong>，并从 footing 中标记为 controversy。<code>DROP</code>=直接剔除，<code>KEEP</code>=完全忽略过滤</td><td>2026-09-21 华瓷股份 5 板但成交额 0.49 亿</td></tr>
+            <tr><td>F2</td><td>同题材并列超过名额</td><td>全部降级为「中位股」并记录，不入候选池</td><td>§4.2 <code>max_same_position</code></td></tr>
+            <tr><td>F3</td><td>同一交易日命中多类节点</td><td>取 <code>node_type_weights</code> 最高者为主节点，其余写入 <code>t_node_detect</code> 但在候选行记录 <code>secondary_nodes</code>；<strong>评分只按主节点计一次</strong></td><td>避免分数被重复放大</td></tr>
+            <tr><td>F4</td><td>数据源缺失（三池为空）</td><td>整体 <code>skip</code>，运行记 <code>status=SKIPPED, warning=NO_DATA</code>，<strong>不产出空候选</strong></td><td>§8.3 步骤①</td></tr>
+            <tr><td>F5</td><td><code>t_zt_perf</code> 未覆盖当日</td><td>依赖它的指标置 NULL，分歧日规则<strong>降级</strong>为仅用炸板率判据，并在 hit_expr 注明 <code>DEGRADED</code></td><td>该表目前仅 3 天数据</td></tr>
+            <tr><td>F6</td><td>题材映射表为空</td><td>降级为 <code>em_industry</code>（随三池直落，必然有值），警告 <code>TOPIC_FALLBACK</code></td><td>§3.2 概念索引可能未构建</td></tr>
+            <tr><td>F7</td><td>一字板无换手数据</td><td><code>turnover_rate</code> 为 NULL 时<strong>不判为一字</strong>（避免误伤），但成交额 &lt; 阈值仍走 F1 冲突逻辑</td><td>东财仅涨停池带换手字段</td></tr>
+            <tr><td>F8</td><td>停牌个股</td><td>当日三池无记录 → 自然缺席；T+1 验证时标记 <code>SUSPENDED</code>，<strong>不计入命中率分母</strong></td><td>避免幸存者偏差</td></tr>
+            <tr><td>F9</td><td>ST 股识别</td><td>用 <code>t_stock.name</code> 含 ST/*ST 判断；注意名称变更滞后，剔除失败时以风险标记兜底</td><td>字典同步每周一 08:30（V27）</td></tr>
+            <tr><td>F10</td><td>新股（上市 &lt; N 天）</td><td>v1 先用替代口径（近 N 日无三池记录），<code>listed_at</code> 上线后切换为精确判断</td><td>§3.2 数据缺口 2</td></tr>
+            <tr><td>F11</td><td>非交易日 / 节假日</td><td><code>skip</code>，原因写 <code>NON_TRADING_DAY</code></td><td><code>t_trading_holidays</code></td></tr>
+            <tr><td>F12</td><td>重复运行同一交易日</td><td>幂等：清当日候选后重插，运行记录累加保留</td><td>§8.4</td></tr>
+            <tr><td>F13</td><td>候选人过多（超选拔率）</td><td>按评分截断并写 <code>CANDIDATE_TRUNCATED</code>，前端显式提示「已截断 N 只」</td><td>§5.4</td></tr>
+            <tr><td>F14</td><td>跨月 / 跨年回 Lookback 越过数据起点</td><td>动态基准统计量样本不足时（不足 20 日）自动缩短窗口并在结果注明，<strong>不得静默用更少样本假装 20 日</strong></td><td>首次上线必然遇到</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="s14">
+      <h2>14 · 验收用例</h2>
+      <p>每条用例都基于生产库真实数据，预期值可直接复算核对。</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:70px">编号</th><th style="width:230px">用例</th><th>预期结果（真实数据）</th></tr></thead>
+          <tbody>
+            <tr><td>AC-1</td><td><code>min_board_count</code> 由 2 改为 3，重跑 2026-09-21</td><td>参与身位计算的个股由 <strong>20 只</strong>降到 <strong>8 只</strong>；2 板的诚邦股份、新华文轩、百通能源、马矿股份等全部消失；候选池不再出现任何 2 板股</td></tr>
+            <tr><td>AC-2</td><td><code>filter_min_amount</code> 过滤器生效性与冲突策略</td><td>在 <code>filter_conflict_policy=DROP</code> 下，华瓷股份（0.49 亿）、南华生物（0.58 亿）被剔除；改为 <code>MARK</code> 后两者保留，且带 <code>YIZI_THIN</code> 标记、建议仓位按 0.5 折算</td></tr>
+            <tr><td>AC-3</td><td>启动日识别（动态基准）回跑 2026-08-20 ~ 09-21</td><td>仅 <strong>2026-09-07</strong> 命中 1 次；<code>hit_expr</code> 落库可见「昨日 ZT=39 &lt; 触发线 42，今日 ZT=93 &gt; 39×1.5，昨日连板晋级率 11.1% &lt; 30%」</td></tr>
+            <tr><td>AC-4</td><td>分歧日识别（t_zt_perf 口径）回跑同期</td><td>仅 <strong>2026-09-14</strong> 命中；可见「昨日高位 3 只今日均涨 −2.15%，炸板率 35.3%」。若 <code>t_zt_perf</code> 未完成回填，此用例<strong>判为不通过</strong>（阻断项）</td></tr>
+            <tr><td>AC-5</td><td>切换日识别（收紧 B）回跑同期</td><td>命中 <strong>6 / 18</strong> 个交易日（08-27、08-28、08-31、09-01、09-08、09-21），误报率 33%</td></tr>
+            <tr><td>AC-6</td><td>节点票选拔率控制</td><td>启动日 09-07 ≤ 10%（实测 9.7%，9 / 93）；分歧日 09-14 ≤ 20%（实测 16.4%，9 / 55）；切换日 09-21 ≥ 1%（实测 2.1%，2 / 96）</td></tr>
+            <tr><td>AC-7</td><td>版本管理与回滚</td><td>改任一参数保存 → 产生新版本号；<code>config_json</code> 差异可在 diff 接口看到具体 key；回滚后 <code>current_version_id</code> 指向新版本、历史版本仍可查；重跑结果与原版本<strong>逐行一致</strong></td></tr>
+            <tr><td>AC-8</td><td>复盘链路完整性</td><td>以 2026-09-18 候选回看 09-21：12 只 ≥2 板候选中 <strong>8 只晋级（66.7%）</strong>、平均涨幅 <strong>+5.50%</strong>、盈亏比 <strong>2.88</strong>；晋级率/平均涨幅/盈亏比三项在 review 接口可直接取到</td></tr>
+            <tr><td>AC-9</td><td>幂等 &amp; 重跑</td><td>对同一 <code>(strategy_id, trade_date)</code> 连续运行 3 次：<code>t_candidate_stock</code> 行数不变（≤100 行），<code>t_strategy_run</code> 增到 3 行，每次 <code>version_id</code> 一致</td></tr>
+            <tr><td>AC-10</td><td>调度幂等与 skip</td><td>把任务在非交易日触发 → <code>t_scheduler_run</code> 记 skip 且不写候选；缺数据时同样 skip 而非 FAILED</td></tr>
+            <tr><td>AC-11</td><td>参数死分支检测</td><td>配置界面与 review 接口均能读到「近 20 日各规则触发次数」；把 <code>min_board_count</code> 临时改成 8 时，界面提示近 20 日命中 0 次</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="s15">
+      <h2>15 · 非功能需求</h2>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:120px">维度</th><th style="width:260px">要求</th><th>说明 / 调整</th></tr></thead>
+          <tbody>
+            <tr><td>数据准确性</td><td>误差 &lt; 0.1%</td><td>不自建数据源，全部取自现有三池与 <code>t_zt_perf</code>，准确性由上游保证；WaveRider 侧通过「运行记录落 <code>hit_expr</code> + <code>metrics_json</code> 原始值」保证结果可复核</td></tr>
+            <tr><td>计算性能</td><td>15:30 触发，<strong>15:45 前</strong>完成</td><td>实测基数：单日涨停 ≤ 100 只、候选 ≤ 50 行，全内存计算，预期 &lt; 3 秒；耗时瓶颈在<strong>上游 data 落库</strong>而非计算本身。建议把任务时间设为 15:35，并把「上游未就绪」明确为 skip 而非超时失败</td></tr>
+            <tr><td>可扩展性</td><td>支持自定义节点 / 筛选逻辑</td><td>v1 用受限 AST（§9）而非脚本；极端场景走 Webhook 外部服务</td></tr>
+            <tr><td>安全性</td><td>策略配置与结果仅授权用户可见</td><td>所有带 <code>user_id</code> 的接口必须按现有鉴权过滤；候选结果虽不绑用户，但通过 <code>strategy_id → user_id</code> 间接鉴权；<strong>禁止</strong>任何形式的 Python/JavaScript 动态执行</td></tr>
+            <tr><td>可靠性</td><td>失败可重跑、结果可复算</td><td>运行绑定版本快照；同一交易日幂等重放入</td></tr>
+            <tr><td>可观测性</td><td>每次运行可追溯</td><td><code>t_strategy_run</code> 记录 status / warning / cost_ms / error_msg；所有数字改动需能在界面解释来源</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="s16">
+      <h2>16 · 里程碑与开放问题</h2>
+      <h3>16.1 里程碑建议</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:70px">阶段</th><th style="width:230px">范围</th><th>交付物</th></tr></thead>
+          <tbody>
+            <tr><td><strong>M1</strong></td><td>数据就绪</td><td><code>t_zt_perf</code> 历史回填任务 + <code>t_stock.listed_at</code> 补列；概念索引重建确认；V29 建表（WaveRider 7 张表）</td></tr>
+            <tr><td><strong>M2</strong></td><td>计算内核</td><td>规则引擎（AST）、节点识别（三类）、身位计算、统一评分；JUnit 覆盖 §14 全部 AC；不接 UI</td></tr>
+            <tr><td><strong>M3</strong></td><td>配置中心 + 看板</td><td>策略 CRUD、版本管理、模板、候选池看板、V30 排班落地</td></tr>
+            <tr><td><strong>M4</strong></td><td>复盘闭环</td><td>T+1 回流、复盘视图、规则触发频次面板；跑满 20 交易日后做一次权重回归</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>16.2 开放问题（需产品 / 交易员确认）</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:60px">编号</th><th style="width:300px">问题</th><th>当前默认与备选</th></tr></thead>
+          <tbody>
+            <tr><td>Q1</td><td>节点识别的误报率容忍到多少？</td><td>默认取「收紧 B」= 33% 误报，靠人工确认收敛；若团队希望更精准则改用收紧 C（会退化成 0 命中）</td></tr>
+            <tr><td>Q2</td><td>一字缩量龙头是否要给半仓？</td><td>默认给（风险扣分 + 仓位折半）。若交易团队认为空间板身份优先，把 <code>W_risk</code> 置 0</td></tr>
+            <tr><td>Q3</td><td><code>max_position_per_stock</code> 5% 是否为硬上限？</td><td>当前作为建议仓位上限，不参与交易执行；模板里可按环境上浮到 8%</td></tr>
+            <tr><td>Q4</td><td>是否要与现有 <code>t_node_event</code> 打通？</td><td>当前方案是两套独立数据；若希望人工节点直接驱动策略，需要定义在 <code>t_node_detect</code> 与 <code>t_node_event</code> 之间的单向同步规则</td></tr>
+            <tr><td>Q5</td><td>策略数量上限与多人协作模型？</td><td>当前按 <code>user_id</code> 隔离，无团队共享；是否需要「团队可见 / 只读共享」待定</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>16.3 风险登记册</h3>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:60px">编号</th><th style="width:280px">风险</th><th class="ctr" style="width:80px">等级</th><th>缓解措施</th></tr></thead>
+          <tbody>
+            <tr><td>R1</td><td>阈值再次随市场环境漂移失效</td><td class="ctr"><span class="b b-amber">中</span></td><td>默认用动态基准；「规则触发频次」常驻视图；每季度重标定一次</td></tr>
+            <tr><td>R2</td><td><code>t_zt_perf</code> 覆盖不足导致分歧日无法回测</td><td class="ctr"><span class="b b-red">高</span></td><td>M1 阶段回填，并纳入定时任务常态化写入；未完成则分歧日规则不上线</td></tr>
+            <tr><td>R3</td><td>定时任务依赖后端进程常驻，宿主机休眠导致漏跑</td><td class="ctr"><span class="b b-amber">中</span></td><td>加运行看板：连续 2 个交易日无 run 记录时告警</td></tr>
+            <tr><td>R4</td><td>候选池被当作投资建议误用</td><td class="ctr"><span class="b b-amber">中</span></td><td>每页固定免责声明；导出文件头部自带声明</td></tr>
+            <tr><td>R5</td><td>Flyway 6.5.7 复合语句限制导致迁移失败</td><td class="ctr"><span class="b b-amber">中</span></td><td>严格使用 information_schema 幂等套路，禁止存储过程</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="s17">
+      <h2>17 · 附录：配置项完整列表</h2>
+      <p>v1.1 建议默认值一列可直接作为 V29 迁移里的模板种子。</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th style="width:110px">模块</th><th style="width:230px">配置 Key</th><th style="width:70px">类型</th><th style="width:180px">v1.0 默认</th><th>v1.1 建议默认 <span class="b b-blue">含变更</span></th></tr></thead>
+          <tbody>
+            <tr><td rowspan="6">身位板</td><td><code>position_mode</code></td><td>enum</td><td><code>highest_board</code></td><td>不变</td></tr>
+            <tr><td><code>min_board_count</code></td><td>int</td><td><code>2</code></td><td>不变</td></tr>
+            <tr><td><code>max_same_position</code></td><td>int</td><td><code>2</code></td><td>不变</td></tr>
+            <tr><td><code>topic_source</code></td><td>enum</td><td><code>tdx_concept</code>（申万口径，库内无）</td><td><code>em_industry</code> <span class="b b-blue">C4</span></td></tr>
+            <tr><td><code>degrade_on_dragon_death</code></td><td>bool</td><td><code>true</code></td><td>不变</td></tr>
+            <tr><td><code>degrade_board_threshold</code></td><td>int</td><td><span class="b b-gray">无</span></td><td><code>4</code> <span class="b b-blue">新增</span></td></tr>
+            <tr><td rowspan="7">节点票</td><td><code>node_scan_window</code></td><td>int</td><td><code>5</code></td><td>不变</td></tr>
+            <tr><td><code>threshold_mode</code></td><td>enum</td><td><span class="b b-gray">无</span></td><td><code>dynamic</code> <span class="b b-blue">新增</span></td></tr>
+            <tr><td><code>node_rules</code></td><td>json(AST)</td><td>裸 JSON 字符串</td><td>AST + 动态基准 <span class="b b-blue">C1</span></td></tr>
+            <tr><td><code>node_stock_rules</code></td><td>json(AST)</td><td>裸 JSON 字符串</td><td>增加题材收敛条件 <span class="b b-blue">C2</span></td></tr>
+            <tr><td><code>node_type_weights</code></td><td>dict</td><td><code>{start:1.0,switch:0.8,diverge:0.6}</code></td><td>不变</td></tr>
+            <tr><td><code>node_stock_limit_per_theme</code></td><td>int</td><td><span class="b b-gray">无</span></td><td><code>1</code> <span class="b b-blue">新增</span></td></tr>
+            <tr><td><code>max_select_rate</code></td><td>float</td><td><span class="b b-gray">无</span></td><td><code>0.15</code> <span class="b b-blue">新增</span></td></tr>
+            <tr><td rowspan="4">过滤</td><td><code>filter_st</code></td><td>bool</td><td><code>true</code></td><td>不变</td></tr>
+            <tr><td><code>filter_new_stock_days</code></td><td>int</td><td><code>30</code></td><td>暂用替代口径，待 <code>listed_at</code> 上线</td></tr>
+            <tr><td><code>filter_min_amount</code></td><td>float(亿)</td><td><code>1.0</code></td><td>不变</td></tr>
+            <tr><td><code>filter_conflict_policy</code></td><td>enum</td><td><span class="b b-gray">无</span></td><td><code>MARK</code>（KEEP/DROP/MARK）<span class="b b-blue">新增</span></td></tr>
+            <tr><td rowspan="2">排序</td><td><code>sort_by</code></td><td>enum</td><td><code>principle_count</code></td><td><code>weighted_score</code> <span class="b b-blue">C3</span></td></tr>
+            <tr><td><code>score_weights</code></td><td>dict</td><td><span class="b b-gray">无</span></td><td><code>{board:0.50,position:0.30,node:0.20,timing:0.10,risk:0.20}</code> <span class="b b-blue">新增</span></td></tr>
+            <tr><td>风控</td><td><code>max_position_per_stock</code></td><td>float</td><td><code>0.05</code></td><td>不变</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout c-warn">
+        <div class="ttl">免责声明</div>
+        <p style="margin:4px 0 0">本 PRD 描述的系统为<strong>交易辅助工具</strong>，不构成任何投资建议。
+          本文档中的所有个股名称、日期与数值均取自生产库历史行情，仅用于说明算法口径与验证规则，<strong>不代表任何推荐意见</strong>。
+          短线交易风险极高，请结合自身风险承受能力谨慎决策。</p>
+      </div>
+    </section>
+
+    <footer>
+      WaveRider PRD v1.1 · 2026-09-21 · 数据基准 emotion_dashboard 2026-08-20 ~ 2026-09-21（19 个交易日）
+    </footer>
+
+  </main>
+</div>
+<script>
+(function(){
+  var links=[].slice.call(document.querySelectorAll('.side a'));
+  var secs=links.map(function(a){return document.querySelector(a.getAttribute('href'));});
+  function onScroll(){
+    var idx=0, best=1e9;
+    secs.forEach(function(s,i){
+      if(!s) return;
+      var d=Math.abs(s.getBoundingClientRect().top-110);
+      if(d<best){best=d;idx=i;}
+    });
+    links.forEach(function(a,i){a.classList.toggle('on', i===idx);});
+  }
+  window.addEventListener('scroll',onScroll,{passive:true});
+  onScroll();
+  // bar chart
+  var data=[["08-25",65,0],["08-26",52,0],["08-27",77,0],["08-28",82,0],["08-31",88,0],["09-01",83,0],
+            ["09-02",52,0],["09-03",44,0],["09-04",39,0],["09-07",93,1],["09-08",73,0],["09-09",48,0],
+            ["09-10",35,0],["09-11",40,0],["09-14",55,1],["09-16",89,0],["09-17",47,0],["09-18",78,0],
+            ["09-21",96,1]];
+  var box=document.getElementById('bars');
+  if(box){
+    var max=100;
+    box.innerHTML=data.map(function(d){
+      var h=Math.round(d[1]/max*132);
+      return '<div class="cbar'+(d[2]?' hl':'')+'"><b>'+d[1]+'</b><i style="height:'+h+'px"></i><span>'+d[0]+'</span></div>';
+    }).join('');
+  }
+})();
+</script>
+</body>
+</html>

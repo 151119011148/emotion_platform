@@ -1,0 +1,14 @@
+encoding=utf-8 ok, bom=False
+crlf_lines=0 lf_only_lines=74
+other V2x files with CRLF: 0/9
+real-db(emotion_dashboard): all 37 statements OK
+real-db unchanged=True
+real-db cols=['id', 'user_id', 'cycle_id', 'system_type', 'anchor_stock', 'anchor_max_board', 'd0_date', 'd0_candidates', 't1_date', 't1_anchor_repack', 't1_promotion_count', 't1_promotion_rate', 'node_valid', 'node_stock', 'node_stock_max_board', 'anchor_id', 'theme', 'd0_score', 'd0_cycle', 'last_recalc_at', 'conclusion_reason', 'filter_passed', 'filter_detail', 'status', 'status_note', 'note', 'created_at']
+scratch-with-base: all 37 statements OK
+scratch-with-base added_all=True missing=[]
+scratch-with-base idx_anchor=True
+scratch-with-base col_order=['node_stock_max_board', 'anchor_id', 'theme', 'd0_score', 'd0_cycle', 'last_recalc_at', 'conclusion_reason', 'id', 'user_id', 'cycle_id', 'system_type', 'anchor_stock', 'anchor_max_board', 'd0_date', 'node_stock', 'status', 'created_at']
+scratch-no-base: all 37 statements OK
+scratch-no-base added_all=True missing=[]
+scratch-no-base idx_anchor=True
+scratch-no-base col_order=['id', 'user_id', 'cycle_id', 'system_type', 'anchor_stock', 'anchor_max_board', 'd0_date', 'node_stock', 'status', 'created_at', 'anchor_id', 'theme', 'd0_score', 'd0_cycle', 'last_recalc_at', 'conclusion_reason']

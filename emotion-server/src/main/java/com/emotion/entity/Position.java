@@ -35,6 +35,13 @@ public class Position {
     private String stockName;
     private BigDecimal costPrice;
     private BigDecimal currentPrice;
+    /**
+     * 持仓股数（手记）。只有单价没有股数时「总成本」只能把不同股票的股价相加，
+     * 数学上不成立；有它才算得出成本额 = Σ(股数×成本)、市值 = Σ(股数×现价)。
+     * NULL = 没填，汇总按无股数回退到等权口径，<b>不要用 0 冒充</b>——
+     * 0 是「一股没买」，和「不知道买了多少」是两回事。
+     */
+    private Integer quantity;
     /** 手记的浮动盈亏%，原样存；不由成本/现价反推——你记的可能是含费后的数。 */
     private BigDecimal floatPct;
     private String action;

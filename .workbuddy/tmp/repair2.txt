@@ -1,0 +1,5 @@
+before=((1, '24', '存量库基线：已手工执行过 schema.sql', 1), (2, '25', 'quartz and scheduler', 1), (3, '26', 'node event legacy columns', 0))
+deleted_failed_v26_rows=1
+after=((1, '24', '存量库基线：已手工执行过 schema.sql', 'BASELINE', 1), (2, '25', 'quartz and scheduler', 'SQL', 1))
+qrtz_tables=11
+jobs=(('daily_market_pull', '0 0 19 * * ?', 1),)

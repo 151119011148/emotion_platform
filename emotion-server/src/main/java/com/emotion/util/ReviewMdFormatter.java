@@ -147,6 +147,7 @@ public final class ReviewMdFormatter {
         StringBuilder sb = start("持仓", r.getCode() + " " + clean(r.getName()));
         num(sb, "成本", r.getCost(), false);
         num(sb, "现价", r.getCurrent(), false);
+        intNum(sb, "数量", r.getQuantity());
         num(sb, "浮动", r.getFloatPct(), true);
         text(sb, "动作", r.getAction());
         text(sb, "应做", r.getPlannedAction());
@@ -213,6 +214,13 @@ public final class ReviewMdFormatter {
     private static void num(StringBuilder sb, String label, BigDecimal value, boolean signed) {
         if (value != null) {
             sb.append(' ').append(label).append(number(value, signed));
+        }
+    }
+
+    /** 可选整数标签（股数）：没填就整段不出现——写了「数量」却空着，再导入回来会当成标签缺值。 */
+    private static void intNum(StringBuilder sb, String label, Integer value) {
+        if (value != null) {
+            sb.append(' ').append(label).append(value.intValue());
         }
     }
 

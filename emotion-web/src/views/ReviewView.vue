@@ -13,7 +13,7 @@
           </template>
           <span class="fp-help">?</span>
         </el-tooltip></h2>
-      <el-date-picker v-model="form.tradeDate" type="date" value-format="YYYY-MM-DD"
+      <el-date-picker v-model="pickerDate" type="date" value-format="YYYY-MM-DD"
         :disabled-date="disabledDate" :cell-class-name="cellClass" placeholder="选择交易日" style="width: 160px" />
       <span class="header-spacer"></span>
       <el-tag v-if="fetchOverall" :type="overallTag" effect="dark">{{ overallText }}</el-tag>
@@ -23,27 +23,12 @@
       </el-button>
     </div>
 
-    <!-- ============ 外溢②：昨日（T-1）遗留决策，次日 9:25 竞价时回到页面第一眼就能处理 ============ -->
-    <div v-if="pendingCarry.length" class="pend-block">
-      <div class="pend-head">⚠️ 昨日遗留决策（{{ pendingCarryDate }} 写，今日执行）</div>
-      <div v-for="p in pendingCarry" :key="p.id" class="pend-row">
-        <span class="pend-stock"><b>{{ p.stockName }}</b> <span class="muted">{{ p.stockCode }}</span>
-          <span v-if="p.boardNum" class="pend-board">{{ p.boardNum }}板</span>
-          <span v-if="p.industry" class="pend-ind">{{ p.industry }}</span></span>
-        <span class="pend-plan">
-          <span v-if="p.planOpen" class="pend-tier">高开→{{ p.planOpen }}</span>
-          <span v-if="p.planBreak" class="pend-tier">炸板→{{ p.planBreak }}</span>
-          <span v-if="p.planLow" class="pend-tier">平开/低开→{{ p.planLow }}</span>
-          <span v-if="p.planFall" class="pend-tier">跌停→{{ p.planFall }}</span>
-          <span v-if="!p.planOpen && !p.planBreak && !p.planLow && !p.planFall && p.nextDayPlan"
-                class="pend-tier">{{ p.nextDayPlan }}</span>
-        </span>
-        <span class="pend-act">
-          <el-input v-model="pendingAct[p.id]" size="small" placeholder="今日实际动作" style="width: 150px" />
-          <el-button size="small" type="primary" plain :loading="markingPend" @click="markExecuted(p)">标记执行</el-button>
-        </span>
-      </div>
-      <div class="pend-done">✅ 执行后点「标记执行」，自动回填实际动作并关闭该裁决。</div>
+    <!-- ============ 外溢②：昨日（T-1）遗留决策 —— 只留一条入口，
+         明细与「标记执行」都在下方持仓台账里，不再复制出第二套 DOM ============ -->
+    <div v-if="pendingCarry.length" class="pend-jump">
+      <span class="pend-jump-tag">⚠️ 待裁决 {{ pendingCarry.length }} 条</span>
+      <span class="dim-muted">{{ pendingCarryDate }} 写下的次日决策，今日执行</span>
+      <el-button size="small" type="warning" plain @click="scrollToLedger">去台账处理</el-button>
     </div>
 
     <!-- ============ 拉取进度（T1-T8 流式回传） ============ -->
@@ -311,183 +296,224 @@
     </section>
 
     <!-- ============ 持仓台账（整表替换当天行） ============ -->
-    <section class="entry-collapse">
+    <section class="entry-collapse" ref="ledgerRef">
       <div class="entry-body">
-        <h4 class="entry-title">持仓台账 <span class="dim-muted">整表替换当天行</span></h4>
-        <div v-if="posRows.length" class="ledger-summary">
-          <span>持仓 <b>{{ posRows.length }}</b> 只</span>
-          <span>总成本 <b>{{ moneyText(ledgerSummary.totalCost) }}</b></span>
-          <span>总现价 <b>{{ moneyText(ledgerSummary.totalPrice) }}</b></span>
-          <span :class="pctClass(ledgerSummary.floatPct)">浮动 {{ moneyText(ledgerSummary.floatAmount) }}（{{ signed(ledgerSummary.floatPct) }}%）</span>
+        <h4 class="entry-title">
+          持仓台账 <span class="dim-muted">整表替换当天行</span>
+          <span v-if="posDirty" class="dirty-tag">● 未保存</span>
+        </h4>
+
+        <!-- 外溢②：昨日遗留决策的执行闭环统一收在台账里；页面顶部只留一条跳转入口，
+             不再复制出第二套 DOM（同一批数据两套 UI 是之前最容易改漏一处的地方）。 -->
+        <div v-if="pendingCarry.length" class="pend-block">
+          <div class="pend-head">⚠️ 昨日遗留决策（{{ pendingCarryDate }} 写，今日执行）</div>
+          <div v-for="p in pendingCarry" :key="p.id" class="pend-row">
+            <span class="pend-stock"><b>{{ p.stockName }}</b> <span class="muted">{{ p.stockCode }}</span>
+              <span v-if="p.boardNum" class="pend-board">{{ p.boardNum }}板</span>
+              <span v-if="p.industry" class="pend-ind">{{ p.industry }}</span></span>
+            <span class="pend-plan">
+              <span v-if="p.planOpen" class="pend-tier">高开→{{ p.planOpen }}</span>
+              <span v-if="p.planBreak" class="pend-tier">炸板→{{ p.planBreak }}</span>
+              <span v-if="p.planLow" class="pend-tier">平开/低开→{{ p.planLow }}</span>
+              <span v-if="p.planFall" class="pend-tier">跌停→{{ p.planFall }}</span>
+              <span v-if="!p.planOpen && !p.planBreak && !p.planLow && !p.planFall && p.nextDayPlan"
+                    class="pend-tier">{{ p.nextDayPlan }}</span>
+            </span>
+            <span class="pend-act">
+              <el-input v-model="pendingAct[p.id]" size="small" placeholder="今日实际动作" style="width: 150px" />
+              <el-button size="small" type="primary" plain :loading="markingPend" @click="markExecuted(p)">标记执行</el-button>
+            </span>
+          </div>
+          <div class="pend-done">✅ 执行后点「标记执行」，自动回填实际动作并关闭该裁决。</div>
         </div>
+
+        <!-- 汇总两条口径并存，各吃自己吃得下的行：
+             ① 金额口径（市值/盈亏额/占比）——只收填了股数、且成本现价都在的行；
+             ② 等权口径（平均浮动%/盈亏家数）——只看浮动%，缺股数的行仍在这里。
+             缺股数时绝不把股价相加当成本：10 元的票 + 100 元的票 = 110，那不是成本合计。 -->
+        <div v-if="posRows.length" class="ledger-summary">
+          <span>持仓 <b>{{ holdingRows.length }}</b> 只<template v-if="clearedRows.length"> · 清仓 <b>{{ clearedRows.length }}</b> 只</template></span>
+          <span v-if="ledgerSummary.qtyCount">
+            市值 <b>{{ yuan(ledgerSummary.marketValue) }}</b>
+            <span class="dim-muted">{{ ledgerSummary.qtyCount }}/{{ posRows.length }} 有股数</span>
+          </span>
+          <span v-if="ledgerSummary.pnlAmount !== null">
+            浮动盈亏 <b :class="pctClass(ledgerSummary.pnlAmount)">{{ yuan(ledgerSummary.pnlAmount) }}</b>
+            <span v-if="ledgerSummary.pnlPct !== null" :class="pctClass(ledgerSummary.pnlPct)">{{ signed(ledgerSummary.pnlPct) }}%</span>
+          </span>
+          <span v-if="ledgerSummary.avgFloat !== null">
+            平均浮动 <b :class="pctClass(ledgerSummary.avgFloat)">{{ signed(ledgerSummary.avgFloat) }}%</b>
+            <span class="dim-muted">等权 · {{ ledgerSummary.priced }}/{{ posRows.length }} 有价</span>
+          </span>
+          <span>盈 <b class="up">{{ ledgerSummary.winCount }}</b> · 亏 <b class="down">{{ ledgerSummary.loseCount }}</b></span>
+          <span>次日预案 <b>{{ ledgerSummary.planCount }}/{{ posRows.length }}</b></span>
+        </div>
+
         <div class="ledger">
           <div class="card-head">
+            <el-radio-group v-model="posTab" size="small">
+              <el-radio-button value="all">全部 {{ posRows.length }}</el-radio-button>
+              <el-radio-button value="hold">持仓中 {{ holdingRows.length }}</el-radio-button>
+              <el-radio-button value="cleared">今日清仓 {{ clearedRows.length }}</el-radio-button>
+            </el-radio-group>
+            <span v-if="undoTip" class="undo-chip">
+              {{ undoTip }}
+              <el-button size="small" text type="primary" @click="applyUndo">撤销</el-button>
+            </span>
             <span class="header-spacer"></span>
+            <el-button size="small" plain :loading="fillingPrice" @click="fillCurrentPrices">补现价</el-button>
+            <el-button size="small" plain @click="openImportDialog">批量带入</el-button>
             <el-button size="small" @click="addPositionRow">加一行</el-button>
-            <el-button size="small" type="primary" plain :loading="savingPos" @click="savePositions">
+            <el-button size="small" type="primary" plain :loading="savingPos" :disabled="!posDirty" @click="savePositions">
               保存台账
             </el-button>
           </div>
-          <el-tabs v-model="posTab" class="pos-tabs">
-            <!-- ① 当前持仓 -->
-            <el-tab-pane label="① 当前持仓" name="hold">
-              <el-table :data="holdingRows" size="small" empty-text="无当前持仓，点「加一行」录入" class="dim-table">
-                <el-table-column label="股票（代码/名称）" min-width="200">
-                  <template #default="{ row }">
-                    <el-select v-model="row.stockCode" filterable remote clearable size="small"
-                      :remote-method="(q) => searchStocks(q, row)" :loading="row._loading"
-                      placeholder="输代码或名称搜索" @change="pickStock(row)" @clear="row.stockName = ''">
-                      <el-option v-for="s in row._results" :key="s.code" :value="s.code" :label="s.code + ' ' + s.name" />
-                    </el-select>
-                  </template>
-                </el-table-column>
-                <el-table-column label="板块" width="96">
-                  <template #default="{ row }"><el-input v-model="row.industry" size="small" placeholder="板块" /></template>
-                </el-table-column>
-                <el-table-column label="板数" width="70">
-                  <template #default="{ row }">
-                    <el-input-number v-model="row.boardNum" size="small" :min="1" :max="10" :controls="false" style="width: 100%" placeholder="板" />
-                  </template>
-                </el-table-column>
-                <el-table-column label="成本" width="92">
-                  <template #default="{ row }">
-                    <el-input-number v-model="row.costPrice" size="small" :min="0" :precision="2" :controls="false" style="width: 100%" />
-                  </template>
-                </el-table-column>
-                <el-table-column label="现价" width="92">
-                  <template #default="{ row }">
-                    <el-input-number v-model="row.currentPrice" size="small" :min="0" :precision="2" :controls="false" style="width: 100%" />
-                  </template>
-                </el-table-column>
-                <el-table-column label="浮动%" width="86">
-                  <template #default="{ row }">
-                    <el-input-number v-model="row.floatPct" size="small" :precision="2" :controls="false" style="width: 100%" placeholder="自动" />
-                  </template>
-                </el-table-column>
-                <el-table-column label="动作" width="96">
-                  <template #default="{ row }"><el-input v-model="row.action" size="small" placeholder="今日" /></template>
-                </el-table-column>
-                <el-table-column label="应做" width="96">
-                  <template #default="{ row }"><el-input v-model="row.plannedAction" size="small" placeholder="计划" /></template>
-                </el-table-column>
-                <el-table-column label="纪律" width="90">
-                  <template #default="{ row }">
-                    <el-select v-model="row.discipline" size="small" clearable placeholder="未填">
-                      <el-option v-for="d in DISCIPLINES" :key="d" :label="d" :value="d" />
-                    </el-select>
-                  </template>
-                </el-table-column>
-                <el-table-column label="次日决策" min-width="150">
-                  <template #default="{ row }"><el-input v-model="row.nextDayPlan" size="small" placeholder="竞价裁决/预案" /></template>
-                </el-table-column>
-                <el-table-column label="状态" width="92">
-                  <template #default="{ row }">
-                    <el-select v-model="row.status" size="small" placeholder="持仓中">
-                      <el-option label="持仓中" value="持仓中" />
-                      <el-option label="今日清仓" value="今日清仓" />
-                    </el-select>
-                  </template>
-                </el-table-column>
-                <el-table-column label="删" width="46" align="center">
-                  <template #default="{ row }">
-                    <el-button size="small" text type="danger" @click="removePos(row)">×</el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </el-tab-pane>
 
-            <!-- ② 今日清仓 -->
-            <el-tab-pane label="② 今日清仓" name="cleared">
-              <el-table :data="clearedRows" size="small" empty-text="今日无清仓记录" class="dim-table">
-                <el-table-column label="股票（代码/名称）" min-width="200">
-                  <template #default="{ row }">
-                    <el-select v-model="row.stockCode" filterable remote clearable size="small"
-                      :remote-method="(q) => searchStocks(q, row)" :loading="row._loading"
-                      placeholder="输代码或名称搜索" @change="pickStock(row)" @clear="row.stockName = ''">
-                      <el-option v-for="s in row._results" :key="s.code" :value="s.code" :label="s.code + ' ' + s.name" />
-                    </el-select>
-                  </template>
-                </el-table-column>
-                <el-table-column label="板块" width="96">
-                  <template #default="{ row }"><el-input v-model="row.industry" size="small" /></template>
-                </el-table-column>
-                <el-table-column label="成本" width="92">
-                  <template #default="{ row }"><el-input-number v-model="row.costPrice" size="small" :min="0" :precision="2" :controls="false" style="width: 100%" /></template>
-                </el-table-column>
-                <el-table-column label="现价" width="92">
-                  <template #default="{ row }"><el-input-number v-model="row.currentPrice" size="small" :min="0" :precision="2" :controls="false" style="width: 100%" /></template>
-                </el-table-column>
-                <el-table-column label="浮动%" width="86">
-                  <template #default="{ row }"><el-input-number v-model="row.floatPct" size="small" :precision="2" :controls="false" style="width: 100%" /></template>
-                </el-table-column>
-                <el-table-column label="动作" width="96">
-                  <template #default="{ row }"><el-input v-model="row.action" size="small" placeholder="今日" /></template>
-                </el-table-column>
-                <el-table-column label="应做" width="96">
-                  <template #default="{ row }"><el-input v-model="row.plannedAction" size="small" placeholder="计划" /></template>
-                </el-table-column>
-                <el-table-column label="纪律" width="90">
-                  <template #default="{ row }">
-                    <el-select v-model="row.discipline" size="small" clearable placeholder="未填">
-                      <el-option v-for="d in DISCIPLINES" :key="d" :label="d" :value="d" />
-                    </el-select>
-                  </template>
-                </el-table-column>
-                <el-table-column label="延迟天" width="78">
-                  <template #default="{ row }"><el-input-number v-model="row.delayDays" size="small" :min="0" :controls="false" style="width: 100%" /></template>
-                </el-table-column>
-                <el-table-column label="纪律分" width="86">
-                  <template #default="{ row }"><el-input-number v-model="row.disciplineScore" size="small" :min="0" :max="100" :controls="false" style="width: 100%" /></template>
-                </el-table-column>
-                <el-table-column label="状态" width="92">
-                  <template #default="{ row }">
-                    <el-select v-model="row.status" size="small">
-                      <el-option label="持仓中" value="持仓中" />
-                      <el-option label="今日清仓" value="今日清仓" />
-                    </el-select>
-                  </template>
-                </el-table-column>
-                <el-table-column label="删" width="46" align="center">
-                  <template #default="{ row }">
-                    <el-button size="small" text type="danger" @click="removePos(row)">×</el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </el-tab-pane>
+          <!-- 一张表吃三种视图：Tab 只筛选行，列集合三者完全一致。
+               以前 ①/② 各换一张表、列还不一样，想填「延迟天」得先改状态换 Tab。 -->
+          <el-table :data="tableRows" size="small" class="dim-table"
+            empty-text="暂无持仓，点「加一行」或用「批量带入」录入">
+            <el-table-column type="expand">
+              <template #default="{ row }">
+                <div class="plan-tiers">
+                  <span class="pt-label">{{ row.boardNum ? row.boardNum + '板面临几进几，按分档填：' : '次日竞价分档：' }}</span>
+                  <span class="pt-cell">高开→<el-input v-model="row.planOpen" size="small" placeholder="冲高减半" /></span>
+                  <span class="pt-cell">炸板→<el-input v-model="row.planBreak" size="small" placeholder="板砸" /></span>
+                  <span class="pt-cell">平开/低开→<el-input v-model="row.planLow" size="small" placeholder="竞价走" /></span>
+                  <span class="pt-cell">跌停→<el-input v-model="row.planFall" size="small" placeholder="割" /></span>
+                </div>
+                <div class="plan-foot">
+                  💡 四档是②仪表盘「待裁决」卡的取数源，写一格即可外溢。
+                  <span v-if="row.executed" class="exec-done">已执行：{{ row.actualAction || '（未填实际动作）' }}</span>
+                </div>
+              </template>
+            </el-table-column>
 
-            <!-- ③ 次日处理决策：统一查看/补充次日竞价裁决 -->
-            <el-tab-pane label="③ 次日处理决策" name="plan">
-              <el-table :data="posRows" size="small" empty-text="暂无持仓，无需次日决策" class="dim-table">
-                <el-table-column label="股票" min-width="150">
-                  <template #default="{ row }">
-                    <span class="pos-stock">{{ row.stockCode }} <b>{{ row.stockName }}</b></span>
-                    <span v-if="row.industry" class="pos-industry">{{ row.industry }}</span>
-                    <span v-if="row.boardNum" class="pos-board">{{ row.boardNum }}板</span>
-                  </template>
-                </el-table-column>
-                <el-table-column label="次日决策分档（竞价裁决）" min-width="420">
-                  <template #default="{ row }">
-                    <div class="plan-tiers">
-                      <span class="pt-label">
-                        {{ row.nextDayPlan ? '综合' : row.boardNum ? row.boardNum + '板面临几进几，按分档填：' : '按分档填：' }}
-                      </span>
-                      <span class="pt-cell">高开→<el-input v-model="row.planOpen" size="small" placeholder="冲高减半" /></span>
-                      <span class="pt-cell">炸板→<el-input v-model="row.planBreak" size="small" placeholder="板砸" /></span>
-                      <span class="pt-cell">平开/低开→<el-input v-model="row.planLow" size="small" placeholder="竞价走" /></span>
-                      <span class="pt-cell">跌停→<el-input v-model="row.planFall" size="small" placeholder="割" /></span>
-                    </div>
-                  </template>
-                </el-table-column>
-                <el-table-column label="综合预案" min-width="180">
-                  <template #default="{ row }"><el-input v-model="row.nextDayPlan" size="small" placeholder="一段话兜底（可留空）" /></template>
-                </el-table-column>
-              </el-table>
-              <div class="plan-tip">💡 分档四格是②仪表盘「待裁决」卡的取数源；写一格即可外溢，全写更好。</div>
-            </el-tab-pane>
-          </el-tabs>
+            <el-table-column label="股票（代码/名称）" min-width="190">
+              <template #default="{ row }">
+                <el-select v-model="row.stockCode" filterable remote clearable size="small"
+                  :remote-method="(q) => searchStocks(q, row)" :loading="row._loading"
+                  placeholder="输代码或名称搜索" @change="pickStock(row)" @clear="row.stockName = ''">
+                  <el-option v-for="s in row._results" :key="s.code" :value="s.code" :label="s.code + ' ' + s.name" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="板块" width="88">
+              <template #default="{ row }"><el-input v-model="row.industry" size="small" placeholder="板块" /></template>
+            </el-table-column>
+            <el-table-column label="板数" width="62">
+              <template #default="{ row }">
+                <el-input-number v-model="row.boardNum" size="small" :min="1" :max="10" :controls="false" style="width: 100%" placeholder="板" />
+              </template>
+            </el-table-column>
+            <el-table-column label="成本" width="82">
+              <template #default="{ row }">
+                <el-input-number v-model="row.costPrice" size="small" :min="0" :precision="2" :controls="false"
+                  style="width: 100%" @change="syncFloat(row, 'cost')" />
+              </template>
+            </el-table-column>
+            <el-table-column label="现价" width="82">
+              <template #default="{ row }">
+                <el-input-number v-model="row.currentPrice" size="small" :min="0" :precision="2" :controls="false"
+                  style="width: 100%" @change="syncFloat(row, 'price')" />
+              </template>
+            </el-table-column>
+            <el-table-column label="股数" width="76">
+              <template #default="{ row }">
+                <el-input-number v-model="row.quantity" size="small" :min="1" :step="100" :controls="false"
+                  style="width: 100%" placeholder="股数" />
+              </template>
+            </el-table-column>
+            <el-table-column label="浮动%" width="78">
+              <template #default="{ row }">
+                <el-input-number v-model="row.floatPct" size="small" :precision="2" :controls="false" style="width: 100%"
+                  :placeholder="row.costPrice && row.currentPrice ? '' : '手填'" @change="syncFloat(row, 'pct')" />
+              </template>
+            </el-table-column>
+            <!-- 盈亏额只读：股数×现价 − 股数×成本。没填股数就是「—」，不拿股价差凑数。 -->
+            <el-table-column label="盈亏" width="104" align="right">
+              <template #default="{ row }">
+                <span v-if="pnlOf(row)" :class="pctClass(pnlOf(row).amount)">{{ yuan(pnlOf(row).amount) }}</span>
+                <span v-else class="dim-muted">—</span>
+                <span v-if="pnlOf(row) && ledgerSummary.marketValue" class="dim-muted" style="display: block">
+                  占比 {{ (pnlOf(row).value / ledgerSummary.marketValue * 100).toFixed(1) }}%
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column label="今日动作" width="90">
+              <template #default="{ row }"><el-input v-model="row.action" size="small" placeholder="今日" /></template>
+            </el-table-column>
+            <el-table-column label="应做" width="90">
+              <template #default="{ row }"><el-input v-model="row.plannedAction" size="small" placeholder="计划" /></template>
+            </el-table-column>
+            <el-table-column label="纪律" width="84">
+              <template #default="{ row }">
+                <el-select v-model="row.discipline" size="small" clearable placeholder="未填">
+                  <el-option v-for="d in DISCIPLINES" :key="d" :label="d" :value="d" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="延迟天" width="64">
+              <template #default="{ row }">
+                <el-input-number v-model="row.delayDays" size="small" :min="0" :controls="false" style="width: 100%"
+                  :disabled="row.status !== '今日清仓'" :placeholder="row.status !== '今日清仓' ? '清仓' : ''" />
+              </template>
+            </el-table-column>
+            <el-table-column label="纪律分" width="66">
+              <template #default="{ row }">
+                <el-input-number v-model="row.disciplineScore" size="small" :min="0" :max="100" :controls="false"
+                  style="width: 100%" :disabled="row.status !== '今日清仓'" :placeholder="row.status !== '今日清仓' ? '清仓' : ''" />
+              </template>
+            </el-table-column>
+            <el-table-column label="次日决策" min-width="160">
+              <template #default="{ row }">
+                <div class="plan-cell">
+                  <el-input v-model="row.nextDayPlan" size="small" placeholder="综合预案（可留空）" />
+                  <span class="tier-flag" :class="tierCount(row) ? 'ok' : ''"
+                    :title="'四档已填 ' + tierCount(row) + '/4，点行首箭头展开编辑'">{{ tierCount(row) }}/4</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="88">
+              <template #default="{ row }">
+                <el-select v-model="row.status" size="small" @change="onStatusChange(row)">
+                  <el-option label="持仓中" value="持仓中" />
+                  <el-option label="今日清仓" value="今日清仓" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="64" align="center">
+              <template #default="{ row }">
+                <el-button size="small" text type="danger" @click="removePos(row)">×</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
         </div>
       </div>
     </section>
+
+    <!-- 批量带入：从昨日未平持仓 / 当日涨停池 / 阵眼勾选取数，省掉逐只手搜代码 -->
+    <el-dialog v-model="openImport" title="批量带入持仓" width="600px">
+      <el-radio-group v-model="importSource" size="small" style="margin-bottom: 10px">
+        <el-radio-button value="carry">昨日未平持仓</el-radio-button>
+        <el-radio-button value="pool">当日涨停池</el-radio-button>
+        <el-radio-button value="anchor">阵眼</el-radio-button>
+      </el-radio-group>
+      <el-table :data="importCandidates" size="small" height="320"
+        :empty-text="importLoading ? '加载中…' : '该来源当天没有可带入的标的'" @selection-change="onImportSelect">
+        <el-table-column type="selection" width="42" />
+        <el-table-column label="代码" prop="code" width="80" />
+        <el-table-column label="名称" prop="name" min-width="110" />
+        <el-table-column label="板块" prop="industry" width="96" />
+        <el-table-column label="板数" prop="boardNum" width="60" />
+        <el-table-column label="股数" prop="quantity" width="72" />
+      </el-table>
+      <template #footer>
+        <span class="dim-muted" style="float: left">已选 {{ importSelected.length }} 只（已在台账里的会自动跳过）</span>
+        <el-button @click="openImport = false">取消</el-button>
+        <el-button type="primary" :disabled="!importSelected.length" @click="applyImport">带入</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 监管人工补录弹窗 -->
     <el-dialog v-model="openSurv" title="人工补录监管" width="420px">
@@ -511,10 +537,11 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { recordApi, importApi, reviewApi, prdApi, d5Api } from '../api/modules'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute, onBeforeRouteLeave } from 'vue-router'
+import { recordApi, importApi, reviewApi, prdApi, d5Api, marketApi, anchorsApi } from '../api/modules'
 import { useTradingCalendar } from '../utils/tradingCalendar'
+import { pnlOf, yuan } from '../utils/money'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import EditableStatCard from '../components/EditableStatCard.vue'
 
@@ -717,6 +744,7 @@ function handleDateChange(date) {
   loadReuse(date)
   loadPositions(date).catch(() => {})
   loadPendingCarry(date)
+  loadPoolIndex(date)   // 台账选股时自动带出板块/板数的索引
 }
 watch(() => form.tradeDate, d => handleDateChange(d))
 
@@ -828,47 +856,148 @@ function saveFile(name, text) {
   URL.revokeObjectURL(url)
 }
 
-/* 台账 */
-function addPositionRow() {
-  posRows.value.push({ stockCode: '', stockName: '', costPrice: null, currentPrice: null, floatPct: null, action: '', plannedAction: '', discipline: '', industry: '', boardNum: null, status: '持仓中', delayDays: null, disciplineScore: null, nextDayPlan: '', planOpen: '', planBreak: '', planLow: '', planFall: '', executed: 0, actualAction: '', _results: [], _loading: false })
+/* ======================================================================= */
+/* 持仓台账                                                                */
+/* ======================================================================= */
+
+/**
+ * 落库字段白名单：脏检查与提交都按它走，两边必须一致。
+ * _results/_loading/id 是纯前端态，不参与指纹，否则「搜索了一下」就会被判成脏。
+ */
+const POS_KEYS = ['stockCode', 'stockName', 'costPrice', 'currentPrice', 'quantity', 'floatPct', 'action',
+  'plannedAction', 'discipline', 'industry', 'boardNum', 'status', 'delayDays', 'disciplineScore',
+  'nextDayPlan', 'planOpen', 'planBreak', 'planLow', 'planFall', 'executed', 'actualAction']
+
+function blankRow(status = '持仓中') {
+  return {
+    id: null, stockCode: '', stockName: '', costPrice: null, currentPrice: null, quantity: null,
+    floatPct: null,
+    action: '', plannedAction: '', discipline: '', industry: '', boardNum: null, status,
+    delayDays: null, disciplineScore: null, nextDayPlan: '',
+    planOpen: '', planBreak: '', planLow: '', planFall: '',
+    executed: 0, actualAction: '', _results: [], _loading: false
+  }
 }
+function toPayload(rows) {
+  return rows.map((r) => {
+    const o = {}
+    POS_KEYS.forEach(k => { o[k] = r[k] === undefined ? null : r[k] })
+    return o
+  })
+}
+/** 可落库字段的指纹串：这是「脏不脏」的唯一判据 */
+function posFingerprint() { return JSON.stringify(toPayload(posRows.value)) }
+
+const posSnapshot = ref('[]')
+const posDirty = computed(() => posFingerprint() !== posSnapshot.value)
+
+/* ---- 撤销：保存/删行都不再拦确认弹窗，改成事后可撤销 ---- */
+const undoTip = ref('')
+let undoFn = null
+let undoTimer = null
+function pushUndo(tip, fn, ms = 10000) {
+  undoFn = fn
+  undoTip.value = tip
+  if (undoTimer) clearTimeout(undoTimer)
+  undoTimer = setTimeout(clearUndo, ms)
+}
+function clearUndo() {
+  if (undoTimer) clearTimeout(undoTimer)
+  undoTimer = null
+  undoFn = null
+  undoTip.value = ''
+}
+async function applyUndo() {
+  const fn = undoFn
+  clearUndo()
+  if (fn) await fn()
+}
+
+function addPositionRow() {
+  // 跟随当前视图：在「今日清仓」里加行就建清仓行，否则新行会跑去看不见的 Tab
+  posRows.value.push(blankRow(posTab.value === 'cleared' ? '今日清仓' : '持仓中'))
+}
+function removePos(row) {
+  const i = posRows.value.indexOf(row)
+  if (i < 0) return
+  const backup = posRows.value.slice()
+  const label = row.stockName || row.stockCode || '空行'
+  posRows.value.splice(i, 1)
+  pushUndo('已移除 ' + label, () => { posRows.value = backup })
+}
+/** 延迟天/纪律分只对清仓行有意义：切回持仓时清掉，避免留下没人看的脏值 */
+function onStatusChange(row) {
+  if (row.status !== '今日清仓') { row.delayDays = null; row.disciplineScore = null }
+}
+
+function round2(v) { return Math.round(Number(v) * 100) / 100 }
+
+/**
+ * 成本 / 现价 / 浮动% 两两推导：填两个推第三个。
+ * 以前 placeholder 写着「自动」却没有任何自动行为，同一条信息要手输两遍还可能自相矛盾。
+ */
+function syncFloat(row, from) {
+  const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v))
+  const c = num(row.costPrice), p = num(row.currentPrice), f = num(row.floatPct)
+  if (from === 'pct') {
+    if (c && f !== null) { row.currentPrice = round2(c * (1 + f / 100)); return }
+    if (p && f !== null && f !== -100) { row.costPrice = round2(p / (1 + f / 100)); return }
+    return
+  }
+  if (c && p && c > 0) row.floatPct = round2((p - c) / c * 100)
+}
+function tierCount(row) {
+  return [row.planOpen, row.planBreak, row.planLow, row.planFall].filter(x => (x || '').trim()).length
+}
+
 async function savePositions() {
   const date = form.tradeDate
   if (!date) return
-  // 整表替换护栏：先确认再覆盖，避免手滑保存丢掉当天已录持仓
-  try {
-    await ElMessageBox.confirm(
-      `将整表替换 ${date} 的 ${posRows.value.length} 行持仓（替换前旧行会自动快照，可回滚），确认？`,
-      '覆盖持仓台账',
-      { confirmButtonText: '确认覆盖', cancelButtonText: '取消', type: 'warning' }
-    )
-  } catch { return }
+  const keep = posRows.value.filter(r => (r.stockCode || '').trim())
+  const dropped = posRows.value.length - keep.length
+  if (dropped > 0) ElMessage.warning('有 ' + dropped + ' 行没填股票代码，不会保存')
+  if (!keep.length) { ElMessage.warning('没有可保存的持仓行'); return }
   savingPos.value = true
   try {
-    const rows = posRows.value.map(({ stockCode, stockName, costPrice, currentPrice, floatPct, action, plannedAction, discipline, industry, boardNum, status, delayDays, disciplineScore, nextDayPlan, planOpen, planBreak, planLow, planFall, executed, actualAction }) =>
-      ({ stockCode, stockName, costPrice, currentPrice, floatPct, action, plannedAction, discipline, industry, boardNum, status, delayDays, disciplineScore, nextDayPlan, planOpen, planBreak, planLow, planFall, executed, actualAction }))
-    await recordApi.savePositions(date, rows)
+    const before = posRows.value.slice()
+    await recordApi.savePositions(date, toPayload(keep))
+    // 整表替换前服务端已把旧行快照进 t_position_history，
+    // 所以拦一道确认弹窗是多余的——改成保存后给一次撤销（撤销=原样再存一次）。
+    pushUndo('台账已保存', () => restoreRows(before, date))
     ElMessage.success('持仓台账已存（旧行已自动快照）')
-  } catch (e) { /* 拦截器弹 */ } finally { savingPos.value = false }
+    await loadPositions(date)
+    loadPendingCarry(date)
+  } catch (e) { /* 拦截器已弹 */ } finally { savingPos.value = false }
+}
+async function restoreRows(rows, date) {
+  try {
+    await recordApi.savePositions(date, toPayload(rows.filter(r => (r.stockCode || '').trim())))
+    await loadPositions(date)
+    ElMessage.success('已撤销到保存前')
+  } catch (e) { /* 拦截器已弹 */ }
 }
 
-/* 加载某日持仓台账回填编辑表 */
+/* 加载某日持仓台账回填编辑表；顺带把指纹存下来作为脏检查基线 */
 async function loadPositions(date) {
   const res = await recordApi.getPositions(date).catch(() => null)
   if (form.tradeDate !== date) return
-  posRows.value = (res?.data || []).map((r) => ({
-    stockCode: r.stockCode || '', stockName: r.stockName || '',
-    costPrice: r.costPrice, currentPrice: r.currentPrice, floatPct: r.floatPct,
-    action: r.action || '', plannedAction: r.plannedAction || '', discipline: r.discipline || '',
-    industry: r.industry || '', boardNum: r.boardNum, status: r.status || '持仓中',
-    delayDays: r.delayDays, disciplineScore: r.disciplineScore, nextDayPlan: r.nextDayPlan || '',
-    planOpen: r.planOpen || '', planBreak: r.planBreak || '', planLow: r.planLow || '', planFall: r.planFall || '',
-    executed: r.executed || 0, actualAction: r.actualAction || '',
-    _results: [], _loading: false
-  }))
+  posRows.value = (res?.data || []).map((r) => {
+    const row = blankRow(r.status || '持仓中')
+    POS_KEYS.forEach(k => { row[k] = r[k] === undefined || r[k] === null ? row[k] : r[k] })
+    row.id = r.id || null
+    return row
+  })
+  posSnapshot.value = posFingerprint()
+  clearUndo()
 }
+
 const holdingRows = computed(() => posRows.value.filter((r) => !r.status || r.status === '持仓中'))
 const clearedRows = computed(() => posRows.value.filter((r) => r.status === '今日清仓'))
+/** Tab 只筛行，不换表：三种视图共用同一套列 */
+const tableRows = computed(() =>
+  posTab.value === 'hold' ? holdingRows.value
+    : posTab.value === 'cleared' ? clearedRows.value
+      : posRows.value)
 
 /* 外溢②：加载昨日遗留决策（未执行、且日期在当前交易日之前/等于当天） */
 async function loadPendingCarry(date) {
@@ -894,7 +1023,7 @@ async function markExecuted(p) {
   } catch (e) { /* 拦截器弹 */ } finally { markingPend.value = false }
 }
 
-/* 股票远程搜索下拉 + 台账汇总 */
+/* 股票远程搜索下拉 */
 const searchStocks = async (q, row) => {
   if (!q || !q.trim()) { row._results = []; return }
   row._loading = true
@@ -903,20 +1032,222 @@ const searchStocks = async (q, row) => {
     row._results = (Array.isArray(d) ? d : (d?.data || [])).slice(0, 12)
   } catch (e) { row._results = [] } finally { row._loading = false }
 }
+
+/* 当日涨停池索引：code -> {industry, boardNum, name}，选中股票时用来自动带出板块与板数 */
+const poolIndex = ref({})
+async function loadPoolIndex(date) {
+  poolIndex.value = {}
+  if (!date) return
+  const res = await marketApi.stocks(date).catch(() => null)
+  const ladder = res?.data?.ladder
+  if (!ladder) return
+  const idx = {}
+  for (const tier of ladder) {
+    for (const s of (tier.stocks || [])) {
+      if (!s.code) continue
+      idx[s.code] = { industry: s.industry || '', boardNum: tier.board || null, name: s.name || '' }
+    }
+  }
+  poolIndex.value = idx
+}
 function pickStock(row) {
   const hit = (row._results || []).find((s) => s.code === row.stockCode)
-  row.stockName = hit ? hit.name : row.stockName
+  if (hit) row.stockName = hit.name
+  const p = poolIndex.value[row.stockCode]
+  if (!p) return
+  if (!row.stockName && p.name) row.stockName = p.name
+  if (!row.industry && p.industry) row.industry = p.industry
+  if (!row.boardNum && p.boardNum) row.boardNum = p.boardNum
 }
-const ledgerSummary = computed(() => {
-  let cost = 0, price = 0
-  for (const r of posRows.value) {
-    const c = Number(r.costPrice), p = Number(r.currentPrice)
-    if (!Number.isNaN(c)) cost += c
-    if (!Number.isNaN(p)) price += p
+
+/** 裸代码 → 腾讯 symbol：6 沪、4/8/9 北、其余深（与后端 TencentClient.symbolOf 同口径） */
+function symbolOf(code) {
+  if (!code || code.length !== 6) return null
+  const h = code.charAt(0)
+  if (h === '6') return 'sh' + code
+  return (h === '4' || h === '8' || h === '9') ? 'bj' + code : 'sz' + code
+}
+/**
+ * 补现价：只认 date 精确匹配那一根日 K。
+ * 腾讯个股日 K 当天常滞后（16:00 拉仍只到 T-3），缺就留空——绝不用相邻交易日的收盘顶替。
+ */
+const fillingPrice = ref(false)
+async function fillCurrentPrices() {
+  const date = form.tradeDate
+  const targets = posRows.value.filter(r => (r.stockCode || '').trim().length === 6 && r.currentPrice == null)
+  if (!targets.length) { ElMessage.info('没有待补的行（需有 6 位代码且现价为空）'); return }
+  fillingPrice.value = true
+  let filled = 0
+  let missed = 0
+  try {
+    for (const r of targets) {
+      const res = await marketApi.dailyBars(symbolOf(r.stockCode), date, date).catch(() => null)
+      const bar = (res?.data || []).find(b => (b.date || '').slice(0, 10) === date)
+      if (bar && bar.close != null) { r.currentPrice = Number(bar.close); filled++ } else { missed++ }
+      syncFloat(r, 'price')
+    }
+    if (filled && !missed) ElMessage.success('已补 ' + filled + ' 只现价')
+    else if (filled) ElMessage.warning('已补 ' + filled + ' 只，' + missed + ' 只当日日 K 未取到（个股当天滞后，请手填）')
+    else ElMessage.warning(missed + ' 只当日日 K 未取到（个股当天滞后，请手填）')
+  } finally { fillingPrice.value = false }
+}
+
+/* ---- 批量带入：昨日未平持仓 / 当日涨停池 / 阵眼 ---- */
+const openImport = ref(false)
+const importSource = ref('carry')
+const importLoading = ref(false)
+const importCandidates = ref([])
+const importSelected = ref([])
+function onImportSelect(sel) { importSelected.value = sel }
+async function openImportDialog() {
+  openImport.value = true
+  importSelected.value = []
+  importCandidates.value = []
+  await loadImportCandidates()
+}
+async function loadImportCandidates() {
+  const date = form.tradeDate
+  importLoading.value = true
+  importCandidates.value = []
+  try {
+    if (importSource.value === 'carry') {
+      const res = await recordApi.allPositions(30).catch(() => null)
+      const all = res?.data || []
+      // 最近一个早于当天的交易日里仍在持仓的票 = 昨日未平，今日大概率还要处理
+      const days = [...new Set(all.map(r => (r.tradeDate || '').slice(0, 10)))]
+        .filter(d => d && d < date).sort()
+      const last = days[days.length - 1]
+      const seen = {}
+      const out = []
+      for (const r of all) {
+        if (!last || (r.tradeDate || '').slice(0, 10) !== last) continue
+        if (r.status === '今日清仓' || !r.stockCode || seen[r.stockCode]) continue
+        seen[r.stockCode] = 1
+        out.push({ code: r.stockCode, name: r.stockName, industry: r.industry || '', boardNum: r.boardNum || null, quantity: r.quantity || null })
+      }
+      importCandidates.value = out
+    } else if (importSource.value === 'pool') {
+      const res = await marketApi.stocks(date).catch(() => null)
+      const out = []
+      for (const tier of (res?.data?.ladder || [])) {
+        for (const s of (tier.stocks || [])) {
+          out.push({ code: s.code, name: s.name, industry: s.industry || '', boardNum: tier.board || null })
+        }
+      }
+      importCandidates.value = out
+    } else {
+      const res = await anchorsApi.config(date).catch(() => null)
+      importCandidates.value = (res?.data || [])
+        .filter(a => a.stockCode)
+        .map(a => ({ code: a.stockCode, name: a.stockName || '', industry: '', boardNum: null }))
+    }
+  } finally { importLoading.value = false }
+}
+watch(importSource, () => { if (openImport.value) loadImportCandidates() })
+function applyImport() {
+  const inTable = new Set(posRows.value.map(r => r.stockCode))
+  let n = 0
+  for (const c of importSelected.value) {
+    if (!c.code || inTable.has(c.code)) continue
+    const row = blankRow('持仓中')
+    row.stockCode = c.code
+    row.stockName = c.name || ''
+    row.industry = c.industry || ''
+    row.boardNum = c.boardNum || null
+    row.quantity = c.quantity || null
+    posRows.value.push(row)
+    inTable.add(c.code)
+    n++
   }
-  const floatAmount = price - cost
-  const floatPct = cost ? (floatAmount / cost) * 100 : 0
-  return { totalCost: cost, totalPrice: price, floatAmount, floatPct }
+  openImport.value = false
+  ElMessage.success(n ? '带入 ' + n + ' 只' : '没有新增：选中的都已在台账里')
+}
+
+/**
+ * 汇总：两条口径并存，各吃自己吃得下的行——
+ * ① 金额口径（成本额/市值/盈亏额）：只收填了股数、成本现价都在的行；
+ * ② 等权口径（平均浮动%/盈亏家数）：只看浮动%，与股数无关，缺股数的行仍在这里。
+ * 所以「有股数 N/M」要一并显示出来，否则会以为盈亏额已经把全部持仓算进去了。
+ */
+const ledgerSummary = computed(() => {
+  const list = posRows.value
+  const floats = list.map(r => r.floatPct)
+    .filter(v => v !== null && v !== undefined && v !== '')
+    .map(Number).filter(n => !Number.isNaN(n))
+  let costValue = 0
+  let marketValue = 0
+  let qtyCount = 0
+  for (const r of list) {
+    const m = pnlOf(r)
+    if (!m) continue
+    costValue += m.cost
+    marketValue += m.value
+    qtyCount++
+  }
+  const pnlAmount = qtyCount ? marketValue - costValue : null
+  return {
+    avgFloat: floats.length ? floats.reduce((a, b) => a + b, 0) / floats.length : null,
+    priced: floats.length,
+    winCount: floats.filter(n => n > 0).length,
+    loseCount: floats.filter(n => n < 0).length,
+    planCount: list.filter(r => tierCount(r) > 0 || (r.nextDayPlan || '').trim()).length,
+    qtyCount,
+    costValue: qtyCount ? costValue : null,
+    marketValue: qtyCount ? marketValue : null,
+    pnlAmount,
+    pnlPct: pnlAmount !== null && costValue > 0 ? (pnlAmount / costValue) * 100 : null
+  }
+})
+
+
+/* ======================================================================= */
+/* 未保存护栏：切日期 / 关页面 / 离开路由 三处统一拦截                       */
+/* ======================================================================= */
+const ledgerRef = ref(null)
+function scrollToLedger() {
+  ledgerRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+function onBeforeUnload(e) {
+  if (!posDirty.value) return
+  e.preventDefault()
+  e.returnValue = ''
+}
+onBeforeRouteLeave(async () => {
+  if (!posDirty.value) return true
+  try {
+    await ElMessageBox.confirm('持仓台账有未保存的改动，离开本页会丢失。', '台账未保存',
+      { confirmButtonText: '放弃并离开', cancelButtonText: '留在本页', type: 'warning' })
+    return true
+  } catch (e) { return false }
+})
+
+/**
+ * 日期选择的写入口：切日期会整表重读台账，所以有未保存改动时先拦一道。
+ * 确认=保存后切换；取消=放弃改动并切换；关窗口=留在当天。
+ *
+ * 刻意不用 computed setter：取消切换时 form.tradeDate 没变、传给 picker 的 prop 也没变，
+ * picker 不会回弹、界面会停在用户刚点的那个日期上。用独立 ref，取消时显式写回旧值才拉得回来。
+ */
+const pickerDate = ref(form.tradeDate)
+watch(() => form.tradeDate, (v) => { if (pickerDate.value !== v) pickerDate.value = v })
+watch(pickerDate, async (v) => {
+  if (!v || v === form.tradeDate) return
+  if (posDirty.value) {
+    try {
+      await ElMessageBox.confirm(
+        `「${form.tradeDate}」的持仓台账有未保存改动，切换日期会丢掉它们（关闭本窗口 = 留在当天）。`,
+        '台账未保存',
+        {
+          confirmButtonText: '保存后切换', cancelButtonText: '放弃改动并切换',
+          distinguishCancelAndClose: true, type: 'warning'
+        }
+      )
+      await savePositions()
+    } catch (e) {
+      if (e === 'close') { pickerDate.value = form.tradeDate; return }   // 关窗口 = 取消切换
+    }
+  }
+  form.tradeDate = v
 })
 
 /* 监管人工补录 */
@@ -951,9 +1282,11 @@ const statusClass = (s) => s && /涨停|核按钮/.test(s) ? 'st-danger' : (/断
 const topIndustries = computed(() => (d2.value.industries || []).slice(0, 5))
 
 onMounted(async () => {
+  window.addEventListener('beforeunload', onBeforeUnload)
   await initTradingDay()
   handleDateChange(form.tradeDate)
 })
+onUnmounted(() => window.removeEventListener('beforeunload', onBeforeUnload))
 </script>
 
 <style scoped>
@@ -1163,5 +1496,20 @@ onMounted(async () => {
 .pt-cell .el-input { width: 108px; }
 .pos-industry { color: #94a3b8; font-size: 12px; margin-left: 8px; }
 .pos-board { color: #f59e0b; font-size: 12px; margin-left: 6px; }
-.plan-tip { color: #94a3b8; font-size: 12px; margin-top: 8px; }
+
+/* ---- 持仓台账（P0/P1/P2 改版） ---- */
+/* dim-muted 之前只有类名没有规则（全项目就本页在用），这里补成真正的弱化文字 */
+.dim-muted { color: #7a8b9c; font-size: 12px; }
+.dirty-tag { margin-left: 8px; font-size: 12px; color: #ef9f27; }
+.undo-chip { display: inline-flex; align-items: center; gap: 2px; margin-left: 12px; padding: 2px 4px 2px 10px;
+  background: #16202e; border: 1px solid #2d3748; border-radius: 12px; font-size: 12px; color: #9fb3c8; }
+.pend-jump { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px;
+  padding: 9px 14px; background: #1d1a12; border: 1px solid #4a3a12; border-radius: 10px; }
+.pend-jump-tag { font-size: 13px; color: #ef9f27; font-weight: 500; }
+.plan-cell { display: flex; align-items: center; gap: 6px; }
+.tier-flag { flex: none; padding: 1px 6px; border-radius: 8px; font-size: 11px; cursor: help;
+  background: #22303f; color: #7a8b9c; border: 1px solid #2d3748; }
+.tier-flag.ok { background: #123324; color: #4ecb8f; border-color: #1f5c3a; }
+.plan-foot { margin-top: 8px; font-size: 12px; color: #7a8b9c; display: flex; gap: 10px; align-items: center; }
+.exec-done { color: #4ecb8f; }
 </style>

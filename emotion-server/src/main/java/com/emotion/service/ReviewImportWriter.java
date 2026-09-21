@@ -166,6 +166,7 @@ public class ReviewImportWriter {
             p.setStockName(names.getOrDefault(r.getCode(), r.getName()));
             p.setCostPrice(r.getCost());
             p.setCurrentPrice(r.getCurrent());
+            p.setQuantity(r.getQuantity());
             p.setFloatPct(r.getFloatPct());
             p.setAction(r.getAction());
             p.setPlannedAction(r.getPlannedAction());

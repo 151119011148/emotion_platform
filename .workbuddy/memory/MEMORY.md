@@ -65,4 +65,22 @@
 - `cd emotion-server && mvn -DskipTests compile && mvn test`（既有 407 个用例全离线不连库）。
 - 本机 Bash 的 PATH 是坏的（`ls/head/find/grep` 都没有，只有内置命令）、PowerShell 输出不回显：要跑命令就用绝对路径的 node/python，详见当日日志「本机环境」一节。
 - 前端校验**别用** `node -e "import('vite').build()"`（会挂住十几分钟无输出）；用 `@vue/compiler-sfc` 的 `parse + compileTemplate` 逐个编译 .vue，秒级出结果。
+- .vue 校验的正确判据（3.5.42 实测）：`compileScript().bindings` 与模板产物里的 `_ctx.X` 取差集，**差集为空**才算模板无未定义引用。
+  非 inline 模式下产物统一把 setup 绑定编译成 `_ctx.X`，`$setup.` 前缀一个都不出现——扫 `$setup.` 会得到「引用 0 个」的假通过。
+  现成脚本：`%TEMP%/check_sfc.js <绝对路径.vue>`（含 parse/script/template 三段错误与差集检查）。
 - Edit 工具同一条消息里对**同一个文件**连发两次会互相覆盖，改多处的同一文件必须串行改完再 grep 复核。
+
+## 数据就绪度：t_zt_perf 只有 3 天（重要，任何依赖它的新功能先确认）
+- 2026-09-21 实测：`t_zt_perf` 仅有 09-14 / 09-18 / 09-21 三天行（`t_market_stock` 从 08-24 起是齐的）。它是「昨日涨停股（**含首板**）今日表现」的唯一来源，也是 `prev_consecutive` 的唯一出处。
+- 任何读它的新逻辑上线前必须先回填历史，否则历史区间静默失效，且症状是「规则永远不命中」而非报错，非常难查。注意能力边界：**晋级率可以靠三池跨日自连接算出**，但「昨日高位股（≥3板）今日平均涨幅」只有它能给。
+- 判定前期与课程表 `t_premium_tier` 不一样：后者不含首板、只到 8+ 档；两者别混用。
+
+## WaveRider（连板周期选股策略引擎）待办状态
+- PRD v1.1 已定稿在 `prd/WaveRider-PRD.html`，定位是 emotion_platform 的策略层模块，**尚未写任何代码**。
+- 迁移预留 **V29**（t_strategy / t_strategy_version / t_strategy_template / t_strategy_run / t_node_detect / t_candidate_stock / t_candidate_t1）+ **V30**（waveriderDailyScanTask 排班）。V28 已被 position_quantity 占用。
+- 两条硬经验（做别的功能也适用）：①**节点/阈值类规则必须配「近 20 日触发次数」面板**，否则参数变成死分支没人知道（v1.0 三条规则就是这么失效的）；②**写死的绝对阈值几乎必然过期**，凡涉及市场量级的都要有「动态基准（近 N 日分位数）」模式。
+
+## 展示口径：区分「未评」与「真的 0」
+- 后端子项 VO 里有**原生 int**（如 `PressureBlock.survCount/survNuke`）：未评（`score == null`，如监管事件窗为空）时它们回落成 0，
+  前端 `xx ?? '—'` 拦不住，页面会把「不知道」印成「0 家」「0 只」，看着像事实。
+- 判据统一用 `score == null` = 整支未评；`survAvailable=true` 且确实 0 家时 score 仍有值。HighEcoView 已落成 `isRated()/statVal()/nukeText()` 三个 helper。

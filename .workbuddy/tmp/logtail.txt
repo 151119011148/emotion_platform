@@ -1,0 +1,14 @@
+size=2809
+---- TAIL ----
+2026-09-10 16:27:14.194  INFO 28588 --- [main] com.emotion.EmotionApplication           : Starting EmotionApplication v1.0.0 using Java 1.8.0_251 on DESKTOP-0HNOR6H with PID 28588 (D:\gaofeng\emotion_platform\emotion-server\target\emotion-server-1.0.0.jar started by 1 in D:\gaofeng\emotion_platform\emotion-server)
+2026-09-10 16:27:14.197  INFO 28588 --- [main] com.emotion.EmotionApplication           : The following 1 profile is active: "local"
+2026-09-10 16:27:15.344  INFO 28588 --- [main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port(s): 8080 (http)
+2026-09-10 16:27:15.353  INFO 28588 --- [main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-09-10 16:27:15.354  INFO 28588 --- [main] org.apache.catalina.core.StandardEngine  : Starting Servlet engine: [Apache Tomcat/9.0.83]
+2026-09-10 16:27:15.502  INFO 28588 --- [main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-09-10 16:27:15.502  INFO 28588 --- [main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 1262 ms
+2026-09-10 16:27:15.867  INFO 28588 --- [main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-09-10 16:27:16.028  INFO 28588 --- [main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-09-10 16:27:16.848  INFO 28588 --- [main] o.s.s.web.DefaultSecurityFilterChain     : Will secure any request with [org.springframework.security.web.session.DisableEncodeUrlFilter@5b38c1ec, org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter@338fc1d8, org.springframework.security.web.context.SecurityContextPersistenceFilter@52f27fbd, org.springframework.security.web.header.HeaderWriterFilter@304bb45b, org.springframework.web.filter.CorsFilter@4722ef0c, org.springframework.security.web.authentication.logout.LogoutFilter@70cf32e3, com.emotion.config.JwtAuthFilter@557caf28, org.springframework.security.web.savedrequest.RequestCacheAwareFilter@4a8355dd, org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter@c430e6c, org.springframework.security.web.authentication.AnonymousAuthenticationFilter@48e1f6c7, org.springframework.security.web.session.SessionManagementFilter@28dcca0c, org.springframework.security.web.access.ExceptionTranslationFilter@7fd50002, org.springframework.security.web.access.intercept.FilterSecurityInterceptor@17bffc17]
+2026-09-10 16:27:17.207  INFO 28588 --- [main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port(s): 8080 (http) with context path ''
+2026-09-10 16:27:17.231  INFO 28588 --- [main] com.emotion.EmotionApplication           : Started EmotionApplication in 3.394 seconds (JVM running for 3.723)

@@ -1,0 +1,3 @@
+qrtz_tables_count=11
+scheduler_jobs=(('daily_market_pull', 'dailyMarketPullTask', '0 0 19 * * ?', 1),)
+scheduler_tables_present=2

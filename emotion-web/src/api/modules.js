@@ -102,6 +102,12 @@ export const marketApi = {
   breadth: () => api.get('/market/breadth', { skipErrorToast: true }),
   premiumTiers: (date) => api.get('/market/premium-tiers', { params: { date } }),
   /**
+   * 单只日 K（腾讯 newfqkline，只读不落库）。台账用它补「现价」：只认 date 精确匹配那一根。
+   * 注意个股当天常滞后（实测 16:00 拉仍只到 T-3），缺就留空，绝不用相邻交易日的收盘顶替。
+   */
+  dailyBars: (symbol, start, end) =>
+    api.get('/market/daily-bars', { params: { symbol, start, end }, skipErrorToast: true }),
+  /**
    * 子项读数（第 4 维两条家数口径 + 第 8/9 维）。刻意不和 snapshot 并成一次：
    * 阵眼与监管名单逐只打日 K，最坏几十次上游，混进去就是"只要七个数却被上游拖成一整屏红"。
    * 所以它自己加载、自己降级，超时放宽到 60s（和导入预览同一档）。

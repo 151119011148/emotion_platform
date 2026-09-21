@@ -44,6 +44,8 @@ public class ReviewDetailVO {
         private String name;
         private BigDecimal costPrice;
         private BigDecimal currentPrice;
+        /** 持仓股数；null = 没填。 */
+        private Integer quantity;
         /** 你手记的浮动盈亏%，原样存，不由成本/现价反推。 */
         private BigDecimal floatPct;
         private String action;

@@ -1,0 +1,4 @@
+t_scheduler_job cols=['id', 'job_name', 'job_group', 'bean_name', 'cron_expr', 'misfire_policy', 'enabled', 'description', 'created_at', 'updated_at']
+V27 needs=['job_name', 'job_group', 'bean_name', 'cron_expr', 'misfire_policy', 'enabled', 'description']
+missing=[]
+stock_dict_sync already_present=0

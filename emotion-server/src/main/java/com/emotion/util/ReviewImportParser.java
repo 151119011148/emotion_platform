@@ -98,7 +98,7 @@ public final class ReviewImportParser {
 
     /** 每类多行键允许的标签。值的边界就是靠这份表切出来的。 */
     private static final List<String> POSITION_LABELS =
-            Arrays.asList("成本", "现价", "浮动", "动作", "应做", "纪律");
+            Arrays.asList("成本", "现价", "数量", "浮动", "动作", "应做", "纪律");
     private static final List<String> THEME_LABELS = Arrays.asList("强度", "状态", "龙头");
     private static final List<String> PLAN_LABELS = Arrays.asList("概率", "条件");
     private static final List<String> INDEX_LABELS = Arrays.asList("收盘", "涨跌");
@@ -379,8 +379,10 @@ public final class ReviewImportParser {
         }
         BigDecimal cost = numberOrNull(doc, lineNo, "持仓", seg, "成本");
         BigDecimal current = numberOrNull(doc, lineNo, "持仓", seg, "现价");
+        // 数量可选：没写是「不知道买了多少」，与「0 股」区分开——不写就不进金额类汇总。
+        Integer qty = intOrNull(doc, lineNo, "持仓", seg, "数量", 1, 100000000);
         BigDecimal flt = numberOrNull(doc, lineNo, "持仓", seg, "浮动");
-        if (cost == NOT_A_NUMBER || current == NOT_A_NUMBER || flt == NOT_A_NUMBER) {
+        if (cost == NOT_A_NUMBER || current == NOT_A_NUMBER || qty == NOT_AN_INT || flt == NOT_A_NUMBER) {
             return;
         }
         String discipline = seg.labels.get("纪律");
@@ -393,7 +395,7 @@ public final class ReviewImportParser {
             doc.addWarning("第 " + lineNo + " 行 持仓 " + head[1] + "：纪律没填，这行不参与「连续几次应做未做」统计");
         }
         doc.getPositions().add(new ReviewDoc.PositionRow(lineNo, code, head[1],
-                cost, current, flt, seg.labels.get("动作"), seg.labels.get("应做"), discipline));
+                cost, current, qty, flt, seg.labels.get("动作"), seg.labels.get("应做"), discipline));
     }
 
     private static void parseTheme(ReviewDoc doc, int lineNo, String value) {
@@ -699,7 +701,7 @@ public final class ReviewImportParser {
     private static String exampleOf(String key) {
         switch (key) {
             case "持仓":
-                return "002229 鸿博股份 成本11.17 现价12.12 浮动+8.5 动作未动 应做竞价清仓 纪律违约";
+                return "002229 鸿博股份 成本11.17 现价12.12 数量1000 浮动+8.5 动作未动 应做竞价清仓 纪律违约";
             case "题材":
                 return "液冷服务器 强度70 状态扩散 龙头002909 集泰股份";
             case "预判":

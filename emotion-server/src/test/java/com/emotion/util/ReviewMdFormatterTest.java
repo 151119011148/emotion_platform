@@ -111,7 +111,7 @@ class ReviewMdFormatterTest {
     void labelWordInsideAValueDegradesThatRow() {
         ReviewDoc doc = new ReviewDoc();
         doc.setDate(LocalDate.of(2026, 9, 4));
-        doc.getPositions().add(new ReviewDoc.PositionRow(0, "002229", "鸿博股份", null, null, null,
+        doc.getPositions().add(new ReviewDoc.PositionRow(0, "002229", "鸿博股份", null, null, null, null,
                 "打板买入", "止损位 成本 之上出", "遵守"));
 
         String md = ReviewMdFormatter.render(doc, null, null);

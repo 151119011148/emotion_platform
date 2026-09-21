@@ -17,6 +17,8 @@ public class PositionRequest {
     private String stockName;
     private BigDecimal costPrice;
     private BigDecimal currentPrice;
+    /** 持仓股数；留空 = 没填，该行不进金额类汇总（市值/盈亏额），只进等权口径。 */
+    private Integer quantity;
     /** 手记的浮动盈亏%。留空且成本/现价都在时服务端补算，填了就用你的。 */
     private BigDecimal floatPct;
     private String action;
