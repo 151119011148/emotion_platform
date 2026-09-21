@@ -48,7 +48,9 @@ spring:
       initialize-schema: never
     properties:
       org.quartz.scheduler.instanceId: AUTO
-      org.quartz.jobStore.class: org.quartz.impl.jdbcjobstore.JobStoreTX
+      # 不设 org.quartz.jobStore.class：job-store-type=jdbc 时 Boot 会自动用 LocalDataSourceJobStore
+      # 把 Spring 托管的 DataSource 接进来。显式配成 JobStoreTX 会盖掉它，
+      # 原生实现找不到数据源，启动直接报「DataSource name not set」。
       org.quartz.jobStore.driverDelegateClass: org.quartz.impl.jdbcjobstore.StdJDBCDelegate
       org.quartz.jobStore.tablePrefix: QRTZ_
       org.quartz.jobStore.misfireThreshold: 60000

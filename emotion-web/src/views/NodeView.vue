@@ -935,7 +935,8 @@ onMounted(() => {
 .history-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
 .history-head h3 { margin: 0; color: #e1e8ed; }
 .filters { display: flex; gap: 8px; flex-wrap: wrap; }
-.expand-detail { padding: 8px 16px 8px 48px; display: flex; flex-direction: column; gap: 4px; }
+/* 单元格本身已有 20px 50px 内边距，这里只补少量间距，避免左缘被推到 100px 外 */
+.expand-detail { padding: 4px 8px 6px 2px; display: flex; flex-direction: column; gap: 6px; }
 .detail-row { color: #8899a6; font-size: 12px; }
 .reason-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px; }
 .reason-tag { margin: 0; font-size: 11px; }

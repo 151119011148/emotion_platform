@@ -23,9 +23,11 @@
         <java.version>1.8</java.version>
         <mybatis-plus.version>3.5.5</mybatis-plus.version>
         <jjwt.version>0.11.5</jjwt.version>
-        <!-- 与父 BOM（Spring Boot 2.7.18）托管的 flyway-core 保持同号：
-             Flyway 自 10.x 起把 MySQL 支持拆到 flyway-mysql 模块，两个模块版本必须严格一致。 -->
-        <flyway.version>8.5.13</flyway.version>
+        <!-- 数据库是 MySQL 5.7：Flyway 自 8.0 起社区版不再支持 5.7（连接时直接抛
+             FlywayEditionUpgradeRequiredException），故钉在 6.5.7——最后一个支持 5.7 的社区版。
+             该版本 MySQL 支持内置在 flyway-core，不需要 flyway-mysql 模块。
+             以后数据库升到 8.0，可删掉本属性回退到父 BOM 托管的 8.5.13 并加回 flyway-mysql。 -->
+        <flyway.version>6.5.7</flyway.version>
     </properties>
 
     <dependencies>
@@ -64,13 +66,6 @@
             <artifactId>flyway-core</artifactId>
             <version>${flyway.version}</version>
         </dependency>
-        <!-- MySQL 专用支持模块。Flyway 10 起不再内置在 core 里，版本号必须与 flyway-core 完全一致。 -->
-        <dependency>
-            <groupId>org.flywaydb</groupId>
-            <artifactId>flyway-mysql</artifactId>
-            <version>${flyway.version}</version>
-        </dependency>
-
         <!-- 单机定时任务平台：Quartz + JDBC 持久化(QRTZ_* 表)，任务定义与 cron 在库里维护。 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

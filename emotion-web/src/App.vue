@@ -24,9 +24,18 @@ body {
   --el-table-header-text-color: #8899a6;
   --el-table-row-hover-bg-color: #22303f;
   --el-table-current-row-bg-color: #22303f;
+  /* 展开行（type="expand"）默认取 --el-fill-color-blank = 纯白，卡片内会突兀地白一块；
+     这里压成比卡片（#1a2332）更深一档的 #16202e，与表头同色，展开区看着像凹进去的一层 */
+  --el-table-expanded-cell-bg-color: #16202e;
   --el-table-fixed-box-shadow: -10px 0 12px -8px rgba(0, 0, 0, .45);
   color: var(--el-table-text-color);
   background-color: transparent;
+}
+/* 展开单元格：Element 自带 `.el-table__expanded-cell:hover{background-color:transparent!important}`，
+   鼠标划过时会透出下层卡片色、和未悬停状态不一致，这里用同源色压回去保持恒定 */
+.el-table .el-table__expanded-cell,
+.el-table .el-table__expanded-cell:hover {
+  background-color: var(--el-table-expanded-cell-bg-color) !important;
 }
 /* 内部容器与滚动区：变量不覆盖 background 简写的地方，逐节点压透明 */
 .el-table .el-table__inner-wrapper,
@@ -90,11 +99,57 @@ body {
   color: #cbd5e0;
 }
 
-/* ===== 日期控件浮层全站深色化 =====
+/* ===== el-dialog 全站深色化 =====
+   弹窗 teleport 到 body，页面 scoped 样式够不到，之前只有节点页靠 .dark-node-dialog 单独压，
+   其它页面（高位生态的阵眼弹窗等）一开就是白板。这里按同一套色值统一处理，类选择器保留也不冲突。
+   dialog 面板背景走 --el-dialog-bg-color（默认 var(--el-bg-color) = 白），整体换变量 + 补关键节点。 */
+.el-dialog {
+  --el-dialog-bg-color: #1a2332;
+  --el-dialog-border-radius: 12px;
+  --el-text-color-primary: #e1e8ed;
+  --el-text-color-regular: #cbd5e0;
+  --el-text-color-secondary: #8899a6;
+  --el-text-color-placeholder: #5c6e84;
+  --el-border-color: #3a4d63;
+  --el-border-color-light: #2d3748;
+  --el-border-color-lighter: #263140;
+  --el-fill-color: #22303f;
+  --el-fill-color-light: #202c3b;
+  --el-fill-color-lighter: #1c2634;
+  --el-bg-color: #1a2332;
+  --el-bg-color-overlay: #1a2332;
+  background: #1a2332;
+  border: 1px solid #2a3a52;
+  color: #cbd5e0;
+}
+.el-dialog__title { color: #e1e8ed; }
+.el-dialog__body { color: #cbd5e0; }
+.el-dialog__headerbtn:hover .el-dialog__close,
+.el-dialog__headerbtn:focus .el-dialog__close { color: #ffd166; }
+.el-dialog .el-form-item__label { color: #9fb2c6; }
+.el-dialog .el-input__wrapper,
+.el-dialog .el-select__wrapper,
+.el-dialog .el-textarea__inner {
+  background-color: #0f1720 !important;
+  box-shadow: 0 0 0 1px #2a3a52 inset !important;
+}
+.el-dialog .el-input__inner,
+.el-dialog .el-textarea__inner { color: #e1e8ed !important; }
+.el-dialog .el-input__inner::placeholder,
+.el-dialog .el-textarea__inner::placeholder { color: #5c6e84; }
+.el-dialog .el-radio__label,
+.el-dialog .el-checkbox__label { color: #c6d2de; }
+.el-dialog .el-dialog__footer { border-top: 1px solid #2a3a52; padding-top: 12px; }
+
+/* ===== 浮层（日期面板 / 下拉 / popover）全站深色化 =====
    浮层是 teleport 到 body 的，页面级 scoped 样式够不到，只能在这里全局压。
    做法跟表格一样：整体换掉 Element 的语义色变量（面板/表头/单元格/底部按钮全是 var() 引用），
-   而不是逐个节点打补丁——这样月/年面板、快捷栏一并跟随。 */
-.el-picker__popper.el-popper {
+   而不是逐个节点打补丁——这样月/年面板、快捷栏一并跟随。
+   下拉（el-select 远程搜索、el-dropdown）与 popover 走同一套变量，避免弹窗里再冒白框。 */
+.el-picker__popper.el-popper,
+.el-select__popper.el-popper,
+.el-dropdown__popper.el-popper,
+.el-popover.el-popper {
   --el-text-color-primary: #e1e8ed;
   --el-text-color-regular: #cbd5e0;
   --el-text-color-secondary: #8899a6;
@@ -116,9 +171,25 @@ body {
   color: #cbd5e0;
 }
 /* 箭头：默认取 --el-text-color-primary（浅色主题下是深色小方块），这里直接给实色 */
-.el-picker__popper.el-popper .el-popper__arrow::before {
+.el-picker__popper.el-popper .el-popper__arrow::before,
+.el-select__popper.el-popper .el-popper__arrow::before,
+.el-dropdown__popper.el-popper .el-popper__arrow::before,
+.el-popover.el-popper .el-popper__arrow::before {
   background: #1a2332;
   border-color: #2d3748;
+}
+/* 下拉候选项：hover / 选中态用 Element 变量没覆盖到的地方，补一层深底 */
+.el-select__popper.el-popper .el-select-dropdown__item,
+.el-dropdown__popper.el-popper .el-dropdown-menu__item {
+  color: #cbd5e0;
+}
+.el-select__popper.el-popper .el-select-dropdown__item.is-hovering,
+.el-dropdown__popper.el-popper .el-dropdown-menu__item:not(.is-disabled):hover {
+  background-color: #22303f;
+}
+.el-select__popper.el-popper .el-select-dropdown__item.is-selected {
+  background-color: #22303f;
+  color: #ffd166;
 }
 /* 快捷栏选中态底色是硬编码的浅蓝，单独压 */
 .el-picker-panel__shortcut.active {

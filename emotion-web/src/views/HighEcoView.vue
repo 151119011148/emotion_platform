@@ -48,14 +48,18 @@
         </div>
         <el-alert v-if="!vo.anchor?.configured" type="info" :closable="false" show-icon
           title="当日无在位人工阵眼（本子项未评），点右上「新增阵眼」登记本位后即可计入" style="margin-bottom: 12px" />
-        <div v-for="a in vo.anchor?.items || []" :key="a.id" class="anchor-card">
+        <div v-for="a in anchorItems" :key="a.id" class="anchor-card">
           <div class="anchor-line">
             <el-tag type="danger" effect="dark" size="small">{{ a.roleLabel || '阵眼' }}</el-tag>
             <span class="anchor-name">{{ a.name }}</span>
             <span class="anchor-code">{{ a.code }}</span>
             <el-tag size="small" effect="plain">{{ a.industry || '行业未登记' }}</el-tag>
             <span class="anchor-board">{{ a.consecutive == null ? '—' : a.consecutive + ' 板' }}</span>
-            <span :class="pctClass(a.chg)">{{ a.chg == null ? '—' : signed(a.chg) + '%' }}</span>
+            <!-- 涨幅：三池里没有的票（断板后横盘这类）由后端打日K补；两边都取不到才留 — -->
+            <span class="anchor-chg" :class="pctClass(a.chg)"
+              :title="a.chg == null ? '当日既不在涨停/炸板/跌停池，日K也取不到（未开盘、停牌、未来日期或该日无行情）' : ''">
+              涨幅 {{ a.chg == null ? '—' : signed(a.chg) + '%' }}
+            </span>
             <el-tag :type="actionType(a.action)" size="small">{{ a.actionLabel || '未评' }}</el-tag>
             <el-tag :type="a.realTop ? 'success' : 'warning'" size="small" effect="plain">
               {{ a.realTop ? '= 实际最高板（未易主）' : '市场高度已易主' }}
@@ -239,7 +243,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { d5Api, recordApi, anchorsApi, reviewApi } from '../api/modules'
@@ -324,6 +328,19 @@ function shiftDays(iso, days) {
   d.setDate(d.getDate() - days)
   return d.toLocaleDateString('en-CA')
 }
+
+/**
+ * 阵眼按起爆时间倒序：最近一轮起爆的排最前——看盘时的注意力在"这一波"，
+ * 早期那个还在位的老周期阵眼往后放。同一天登记的按 id 倒序（后登记的在前）。
+ * 后端 AnchorService 已经按这个序返回，这里再排一次只是为了让没重启到新版的服务也一致。
+ */
+const anchorItems = computed(() => {
+  const list = [...(vo.value?.anchor?.items || [])]
+  return list.sort((a, b) => {
+    const byStart = String(b.startDate || '').localeCompare(String(a.startDate || ''))
+    return byStart !== 0 ? byStart : Number(b.id || 0) - Number(a.id || 0)
+  })
+})
 
 async function load() {
   loading.value = true
@@ -611,6 +628,10 @@ async function removeAnchor(a) {
 .anchor-board {
   color: #fbbf24;
   font-weight: 700;
+}
+.anchor-chg {
+  font-weight: 700;
+  cursor: help;
 }
 .anchor-meta {
   display: flex;

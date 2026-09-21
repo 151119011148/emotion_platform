@@ -25,6 +25,7 @@ import com.emotion.service.MarketDailyStore;
 import com.emotion.service.MarketDataService;
 import com.emotion.service.ScoreContextService;
 import com.emotion.service.SurveillanceService;
+import com.emotion.service.StockDictService;
 import com.emotion.vo.ApiResponse;
 import com.emotion.vo.MarketBreadthVO;
 import com.emotion.vo.MarketIndexesVO;
@@ -55,17 +56,20 @@ public class MarketController {
 
     private final MarketDataService marketDataService;
     private final SurveillanceService surveillanceService;
+    private final StockDictService stockDictService;
     private final ScoreContextService scoreContextService;
     private final IndexCloseStore indexCloseStore;
     private final MarketDailyStore marketDailyStore;
 
     public MarketController(MarketDataService marketDataService,
                             SurveillanceService surveillanceService,
+                            StockDictService stockDictService,
                             ScoreContextService scoreContextService,
                             IndexCloseStore indexCloseStore,
                             MarketDailyStore marketDailyStore) {
         this.marketDataService = marketDataService;
         this.surveillanceService = surveillanceService;
+        this.stockDictService = stockDictService;
         this.scoreContextService = scoreContextService;
         this.indexCloseStore = indexCloseStore;
         this.marketDailyStore = marketDailyStore;
@@ -222,6 +226,18 @@ public class MarketController {
             targets.addAll(surveillanceService.trackedCodes(begin, last));
         }
         return ApiResponse.ok(surveillanceService.refresh(targets, begin, last));
+    }
+
+    /**
+     * 同步 A股代码名称字典（t_stock）。
+     *
+     * <p>选股下拉（阵眼登记 / 持仓台账）的远程搜索只查这张表；新库在第一次同步前它是空的，
+     * 表现是"输什么都搜不到"，很容易被当成搜索功能坏了。字典变化慢（新股上市、ST 改名），
+     * 排了每周一次的 stock_dict_sync 定时任务；这个手工入口留给首次部署与排障时立刻灌一次。
+     */
+    @PostMapping("/stock-dict/sync")
+    public ApiResponse<StockDictService.SyncResult> syncStockDict() {
+        return ApiResponse.ok(stockDictService.sync());
     }
 
     /** 登录态里带的是账号 id（JwtAuthFilter 放进 principal），阵眼按它查各自的登记。 */

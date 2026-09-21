@@ -15,6 +15,7 @@ import java.util.TreeSet;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -23,6 +24,7 @@ import com.emotion.entity.MarketStock;
 import com.emotion.mapper.MarketStockMapper;
 import com.emotion.market.HighEcoMetrics;
 import com.emotion.market.MarketMetrics;
+import com.emotion.market.TencentClient;
 import com.emotion.market.SurvivalMember;
 import com.emotion.vo.HighEcoVO;
 
@@ -73,10 +75,20 @@ public class HighEcoMetricsService {
 
     private final MarketStockMapper marketStockMapper;
     private final AnchorService anchorService;
+    /** 补阵眼当日涨跌幅用的日 K 客户端；测试构造（无客户端）时为 null，补数那一步整体跳过。 */
+    private final TencentClient tencent;
 
-    public HighEcoMetricsService(MarketStockMapper marketStockMapper, AnchorService anchorService) {
+    @Autowired
+    public HighEcoMetricsService(MarketStockMapper marketStockMapper, AnchorService anchorService,
+                                 TencentClient tencent) {
         this.marketStockMapper = marketStockMapper;
         this.anchorService = anchorService;
+        this.tencent = tencent;
+    }
+
+    /** 测试可见：不连行情源的构造，日 K 补涨跌幅自动跳过。 */
+    HighEcoMetricsService(MarketStockMapper marketStockMapper, AnchorService anchorService) {
+        this(marketStockMapper, anchorService, null);
     }
 
     /** 取数结果：metrics 进引擎，vo 直接给 /api/d5/high。 */
@@ -120,9 +132,97 @@ public class HighEcoMetricsService {
                 : anchorService.listInPosition(userId, date);
         Integer h = snap == null ? null : snap.maxBoard;
         String mainIndustry = snap == null ? null : snap.mainIndustry;
-        return aggregate(date, h, mainIndustry, todayZt, todayZb, todayDt, prevZt, recent,
+        Build b = aggregate(date, h, mainIndustry, todayZt, todayZb, todayDt, prevZt, recent,
                 tiers, anchors, members == null ? Collections.<SurvivalMember>emptyList() : members,
                 survAvailable, snap == null ? null : snap.zongLong);
+        backfillAnchorChg(date, b.getVo() == null || b.getVo().getAnchor() == null
+                ? null : b.getVo().getAnchor().getItems());
+        return b;
+    }
+
+    /**
+     * 阵眼当天没进三池时，用日 K 把当日涨跌幅补上。
+     *
+     * <p>卡片的「涨幅」原本只取自涨停/炸板/跌停池行：一只票当天只是普通涨跌（断板后横盘、
+     * 慢涨慢跌）三池里根本没有它，涨幅就空着显示「—」，看着像数据丢了，其实只是取数口径太窄。
+     * 阵眼是哨兵，恰恰是断板之后那几天的走势最该看，所以这里补一次日 K。
+     *
+     * <p>只认请求日当天那一根 bar：拿不到（未开盘、停牌、未来日期、上游没数据）就继续留 null，
+     * 绝不用相邻交易日的涨幅顶替——把昨天的涨跌当今天展示，比留空更误事。
+     * 补的是纯展示字段，不进 metrics，因此不影响 D5 任何评分。
+     */
+    private void backfillAnchorChg(LocalDate date, List<HighEcoVO.AnchorItem> items) {
+        if (tencent == null || date == null || items == null || items.isEmpty()) {
+            return;
+        }
+        List<HighEcoVO.AnchorItem> missing = new ArrayList<>();
+        for (HighEcoVO.AnchorItem it : items) {
+            if (it.getChg() != null || it.getCode() == null) {
+                continue;
+            }
+            String symbol = TencentClient.symbolOf(it.getCode());
+            if (symbol == null) {
+                continue;
+            }
+            try {
+                List<TencentClient.DayBar> bars = tencent.dailyBars(symbol, date, date);
+                if (bars != null) {
+                    for (TencentClient.DayBar bar : bars) {
+                        if (bar != null && date.equals(bar.getDate()) && bar.getPct() != null) {
+                            it.setChg(bar.getPct());
+                            break;
+                        }
+                    }
+                }
+            } catch (RuntimeException e) {
+                log.warn("D5 阵眼日K补涨跌幅失败 code={} date={}：{}", it.getCode(), date, e.toString());
+            }
+            if (it.getChg() == null) {
+                missing.add(it);
+            }
+        }
+        backfillAnchorChgByQuote(date, missing);
+    }
+
+    /**
+     * 日 K 还没出当天那根时（收盘后上游日线常滞后若干小时）用实时快照兜底。
+     *
+     * <p>快照只有「此刻」这一份，所以必须用 quoteDate 卡住：不是请求日就不认 ———
+     * 否则今天的涨幅会被当成历史某天的，比留空危险得多。也因此它只对当天有意义，
+     * 历史日期直接跳过，一次多余的请求都不发。
+     */
+    private void backfillAnchorChgByQuote(LocalDate date, List<HighEcoVO.AnchorItem> missing) {
+        if (missing == null || missing.isEmpty() || !date.equals(LocalDate.now())) {
+            return;
+        }
+        Map<String, HighEcoVO.AnchorItem> bySymbol = new LinkedHashMap<>();
+        for (HighEcoVO.AnchorItem it : missing) {
+            String symbol = TencentClient.symbolOf(it.getCode());
+            if (symbol != null) {
+                bySymbol.put(symbol, it);
+            }
+        }
+        if (bySymbol.isEmpty()) {
+            return;
+        }
+        try {
+            Map<String, TencentClient.StockQuote> quotes = tencent.quotes(new ArrayList<>(bySymbol.keySet()));
+            if (quotes == null) {
+                return;
+            }
+            for (Map.Entry<String, TencentClient.StockQuote> e : quotes.entrySet()) {
+                TencentClient.StockQuote q = e.getValue();
+                if (q == null || !date.equals(q.getQuoteDate()) || q.getChangePct() == null) {
+                    continue;
+                }
+                HighEcoVO.AnchorItem it = bySymbol.get(e.getKey());
+                if (it != null) {
+                    it.setChg(q.getChangePct());
+                }
+            }
+        } catch (RuntimeException ex) {
+            log.warn("D5 阵眼快照补涨跌幅失败 date={}：{}", date, ex.toString());
+        }
     }
 
     private List<MarketStock> listPool(LocalDate date, String pool) {

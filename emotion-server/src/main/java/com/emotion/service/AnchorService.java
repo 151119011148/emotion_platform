@@ -45,14 +45,21 @@ public class AnchorService {
         this.stockMapper = stockMapper;
     }
 
-    /** 某日在位 = 起点不晚于该日，且（没有终点 或 终点不早于该日）。打分和面板都读这一个判据。 */
+    /**
+     * 某日在位 = 起点不晚于该日，且（没有终点 或 终点不早于该日）。打分和面板都读这一个判据。
+     *
+     * <p>一律按起爆日倒序返回（最近一轮起爆的在前）：面板、节点页下拉、导出 md 都直接吃这个顺序，
+     * 各消费方自己排就会出现"面板倒序、导出正序"这种对不上的情况。打分取的是最差/加权平均，与顺序无关。
+     */
     public List<Anchor> listInPosition(Long userId, LocalDate date) {
         return anchorMapper.selectList(new LambdaQueryWrapper<Anchor>()
                 .eq(Anchor::getUserId, userId)
                 .le(Anchor::getStartDate, date)
                 .and(w -> w.isNull(Anchor::getEndDate).or().ge(Anchor::getEndDate, date))
-                .orderByAsc(Anchor::getStartDate)
-                .orderByAsc(Anchor::getId));
+                // 起爆时间倒序：最近一轮起爆的排最前，看盘时先看到"这一波"；
+                // 同一天登记的两只按 id 倒序，后登记的在前。
+                .orderByDesc(Anchor::getStartDate)
+                .orderByDesc(Anchor::getId));
     }
 
     /** 跨度与 [from, to] 有交集的全部阵眼，含已经下位的：曲线画 markArea 用。 */
@@ -61,8 +68,10 @@ public class AnchorService {
                 .eq(Anchor::getUserId, userId)
                 .le(Anchor::getStartDate, to)
                 .and(w -> w.isNull(Anchor::getEndDate).or().ge(Anchor::getEndDate, from))
-                .orderByAsc(Anchor::getStartDate)
-                .orderByAsc(Anchor::getId));
+                // 起爆时间倒序：最近一轮起爆的排最前，看盘时先看到"这一波"；
+                // 同一天登记的两只按 id 倒序，后登记的在前。
+                .orderByDesc(Anchor::getStartDate)
+                .orderByDesc(Anchor::getId));
     }
 
     public Anchor create(Long userId, Anchor anchor) {
