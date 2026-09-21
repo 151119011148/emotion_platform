@@ -545,6 +545,9 @@ import { pnlOf, yuan } from '../utils/money'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import EditableStatCard from '../components/EditableStatCard.vue'
 
+// useRoute 必须在 setup 顶层取一次：放进普通函数会在 watch/生命周期回调里 inject 失败（返回 undefined 抛 TypeError）
+const route = useRoute()
+
 /* ======================================================================= */
 /* 只读小组件：就绪度 badge / 得分 chip / 统计项                           */
 /* ======================================================================= */
