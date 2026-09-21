@@ -18,9 +18,14 @@
     <description>A股短线情绪周期仪表盘后端</description>
 
     <properties>
+        <!-- 源码与资源一律 UTF-8（本机默认 GBK，不写死的话换台机器就乱码）。 -->
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <java.version>1.8</java.version>
         <mybatis-plus.version>3.5.5</mybatis-plus.version>
         <jjwt.version>0.11.5</jjwt.version>
+        <!-- 与父 BOM（Spring Boot 2.7.18）托管的 flyway-core 保持同号：
+             Flyway 自 10.x 起把 MySQL 支持拆到 flyway-mysql 模块，两个模块版本必须严格一致。 -->
+        <flyway.version>8.5.13</flyway.version>
     </properties>
 
     <dependencies>
@@ -50,6 +55,26 @@
             <groupId>mysql</groupId>
             <artifactId>mysql-connector-java</artifactId>
             <version>8.0.33</version>
+        </dependency>
+
+        <!-- 数据库版本管理：以后新增/改表一律写 src/main/resources/db/migration 下的 Vxx__xxx.sql，
+             不再往 schema.sql 里堆注释 ALTER。-->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+            <version>${flyway.version}</version>
+        </dependency>
+        <!-- MySQL 专用支持模块。Flyway 10 起不再内置在 core 里，版本号必须与 flyway-core 完全一致。 -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+            <version>${flyway.version}</version>
+        </dependency>
+
+        <!-- 单机定时任务平台：Quartz + JDBC 持久化(QRTZ_* 表)，任务定义与 cron 在库里维护。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-quartz</artifactId>
         </dependency>
 
         <dependency>

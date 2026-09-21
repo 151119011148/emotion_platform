@@ -23,3 +23,6 @@ mysql-reinstall.sh
 
 # 临时/补丁脚本
 *.py
+# 例外：可复用的数据库导出脚本需要入库
+!scripts/
+!scripts/**

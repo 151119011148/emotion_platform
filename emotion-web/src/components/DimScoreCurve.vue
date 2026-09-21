@@ -3,10 +3,10 @@
     <div class="curve-head">
       <h3>{{ name }}分走势 <span class="sub">近 {{ rows.length }} 个交易日 · 空档=未评</span></h3>
       <span class="legend">
-        <i class="lg" style="background: rgba(248, 113, 113, .45)"></i>高潮
-        <i class="lg" style="background: rgba(251, 191, 36, .45)"></i>发酵
-        <i class="lg" style="background: rgba(96, 165, 250, .45)"></i>混沌
-        <i class="lg" style="background: rgba(148, 163, 184, .45)"></i>退潮
+        <i class="lg" style="background: #dc2626"></i>高潮
+        <i class="lg" style="background: #d97706"></i>发酵
+        <i class="lg" style="background: #0891b2"></i>混沌
+        <i class="lg" style="background: #4a5568"></i>退潮
       </span>
     </div>
     <el-empty v-if="!rows.length" description="近 90 天还没有打分记录（五维打分上线前的日子没有分）" :image-size="60" />
@@ -19,13 +19,15 @@
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
 import { fiveDimBandOf } from '../utils/scores'
+import { STAGE_COLORS, NO_STAGE_COLOR } from '../utils/stages'
 
 /**
  * 单维分走势（五维模型 0-100 直加权）。
  *
- * <p>背景按五维 4 带（退潮 0-40 / 混沌 40-60 / 发酵 60-85 / 高潮 85-100）铺色，
- * 一眼看清分数落在哪个带位；分数据来自 {@code t_daily_record.score_*} 回填列，
- * 逐日再算一遍只会每天多打一次指数日 K + N 次个股日 K，所以只画已落库的分。
+ * <p>视觉与交互全面对齐首页温度曲线（TemperatureChart）：日变化柱、逐点按带位着色、
+ * 带下界阈值线标签、最高/最低图钉、选中日期金色竖线、冷→暖面积渐变同一套色值。
+ * 分数据来自 {@code t_daily_record.score_*} 回填列，逐日再算一遍只会每天多打一次
+ * 指数日 K + N 次个股日 K，所以只画已落库的分。
  */
 const props = defineProps({
   /** [{date, score}]，score 为 null 表示那天未评（画空档） */
@@ -40,17 +42,18 @@ const emit = defineEmits(['select'])
 const chartRef = ref(null)
 let chart = null
 
+// 背景四带铺色与首页温度曲线同一套色值（markArea 不带 name：带了会被渲染成带内堆叠乱文）
 const BANDS = [
-  { label: '高潮', min: 85, max: 100, fill: 'rgba(248, 113, 113, 0.07)' },
-  { label: '发酵', min: 60, max: 85, fill: 'rgba(251, 191, 36, 0.07)' },
-  { label: '混沌', min: 40, max: 60, fill: 'rgba(96, 165, 250, 0.07)' },
-  { label: '退潮', min: 0, max: 40, fill: 'rgba(148, 163, 184, 0.07)' }
+  { label: '高潮', min: 85, max: 100, fill: 'rgba(245,34,45,0.09)' },
+  { label: '发酵', min: 60, max: 85, fill: 'rgba(250,173,20,0.07)' },
+  { label: '混沌', min: 40, max: 60, fill: 'rgba(148,163,184,0.06)' },
+  { label: '退潮', min: 0, max: 40, fill: 'rgba(24,144,255,0.05)' }
 ]
 
 /**
- * 自适应纵轴：只在分数实际落点上下留一小段空白，让曲线纵向张满画布。
- * 分数若都挤在 0-100 中间某个窄区，固定 0-100 会让折线看着像平线；缩到数据附近后
- * 同一段波动会被放大拉陡，视觉对比明显增强。背景四带仍按真实 0-100 落位绘制（拼可见段）。
+ * 自适应纵轴：与首页温度曲线 yRange 同一套规则 —— 数据落点上下各留 4 分空白，
+ * 且 40/60 两条带下界强制留在视野内（min(vMin,38)/max(vMax,62) 兜底），
+ * 放大波动不能丢位置参照，40/60/85 阈值线也才有得画。
  */
 function axisRange(rows) {
   const vals = rows
@@ -58,20 +61,12 @@ function axisRange(rows) {
     .filter((v) => v != null && !Number.isNaN(Number(v)))
     .map(Number)
   if (!vals.length) return { min: 0, max: 100 }
-  const rawMin = Math.min(...vals)
-  const rawMax = Math.max(...vals)
-  const pad = Math.max(15, (rawMax - rawMin) * 0.25)
-  let min = rawMin - pad
-  let max = rawMax + pad
-  if (max - min < 30) {
-    const extra = (30 - (max - min)) / 2
-    min -= extra
-    max += extra
+  const vMin = Math.min(...vals)
+  const vMax = Math.max(...vals)
+  return {
+    min: Math.max(0, Math.floor(Math.min(vMin, 38) - 4)),
+    max: Math.min(100, Math.ceil(Math.max(vMax, 62) + 4))
   }
-  min = Math.max(0, Math.round(min))
-  max = Math.min(100, Math.round(max))
-  if (min === max) max = Math.min(100, min + 1)
-  return { min, max }
 }
 
 function buildOption() {
@@ -79,6 +74,15 @@ function buildOption() {
   if (!rows.length) return {}
   const dates = rows.map((r) => r.date)
   const range = axisRange(rows)
+
+  // 日变化：今日-昨日分差；前后任一未评=该日无柱（与首页温度曲线同一套柱样式）
+  const deltas = rows.map((r, i) => {
+    const prev = i === 0 ? null : rows[i - 1].score
+    if (r.score == null || prev == null) return null
+    return +(Number(r.score) - Number(prev)).toFixed(1)
+  })
+  const dMax = Math.max(...deltas.filter((v) => v != null).map(Math.abs), 5)
+
   // 只画与可见纵轴重叠的带（自适应缩放后越界的带不铺，避免一大片无意义底色）。
   // 不渲染带名：markArea 数据项一旦带 name 就会被 ECharts 渲染成带内堆叠文字（实测四带名
   // 挤成一团乱文）。因此这里不传 name，并在 markArea 上显式 label.show=false 双保险。
@@ -89,42 +93,52 @@ function buildOption() {
       { yAxis: Math.min(b.max, range.max), itemStyle: { color: b.fill } }
     ])
 
-  // 阈值虚线只在可见范围内画（自适应缩放后 40/60/85 可能落在轴外，画了也看不见）；
-  // 颜色提亮一点（原 #2d3748 在深底上几乎隐形），不带文字标签
+  // 带下界虚线：只在可见范围内画（自适应缩放后 40/60/85 可能落在轴外，画了也看不见）；
+  // 标签与首页温度曲线同款："跨过这条线就进入哪个带"
   const THRESHOLDS = [
-    { v: 40 },
-    { v: 60 },
-    { v: 85 }
+    { v: 40, label: '混沌 40', color: '#0891b2' },
+    { v: 60, label: '发酵 60', color: '#d97706' },
+    { v: 85, label: '高潮 85', color: '#dc2626' }
   ]
   const thrLines = THRESHOLDS
     .filter((t) => t.v > range.min && t.v < range.max)
     .map((t) => ({
       yAxis: t.v,
-      label: { show: false },
-      lineStyle: { color: 'rgba(136, 153, 166, 0.5)', type: 'dashed', width: 1 }
+      label: { formatter: t.label, color: t.color, position: 'insideEndTop', fontSize: 10 },
+      lineStyle: { color: '#2d3748', type: 'dashed', width: 1 }
     }))
 
-  // 最新一条已评分的横线：一眼看出当前分落在哪；标签挂左端，不挤在右端
+  // 最新一条已评分的横线：一眼看出当前分落在哪；样式对齐首页"当前温度"金线
   let latest = null
   rows.forEach((r) => { if (r.score != null) latest = Number(r.score) })
   const latestLine = latest != null
     ? [{
         yAxis: latest,
-        label: { formatter: `最新 ${latest.toFixed(1)}`, color: '#fbbf24', fontSize: 10, position: 'start' },
-        lineStyle: { color: '#fbbf24', width: 1.5, type: 'dashed' }
+        label: { formatter: `最新 ${latest.toFixed(1)}`, color: '#fbbf24', fontSize: 10, position: 'insideEndTop' },
+        lineStyle: { color: '#fbbf24', width: 1.5 }
+      }]
+    : []
+
+  // 选中日期：金色竖线标出当前看的是哪一天（与首页 activeDate 竖线同款）
+  const selIdx = props.selected ? dates.indexOf(props.selected) : -1
+  const selectedLine = selIdx >= 0
+    ? [{
+        xAxis: dates[selIdx],
+        lineStyle: { color: '#fbbf24', width: 1.5, type: 'dashed' },
+        label: { formatter: dates[selIdx].slice(5), position: 'insideEndTop', color: '#fbbf24', fontSize: 10 }
       }]
     : []
 
   // 渐变按"分数越高越暖"铺：把 0/40/60/85/100 锚点映射到像素 offset
-  //（纵轴自适应，offset 写死会与真实分位错位；与仪表盘温度曲线同一套冷→暖语义）
+  //（纵轴自适应，offset 写死会与真实分位错位；与首页温度曲线同一套冷→暖语义、同一套色值）
   const span = range.max - range.min || 1
   const off = (v) => Math.max(0, Math.min(1, (range.max - v) / span))
   const areaStops = [
-    { offset: off(100), color: 'rgba(245, 34, 45, 0.30)' },   // 顶部=高分 热红
-    { offset: off(85),  color: 'rgba(250, 173, 20, 0.18)' },  // 发酵 暖橙
-    { offset: off(60),  color: 'rgba(250, 173, 20, 0.10)' },  // 混沌上沿 淡橙
-    { offset: off(40),  color: 'rgba(148, 163, 184, 0.08)' }, // 混沌下沿 中性
-    { offset: off(0),   color: 'rgba(59, 130, 246, 0.03)' }   // 底部=低分 冷蓝
+    { offset: off(100), color: 'rgba(245,34,45,0.32)' },   // 顶部=高分 热红
+    { offset: off(85),  color: 'rgba(250,173,20,0.24)' },  // 发酵 暖橙
+    { offset: off(60),  color: 'rgba(250,173,20,0.13)' },  // 混沌上沿 淡橙
+    { offset: off(40),  color: 'rgba(148,163,184,0.06)' }, // 混沌下沿 中性
+    { offset: off(0),   color: 'rgba(24,144,255,0.04)' }   // 底部=低分 冷蓝
   ]
     .sort((a, b) => a.offset - b.offset)
     .filter((s, i, arr) => i === 0 || Math.abs(s.offset - arr[i - 1].offset) > 0.001)
@@ -136,8 +150,12 @@ function buildOption() {
       borderColor: '#2d3748',
       textStyle: { color: '#e1e8ed' },
       formatter: (params) => {
-        const i = params[0]?.dataIndex ?? 0
+        // 双 series（柱+线）后 params 顺序不固定，按名字各取各的，与首页温度曲线同思路
+        const line = params.find((x) => x.seriesName === props.name + '分')
+        const bar = params.find((x) => x.seriesName === '日变化')
+        const i = (line || bar || params[0])?.dataIndex ?? 0
         const r = rows[i]
+        if (!r) return ''
         const lines = [`${r.date}`]
         if (r.score == null) {
           lines.push(`得分: <b>未评</b>（该日无五维打分）`)
@@ -146,15 +164,12 @@ function buildOption() {
           const band = fiveDimBandOf(v)
           lines.push(`得分: <b>${v.toFixed(1)} / 100</b>`)
           if (band) lines.push(`带位: <b>${band}</b>`)
-          if (i > 0 && rows[i - 1]?.score != null) {
-            const d = +(v - Number(rows[i - 1].score)).toFixed(1)
-            lines.push(`日变化: <b style="color:${d >= 0 ? '#fbbf24' : '#60a5fa'}">${d >= 0 ? '+' : ''}${d}</b>`)
-          }
         }
+        if (bar && bar.value != null) lines.push(`日变化: <b>${bar.value > 0 ? '+' : ''}${bar.value}</b>`)
         return lines.join('<br/>')
       }
     },
-    grid: { left: 46, right: 18, top: 30, bottom: 26 },
+    grid: { left: 50, right: 46, top: 30, bottom: 26 },
     xAxis: {
       type: 'category',
       data: dates,
@@ -162,39 +177,83 @@ function buildOption() {
       // 轴本体是 ISO 串（点选要把它原样传回去），标签只给人看月/日
       axisLabel: { color: '#8899a6', formatter: (v) => (v || '').slice(5) }
     },
-    yAxis: {
-      type: 'value',
-      min: range.min,
-      max: range.max,
-      splitLine: { lineStyle: { color: '#2d3748' } },
-      axisLabel: { color: '#8899a6' },
-      name: '分',
-      nameTextStyle: { color: '#8899a6', fontSize: 10 }
-    },
+    yAxis: [
+      {
+        type: 'value',
+        min: range.min,
+        max: range.max,
+        splitLine: { lineStyle: { color: '#2d3748' } },
+        axisLabel: { color: '#8899a6' },
+        name: '分',
+        nameTextStyle: { color: '#8899a6', fontSize: 10 }
+      },
+      {
+        // 日变化副轴：对称量程，柱的升降幅度一眼可比（与首页同款）
+        type: 'value',
+        name: '日变化',
+        nameTextStyle: { color: '#6e7681', fontSize: 10 },
+        min: -dMax,
+        max: dMax,
+        splitNumber: 4,
+        splitLine: { show: false },
+        axisLabel: { color: '#6e7681', fontSize: 10 }
+      }
+    ],
     series: [
+      {
+        // 柱在折线下面（z:2 < z:4），透明度压低避免遮挡分数线；正=升分(暖橙) 负=降分(冷蓝)
+        name: '日变化',
+        type: 'bar',
+        yAxisIndex: 1,
+        data: deltas,
+        barWidth: '34%',
+        z: 2,
+        itemStyle: {
+          color: (p) => (p.value >= 0 ? 'rgba(250,173,20,0.42)' : 'rgba(24,144,255,0.38)')
+        }
+      },
       {
         name: props.name + '分',
         type: 'line',
         data: rows.map((r) => {
           if (r.score == null) return null
           const selected = r.date === props.selected
+          if (selected) {
+            return {
+              value: Number(r.score),
+              itemStyle: { color: '#fbbf24', borderColor: '#fff', borderWidth: 1.5 },
+              symbolSize: 14
+            }
+          }
+          // 逐点按带位着色而不是统一金色：分→带→STAGE_COLORS，与首页逐点按阶段着色同一思路
+          const band = fiveDimBandOf(r.score)
           return {
             value: Number(r.score),
-            itemStyle: selected
-              ? { color: '#fbbf24', borderColor: '#fff', borderWidth: 1.5 }
-              : { color: '#fbbf24' },
-            symbolSize: selected ? 14 : 9
+            itemStyle: { color: band ? (STAGE_COLORS[band] || NO_STAGE_COLOR) : NO_STAGE_COLOR },
+            symbolSize: 9
           }
         }),
         smooth: 0.5,
         symbol: 'circle',
         showAllSymbol: true,
         connectNulls: false,
-        lineStyle: { width: 2.6, color: '#fbbf24' },
+        z: 4,
         emphasis: {
           // hover 给金色描边，提示这些点可以点
           itemStyle: { borderColor: '#fbbf24', borderWidth: 1.5 }
         },
+        // 点位数值标签只在点数不多时开（首页曲线数据量小开标签没问题；
+        // 五维曲线近 90 天，全开会在 220px 高度里挤成一团）
+        label: rows.length <= 31
+          ? {
+              show: true,
+              position: 'top',
+              fontSize: 10,
+              color: '#8899a6',
+              formatter: (p) => (p.value == null ? '' : p.value)
+            }
+          : { show: false },
+        lineStyle: { width: 2.4, color: '#a16207' },
         areaStyle: {
           opacity: 1,
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, areaStops)
@@ -206,17 +265,18 @@ function buildOption() {
         },
         markPoint: {
           symbol: 'pin',
-          symbolSize: 40,
+          symbolSize: 42,
           data: [
-            // 用金/蓝而非红/蓝：最高分常不到 85，标红会被误读成"高潮"
-            { type: 'max', itemStyle: { color: '#fbbf24' }, label: { formatter: '{c}', color: '#1a2332', fontSize: 9 } },
-            { type: 'min', itemStyle: { color: '#60a5fa' }, label: { formatter: '{c}', color: '#1a2332', fontSize: 9 } }
+            // 最高/最低图钉配色与首页温度曲线一致（max 红 / min 青蓝）
+            { type: 'max', itemStyle: { color: '#dc2626' }, label: { formatter: '{c}', color: '#fff', fontSize: 10 } },
+            { type: 'min', itemStyle: { color: '#0891b2' }, label: { formatter: '{c}', color: '#fff', fontSize: 10 } }
           ]
         },
         markLine: {
           silent: true,
           symbol: 'none',
-          data: [...thrLines, ...latestLine]
+          lineStyle: { type: 'dashed', color: '#2d3748' },
+          data: [...thrLines, ...selectedLine, ...latestLine]
         }
       }
     ]
@@ -227,12 +287,13 @@ function renderChart() {
   if (!chartRef.value) return
   if (!chart) {
     chart = echarts.init(chartRef.value)
-    // 只监听画布、不再单独挂 series click：点挂在点上等于把"点一天换一天"这条主交互退化成碰运气
+    // 只监听画布、不再单独挂 series click：点挂在点上等于把"点一天换一天"这条主交互退化成碰运气。
+    // 坐标换算按 grid 定位（加了日变化柱后 seriesIndex 0 变成了柱系列，按 series 找会找错）
     chart.getZr().on('click', (e) => {
       const rows = props.rows || []
       const pos = [e.offsetX, e.offsetY]
       if (!rows.length || !chart.containPixel({ gridIndex: 0 }, pos)) return
-      const i = Math.round(chart.convertFromPixel({ seriesIndex: 0 }, pos)[0])
+      const i = Math.round(chart.convertFromPixel({ gridIndex: 0 }, pos)[0])
       const date = rows[i]?.date
       if (date) emit('select', date)
     })

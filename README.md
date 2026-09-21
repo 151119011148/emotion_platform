@@ -14,15 +14,28 @@ emotion-web/        Vue 3 前端（Vite）
 技术方案.md         九维口径、表设计、算法、页面设计
 ```
 
-## 一、建库
+## 一、建库（Flyway 自动迁移）
+
+**不用手工跑 SQL**：后端启动时会由 Flyway 自动把 `emotion-server/src/main/resources/db/migration/` 下的 `V1__xxx.sql` … 顺序执行到
+`emotion_dashboard` 库，执行记录写在 `t_flyway_history` 里。只需要保证库本身存在：
 
 ```bash
-mysql -uroot -p --default-character-set=utf8mb4 < emotion-server/src/main/resources/schema.sql
+mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS emotion_dashboard DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 ```
 
-内容是 14 张表的 `CREATE TABLE IF NOT EXISTS`，重复跑无害。
+两种情况的差别：
 
-**存量库升级要多看一眼文件末尾「存量库迁移」那一节**：那批注释掉的 `ALTER` 是给已经建过库的人准备的——新建库不用管（列已经在 `CREATE TABLE` 里），但如果你是几周前建的库、现在拉新代码，直接跑会 `Unknown column`。按日期挑你需要的那几条解开注释执行。
+| 库的状态 | Flyway 的行为 |
+|---|---|
+| **空库**（新装） | 从 V1 顺序回放全部迁移，一次建成现在的样子 |
+| **存量库**（已经手工跑过旧 `schema.sql`） | 检测到非空且没有 `t_flyway_history`，按 `baseline-version=24` 打基线，V1–V24 一条都不重放，只跑 V25 及以后 |
+
+为什么存量库不重放：那段历史里有若干 `DELETE + INSERT` 的种子收敛语句，重放会把你在管理端改过的权重冲掉。
+
+**新增/改表一律写新的迁移文件，不许改已经存在的文件**——`validate-on-migrate` 会对 checksum，改历史版本会导致所有环境启动失败。
+命名规则：`V{版本号}__{英文下划线描述}.sql`，版本号只增不复用。
+
+`schema.sql` 保留作历史参考，**不要再往里加内容**（它已经被切成 V1–V24 了）。
 
 ## 二、后端
 
@@ -97,6 +110,7 @@ cd emotion-web && npm run build
 | `/anchors` | `GET /`、`GET /span`、`GET /series`、`POST /`、`PUT /{id}`、`DELETE /{id}` |
 | `/nodes` | `GET /`、`GET /current`、`POST /`、`PUT /{id}`、`GET /{id}/suggest`、`POST /{id}/adopt` |
 | `/stocks` | `POST /refresh`、`GET /search` |
+| `/scheduler` | `GET /jobs`、`POST /reload`、`POST /jobs/{name}/cron?cron=`、`POST /jobs/{name}/enabled?enabled=`、`POST /jobs/{name}/run`、`GET /runs?job=&limit=` |
 | 复盘 md | `GET /records/review-doc`（复盘页的「导出复盘文档」在用）；`POST /records/import`、`GET /records/import/template`、`GET /records/import/export` **无前端入口**（导入页已撤，契约没撤，要用走 curl）；`GET /records/import/detail` 仍被复盘页底部只读明细块使用 |
 
 ## 六、九维口径（速览）
@@ -110,3 +124,38 @@ cd emotion-web && npm run build
 ## 七、行情源
 
 `application.yml` 的 `market:` 一节配了三路上游（腾讯报价与日 K、东财三池、东财异动公告），字段里注释了哪些主机在本机可用、哪些只能走 http。不联网也能用：所有读数都可以手填，拉不到时对应维退回"未评"。
+
+## 八、定时任务（单机 Quartz + 库表维护）
+
+任务不由外部脚本触发，也不挂在操作系统计划任务上：**进程内的 Quartz 自己到点唤醒**，
+任务定义躺在 `t_scheduler_job` 表里，`QRTZ_*` 那套调度账只记 Quartz 自己的状态。
+三者分工：
+
+| 层 | 表 / 位置 | 干什么 |
+|---|---|---|
+| 排班（人维护） | `t_scheduler_job` | 挂哪个 `bean_name`、cron、是否启用、错过怎么处置 |
+| 调度（Quartz） | `QRTZ_*` | 触发时刻计算、状态、实例心跳。**不要手工改** |
+| 留痕（人看） | `t_scheduler_run` | 每次成功/失败/跳过的结论、耗时、异常原因 |
+
+现在只有一个任务：
+
+| job_name | 触发 | 干什么 |
+|---|---|---|
+| `daily_market_pull` | 每天 19:00（`0 0 19 * * ?`，按 Asia/Shanghai） | 拉当天公开行情落库：三池明细 / 档位溢价 / 昨日涨停今日表现 / 五大指数收盘 / 全局客观九数。非交易日自动跳过 |
+
+维护动作（都要 Bearer token）：
+
+```bash
+curl -s localhost:8080/api/scheduler/jobs -H "Authorization: Bearer $TOKEN"      # 列表
+curl -s -X POST "localhost:8080/api/scheduler/jobs/daily_market_pull/run" -H "Authorization: Bearer $TOKEN"
+curl -s -X POST "localhost:8080/api/scheduler/jobs/daily_market_pull/cron?cron=0%200%2020%20*%20*%20%3F" -H "Authorization: Bearer $TOKEN"
+curl -s -X POST "localhost:8080/api/scheduler/jobs/daily_market_pull/enabled?enabled=false" -H "Authorization: Bearer $TOKEN"
+curl -s "localhost:8080/api/scheduler/runs?limit=20" -H "Authorization: Bearer $TOKEN"
+```
+
+**加一个新任务**两步：写一个实现 `ManagedTask` 的 Spring bean（返回 `TaskResult`），
+往 `t_scheduler_job` 插一行（建议写成下一个 Flyway 迁移版本，别手工 INSERT，环境之间才一致），
+重启或 `POST /api/scheduler/reload` 生效。
+
+前提：任务在后端进程内执行，**19:00 那一刻后端必须开着**。开了但没到晚饭没拉数，
+第一件事是看 `t_scheduler_run` 里有没有那天的行——没有就是进程当时不在。

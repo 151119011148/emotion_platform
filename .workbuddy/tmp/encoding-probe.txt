@@ -1,0 +1,1 @@
+utf8   229 个文件  例：emotion-server\src\main\java\com\emotion\EmotionApplication.java, emotion-server\src\main\java\com\emotion\config\GlobalExceptionHandler.java, emotion-server\src\main\java\com\emotion\config\JwtAuthFilter.java

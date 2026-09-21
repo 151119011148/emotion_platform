@@ -1,0 +1,68 @@
+-- Flyway migration V8: historical alters note
+-- -----------------------------------------------------------------------------
+-- 由 emotion-server/src/main/resources/schema.sql 第 742-797 行原样切出。
+-- 该文件历史上是「就地维护」的单体脚本：建表语句里已包含后来补的列，
+-- 所以中间版本的 CREATE 语句并非当天的历史原貌，而是当前结构的切片。
+-- 新库从 V1 顺序回放即可得到与 schema.sql 完全一致的库；存量库用 baseline 打点跳过。
+-- 已经应用过的版本严禁修改——新变更一律写下一个版本号。
+-- -----------------------------------------------------------------------------
+-- ============ 存量库迁移 ============
+-- 上面全是 CREATE TABLE IF NOT EXISTS，对已经建好的库一个字都不改。
+-- 加列必须在这里另留一条可重复判断的 ALTER，否则存量库跑新代码会直接 Unknown column。
+--
+-- 2026-09-06 第 4 维并入家数封板率与回封率（打分同时开放 -1 档）：
+-- ALTER TABLE t_daily_record
+--     ADD COLUMN sealed_home_rate DECIMAL(5,2) DEFAULT NULL COMMENT '家数封板率(%)=涨停家数÷(涨停+炸板)' AFTER broken_board_rate,
+--     ADD COLUMN reseal_rate DECIMAL(5,2) DEFAULT NULL COMMENT '回封率(%)=封住前曾打开的涨停家数÷(那些+炸板家数)' AFTER sealed_home_rate,
+--     ADD COLUMN broken_note VARCHAR(300) DEFAULT NULL COMMENT '第 4 维三个子项的算式与出分' AFTER surv_note;
+--
+-- 2026-09-06 复盘 md 导入器（三张新表由上面的 CREATE TABLE IF NOT EXISTS 覆盖，重复跑无害）：
+-- ALTER TABLE t_daily_record
+--     ADD COLUMN up_count INT DEFAULT NULL COMMENT '上涨家数（复盘 md 导入，不参与打分）' AFTER limit_down_count,
+--     ADD COLUMN down_count INT DEFAULT NULL COMMENT '下跌家数（同上）' AFTER up_count,
+--     ADD COLUMN my_position_pct DECIMAL(5,2) DEFAULT NULL COMMENT '我的实际仓位%' AFTER mid_cap_stock,
+--     ADD COLUMN review_md MEDIUMTEXT COMMENT '整篇复盘原文（含 meta 块）' AFTER tomorrow_plan;
+--
+-- 2026-09-07 各节判断文字（「导出复盘文档」要能带回你贴进来的定性）：
+-- ALTER TABLE t_daily_record
+--     ADD COLUMN doc_notes TEXT COMMENT '复盘文档各节判断文字(JSON：小节键→正文)' AFTER review_md;
+--
+-- 2026-09-08 子项人工覆盖八列（第 2/4/8/9 维的分项，NULL=未覆盖，清空即回退到自动值）：
+-- ALTER TABLE t_daily_record
+--     ADD COLUMN manual_sealed_home_rate DECIMAL(5,2) DEFAULT NULL COMMENT '第4维手改：家数封板率(%)' AFTER broken_note,
+--     ADD COLUMN manual_reseal_rate DECIMAL(5,2) DEFAULT NULL COMMENT '第4维手改：回封率(%)' AFTER manual_sealed_home_rate,
+--     ADD COLUMN manual_premium_low_pct DECIMAL(7,2) DEFAULT NULL COMMENT '第2维手改：低位组今日均涨幅(%)' AFTER manual_reseal_rate,
+--     ADD COLUMN manual_premium_mid_pct DECIMAL(7,2) DEFAULT NULL COMMENT '第2维手改：中位组今日均涨幅(%)' AFTER manual_premium_low_pct,
+--     ADD COLUMN manual_premium_high_pct DECIMAL(7,2) DEFAULT NULL COMMENT '第2维手改：高位组今日均涨幅(%)' AFTER manual_premium_mid_pct,
+--     ADD COLUMN manual_anchor_score TINYINT DEFAULT NULL COMMENT '第8维手改：阵眼当日反馈分(0~3)' AFTER manual_premium_high_pct,
+--     ADD COLUMN manual_surv_count INT DEFAULT NULL COMMENT '第9维手改：进分家数' AFTER manual_anchor_score,
+--     ADD COLUMN manual_surv_premium DECIMAL(7,2) DEFAULT NULL COMMENT '第9维手改：进分组合当日均涨幅(%)' AFTER manual_surv_count;
+--
+-- 2026-09-08 复盘导入页撤掉，给「对照」补一列（原来它只活在 review_md 里，现读现展示）：
+-- ALTER TABLE t_daily_record
+--     ADD COLUMN compare_note VARCHAR(300) DEFAULT NULL COMMENT '手记与系统读数的对照，人工填' AFTER doc_notes;
+-- 存量那两天（09-03/09-04）的对照值不回补：读取路径是"列优先、md 兜底"，老值照样看得见，
+-- 等他下次在这天填一次才以列为准。
+
+-- 2026-09-13 节点追踪改版：节点事件关联人工阵眼、补题材/情绪分/复算时间派生列。存量库跑下两条：
+-- ALTER TABLE t_node_event
+--     ADD COLUMN anchor_id BIGINT DEFAULT NULL COMMENT '锚定龙头关联的人工阵眼(t_anchor.id)；NULL=未关联(仍可手填)' AFTER node_stock_max_board,
+--     ADD COLUMN theme VARCHAR(50) DEFAULT NULL COMMENT '所属题材/板块(系统B必填)' AFTER anchor_id,
+--     ADD COLUMN d0_score DECIMAL(5,2) DEFAULT NULL COMMENT 'D0当日情绪总分(five_dim总分或旧温度)，节点产生时市场温度' AFTER theme,
+--     ADD COLUMN d0_cycle VARCHAR(20) DEFAULT NULL COMMENT 'D0当日周期阶段(退潮/启动/发酵/高潮/...)' AFTER d0_score,
+--     ADD COLUMN last_recalc_at DATETIME DEFAULT NULL COMMENT '上次复算(T+1自动判定/人工复算)时间，数据新鲜度' AFTER d0_cycle;
+-- ALTER TABLE t_node_event ADD INDEX idx_anchor (anchor_id);
+-- ALTER TABLE t_node_event ADD COLUMN conclusion_reason VARCHAR(30) DEFAULT NULL COMMENT '状态来路细分原因' AFTER last_recalc_at;
+
+--
+-- 2026-09-10 打分模型三表 + 超短情绪模型种子：上面的 CREATE TABLE IF NOT EXISTS 与 INSERT IGNORE 自覆盖，
+--            重复跑无害；存量库要拿这套新配置，整段重放即可，不会动已改过的权重。
+-- 若要把温度口径从 39 分母切到截图的 (加权和+81)/162（注意：现有 9 维权重和=13、每维±3，加权和只到 ±39，
+--            切到 81 后温度实际只能落在约 26..74，阶段里的 冰点<=15 与 高潮>=80 将永远取不到，
+--            且需整体重 bless golden 与重调 determineStage 阈值，属打分口径重定标，不是建表这一步）：
+-- UPDATE t_scoring_model SET max_score = 81.00 WHERE model_key = 'ultra_short';
+
+-- 这一段是历史存档：下面这些 ALTER 当年是直接落到建表语句里的，
+-- 对今天的新库是空操作（列已经在 V1 的 CREATE 里），留着是为了让人看得见演进过程。
+-- 给一条空操作语句，让这个文件在 Flyway 眼里确实是「执行过」。
+SELECT 'flyway_v8_note_marker: 历史 ALTER 注释存档，无需执行' AS note;

@@ -15,6 +15,45 @@ spring:
     password: ${MYSQL_PASSWORD:}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
+  # ---- Flyway：数据库变更的版本管理 ----
+  # 迁移脚本在 src/main/resources/db/migration：V1__xxx.sql 起，每次变更递增一个版本号。
+  # 已经应用过的版本严禁修改（校验会红），要改就写下个版本。
+  # baseline-version=24：存量库（已经手工跑过 schema.sql 的库）首次接入时直接打基线到第 24 版，
+  #   V1..V24 一条都不重放——那段历史里有 DELETE+INSERT 的种子收敛，重放会把手工改过的权重洗掉。
+  #   空库则跳过基线，从 V1 顺序建起。
+  flyway:
+    enabled: true
+    encoding: UTF-8
+    locations: classpath:db/migration
+    table: t_flyway_history
+    baseline-on-migrate: true
+    baseline-version: 24
+    baseline-description: '存量库基线：已手工执行过 schema.sql'
+    out-of-order: false
+    validate-on-migrate: true
+    # 清库是删库级别的动作，本地调试也不该顺手可用
+    clean-disabled: true
+
+  # ---- Quartz：单机定时任务 ----
+  # 任务定义(delay/cron/是否启用)在 t_scheduler_job 表里维护，启动时同步进 QRTZ_*。
+  # 不设 startup-delay：要让 Quartz 在 ApplicationRunner 之前起来，
+  # 否则平台那次装载会撞上「调度器还没启动」——装载失败的任务当天就不会跑了。
+  quartz:
+    job-store-type: jdbc
+    scheduler-name: emotion-scheduler
+    auto-startup: true
+    overwrite-existing-jobs: true
+    jdbc:
+      # QRTZ_* 的建表由 Flyway V25 负责。这里必须 never：两条路径同时建表会互相踩。
+      initialize-schema: never
+    properties:
+      org.quartz.scheduler.instanceId: AUTO
+      org.quartz.jobStore.class: org.quartz.impl.jdbcjobstore.JobStoreTX
+      org.quartz.jobStore.driverDelegateClass: org.quartz.impl.jdbcjobstore.StdJDBCDelegate
+      org.quartz.jobStore.tablePrefix: QRTZ_
+      org.quartz.jobStore.misfireThreshold: 60000
+      org.quartz.threadPool.threadCount: 3
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

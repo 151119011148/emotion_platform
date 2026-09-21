@@ -1,0 +1,14 @@
+﻿PWD=D:\gaofeng\emotion_platform
+PY=C:\Program Files\Python38\python.exe
+MVN=C:\Program Files\apache-maven-3.9.4\bin\mvn.cmd
+JAVA=C:\Program Files\Java\jdk1.8.0_251\bin\java.exe
+JAVA_VERSION=java.exe : java version "1.8.0_251"
+所在位置 行:445 字符: 544
++ ... ty Source); $lines += "JAVA_VERSION=" + (& java -version 2>&1 | Out-S ...
++                                              ~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (java version "1.8.0_251":String)  
+   [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Java(TM) SE Runtime Environment (build 1.8.0_251-b08)
+Java HotSpot(TM) 64-Bit Server VM (build 25.251-b08, mixed mode)
