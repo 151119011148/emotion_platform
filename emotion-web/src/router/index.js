@@ -59,6 +59,11 @@ const routes = [
         component: () => import('../views/NodeView.vue')
       },
       {
+        path: 'positions',
+        name: 'Positions',
+        component: () => import('../views/PositionsView.vue')
+      },
+      {
         path: 'scoring',
         name: 'Scoring',
         component: () => import('../views/ScoringAdminView.vue')

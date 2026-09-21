@@ -179,6 +179,15 @@ public class ReviewLedgerService {
         return positionStore.pendingList(userId, beforeOrEqual, limit);
     }
 
+    /**
+     * 跨日全量台账（持仓与台账页）：days 缺省=365 自然日，0=不限。
+     * 行是各日快照原样返回，按标的聚合生命周期/纪律统计放在页面做——
+     * 聚合口径跟着页面改时不用每次都动接口。
+     */
+    public List<Position> allPositions(Long userId, Integer days) {
+        return positionStore.readAll(userId, days);
+    }
+
     /** 标记某持仓已执行，闭环：回填真实动作，executed 置 1。 */
     public boolean markPositionExecuted(Long userId, Long positionId, String actualAction) {
         return positionStore.markExecuted(userId, positionId, emptyToNull(actualAction));

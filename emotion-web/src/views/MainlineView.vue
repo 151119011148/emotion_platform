@@ -6,7 +6,7 @@
           body="雷达区=当日所有有涨停的行业扫描（只标连续天数与强度）；连续 3 个交易日（含今天）该行业排进板块前五，才晋级主线区打 D2 分。雷达区可点击「升级到主线区」落人工标记。" />
       </h2>
       <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" :clearable="false"
-        :disabled-date="disabledDate" style="width: 168px" />
+        :disabled-date="disabledDate" :cell-class-name="cellClass" style="width: 168px" />
     </div>
 
     <DimScoreBlock :date="date" dim-key="theme_main" title="D2 · 主线明确度" />
@@ -290,7 +290,7 @@ import { useTradingCalendar } from '../utils/tradingCalendar'
 import DimScoreBlock from '../components/DimScoreBlock.vue'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
 
-const { disabledDate, loadTradingDays } = useTradingCalendar()
+const { disabledDate, cellClass, loadTradingDays } = useTradingCalendar()
 
 const route = useRoute()
 

@@ -14,7 +14,7 @@
           <span class="fp-help">?</span>
         </el-tooltip></h2>
       <el-date-picker v-model="form.tradeDate" type="date" value-format="YYYY-MM-DD"
-        :disabled-date="disabledDate" placeholder="选择交易日" style="width: 160px" />
+        :disabled-date="disabledDate" :cell-class-name="cellClass" placeholder="选择交易日" style="width: 160px" />
       <span class="header-spacer"></span>
       <el-tag v-if="fetchOverall" :type="overallTag" effect="dark">{{ overallText }}</el-tag>
       <el-button type="primary" :loading="fetching" @click="handleFetch">🔄 一键拉取行情</el-button>
@@ -625,7 +625,7 @@ const formReady = ref(false)
 const saving = ref(false)
 
 /* 可复盘交易日集合（降序，[0]=最近交易日）：共享工具统一「周末+官方休市日」置灰 */
-const { tradingDays, loadTradingDays, disabledDate, isNonTrading, fallbackRecentTradingDay } = useTradingCalendar()
+const { tradingDays, loadTradingDays, disabledDate, cellClass, isNonTrading, fallbackRecentTradingDay } = useTradingCalendar()
 function initTradingDay() {
   const route = useRoute()
   const q = route.query?.date

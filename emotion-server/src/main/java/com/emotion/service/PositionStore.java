@@ -128,6 +128,21 @@ public class PositionStore {
                 .last("LIMIT " + Math.max(1, limit)));
     }
 
+    /**
+     * 跨日全量台账（持仓与台账页）：该用户全部行，按日期升序、行序稳定。
+     * days>0 时只取近 N 个自然日——标的维度生命周期与纪律统计要的就是这个跨日视角。
+     */
+    public List<Position> readAll(Long userId, Integer days) {
+        LambdaQueryWrapper<Position> qw = new LambdaQueryWrapper<Position>()
+                .eq(Position::getUserId, userId)
+                .orderByAsc(Position::getTradeDate)
+                .orderByAsc(Position::getId);
+        if (days != null && days > 0) {
+            qw.ge(Position::getTradeDate, LocalDate.now().minusDays(days));
+        }
+        return mapper.selectList(qw);
+    }
+
     /** 标记某持仓已执行：回填真实动作，并把 executed 置 1，闭环完成。 */
     @Transactional(rollbackFor = Exception.class)
     public boolean markExecuted(Long userId, Long positionId, String actualAction) {

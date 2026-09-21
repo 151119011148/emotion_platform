@@ -36,7 +36,9 @@ export const recordApi = {
   // 外溢②：次日复盘页顶部「昨日遗留决策」，取最近 limit 条未执行决策
   pendingPositions: (before, limit = 5) => api.get('/records/positions/pending', { params: { before, limit }, skipErrorToast: true }),
   // 标记某持仓已执行，闭环回填真实动作
-  markPositionExecuted: (id, action) => api.post(`/records/positions/${id}/execute`, null, { params: { action } })
+  markPositionExecuted: (id, action) => api.post(`/records/positions/${id}/execute`, null, { params: { action } }),
+  // 持仓与台账页：跨日全量台账（生命周期/纪律统计都在页面按标的聚合），days=自然日窗口，0=不限
+  allPositions: (days = 365) => api.get('/records/positions/all', { params: { days }, timeout: 25000, skipErrorToast: true })
 }
 
 export const nodeApi = {

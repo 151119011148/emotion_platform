@@ -18,11 +18,43 @@ function keyOf(d) {
   return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
 }
 
+/** 今天（本地时区）YYYY-MM-DD。 */
+function todayKey() {
+  return keyOf(new Date())
+}
+
 /** 是否非交易日：周末恒非；交易日历在手时不在集合里的也算（用于拉取前兜底拦截）。 */
 function isNonTrading(dstr) {
   const dow = new Date(dstr + 'T00:00:00').getDay()
   if (dow === 0 || dow === 6) return true
   return tradingDays.value.length ? !tradingDays.value.includes(dstr) : false
+}
+
+/**
+ * 单元格性质，供日期面板做样式区分：
+ *   'non-trading' —— 非交易日（周末恒非；日历已加载的工作日里不在集合里的=官方休市）
+ *   'future'      —— 还没到的交易日（今天之后的工作日，数据尚未产生，点了也拉不到东西）
+ *   'trading'     —— 正常可选交易日
+ * 注意后端只给到「今天」为止，未来某天是否休市无从判断，所以未来工作日一律按「未到」处理。
+ */
+function dayState(d) {
+  const dow = d.getDay()
+  const k = keyOf(d)
+  if (k > todayKey()) return dow === 0 || dow === 6 ? 'non-trading' : 'future'
+  if (dow === 0 || dow === 6) return 'non-trading'
+  const days = tradingDays.value
+  if (!days.length) return 'trading'
+  // 早于日历覆盖范围（后端只回近 3 个月）的日子：性质未知，不贴标签，只按默认置灰处理
+  if (k < days[days.length - 1]) return 'unknown'
+  return days.includes(k) ? 'trading' : 'non-trading'
+}
+
+/** el-date-picker 的 cell-class-name：把上面三种性质落成 td 上的 class，样式见 App.vue 全局段。 */
+function cellClass(d) {
+  const s = dayState(d)
+  if (s === 'non-trading') return 'day-non-trading'
+  if (s === 'future') return 'day-future'
+  return ''
 }
 
 /** el-date-picker 的 disabled-date：周末恒灰；交易日历在手时不在集合里的全灰。 */
@@ -74,6 +106,8 @@ export function useTradingCalendar() {
     tradingDays,
     loadTradingDays,
     disabledDate,
+    cellClass,
+    dayState,
     isNonTrading,
     latestTradingDay,
     fallbackRecentTradingDay,

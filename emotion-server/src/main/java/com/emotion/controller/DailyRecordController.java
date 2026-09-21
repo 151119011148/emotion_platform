@@ -274,6 +274,17 @@ public class DailyRecordController {
     }
 
     /**
+     * 跨日全量台账（持仓与台账页）：days 缺省 365，0=全量。
+     * 各日快照原样返回，生命周期与纪律统计由前端按标的聚合。
+     */
+    @GetMapping("/positions/all")
+    public ApiResponse<List<com.emotion.entity.Position>> allPositions(Authentication auth,
+                                                                       @RequestParam(required = false) Integer days) {
+        Long userId = (Long) auth.getPrincipal();
+        return ApiResponse.ok(reviewLedgerService.allPositions(userId, days == null ? 365 : days));
+    }
+
+    /**
      * 整日替换当天预判与对答案，PLAN + ANSWER 两批一起发、一起换（少发一种就是把它清掉）。
      * <b>复盘页已经没有这块编辑口</b>：这两批行现在只由那天导入的 md 写，这个入口留作同一套语义的手工口。
      */

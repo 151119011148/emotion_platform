@@ -6,7 +6,7 @@
           body="指数与盘面读数全部来自本地表（复盘 md 导入或行情回补）；打分明细与仪表盘第 1 维同源，改权重刷新即变。" />
       </h2>
       <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" :clearable="false"
-        :disabled-date="disabledDate" style="width: 168px" />
+        :disabled-date="disabledDate" :cell-class-name="cellClass" style="width: 168px" />
     </div>
 
     <!-- D1 打分明细 -->
@@ -113,7 +113,7 @@ import { useTradingCalendar } from '../utils/tradingCalendar'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
 import DimIntroTip from '../components/DimIntroTip.vue'
 
-const { disabledDate, loadTradingDays } = useTradingCalendar()
+const { disabledDate, cellClass, loadTradingDays } = useTradingCalendar()
 
 const route = useRoute()
 const scoring = useScoringStore()

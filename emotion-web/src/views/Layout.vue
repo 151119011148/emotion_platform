@@ -38,6 +38,10 @@
           <el-icon><Connection /></el-icon>
           <span>节点追踪</span>
         </el-menu-item>
+        <el-menu-item index="/positions">
+          <el-icon><Tickets /></el-icon>
+          <span>持仓与台账</span>
+        </el-menu-item>
         <el-menu-item index="/scoring">
           <el-icon><SetUp /></el-icon>
           <span>打分配置</span>
