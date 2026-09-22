@@ -37,12 +37,13 @@ public class AnchorMetricsService {
     private static final int LEAD_IN_DAYS = 20;
 
     private final AnchorService anchorService;
-    private final TencentClient tencent;
+    private final DailyBarService dailyBarService;
     private final StockMapper stockMapper;
 
-    public AnchorMetricsService(AnchorService anchorService, TencentClient tencent, StockMapper stockMapper) {
+    public AnchorMetricsService(AnchorService anchorService, DailyBarService dailyBarService,
+                                StockMapper stockMapper) {
         this.anchorService = anchorService;
-        this.tencent = tencent;
+        this.dailyBarService = dailyBarService;
         this.stockMapper = stockMapper;
     }
 
@@ -121,7 +122,7 @@ public class AnchorMetricsService {
             }
             List<DayBar> bars;
             try {
-                bars = tencent.dailyBars(symbol, anchor.getStartDate().minusDays(LEAD_IN_DAYS), to);
+                bars = dailyBarService.bars(symbol, anchor.getStartDate().minusDays(LEAD_IN_DAYS), to);
             } catch (RuntimeException e) {
                 log.warn("阵眼 {} 日 K 未取得：{}", anchor.getStockCode(), e.getMessage());
                 continue;
@@ -204,7 +205,7 @@ public class AnchorMetricsService {
         }
         List<DayBar> bars;
         try {
-            bars = tencent.dailyBars(symbol, anchor.getStartDate().minusDays(LEAD_IN_DAYS), until);
+            bars = dailyBarService.bars(symbol, anchor.getStartDate().minusDays(LEAD_IN_DAYS), until);
         } catch (RuntimeException e) {
             // 一只票的日 K 拉不到不该把整块面板带崩：它变成"这只未评"，其余照常出数
             log.warn("阵眼 {} 日 K 未取得：{}", anchor.getStockCode(), e.getMessage());

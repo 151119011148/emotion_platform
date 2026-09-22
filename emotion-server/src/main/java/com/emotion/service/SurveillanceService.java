@@ -76,6 +76,7 @@ public class SurveillanceService {
 
     private final EastmoneyClient eastmoney;
     private final TencentClient tencent;
+    private final DailyBarService dailyBarService;
     private final SurveillanceMapper surveillanceMapper;
     private final MarketStockMapper marketStockMapper;
     /** 只服务读路径：某天的在列名单逐只拉日 K，串行是十几秒。 */
@@ -85,10 +86,12 @@ public class SurveillanceService {
 
     public SurveillanceService(EastmoneyClient eastmoney,
                               TencentClient tencent,
+                              DailyBarService dailyBarService,
                               SurveillanceMapper surveillanceMapper,
                               MarketStockMapper marketStockMapper) {
         this.eastmoney = eastmoney;
         this.tencent = tencent;
+        this.dailyBarService = dailyBarService;
         this.surveillanceMapper = surveillanceMapper;
         this.marketStockMapper = marketStockMapper;
     }
@@ -303,7 +306,7 @@ public class SurveillanceService {
         if (symbol == null) {
             return new ArrayList<>();
         }
-        List<DayBar> bars = tencent.dailyBars(symbol, begin, end);
+        List<DayBar> bars = dailyBarService.bars(symbol, begin, end);
         return bars == null ? new ArrayList<>() : bars;
     }
 

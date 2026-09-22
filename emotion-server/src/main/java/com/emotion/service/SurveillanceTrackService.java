@@ -50,15 +50,18 @@ public class SurveillanceTrackService {
     private final SurveillanceMapper surveillanceMapper;
     private final SurveillanceDailyMapper dailyMapper;
     private final MarketStockMapper stockMapper;
+    private final DailyBarService dailyBarService;
     private final TencentClient tencent;
 
     public SurveillanceTrackService(SurveillanceMapper surveillanceMapper,
                                     SurveillanceDailyMapper dailyMapper,
                                     MarketStockMapper stockMapper,
+                                    DailyBarService dailyBarService,
                                     TencentClient tencent) {
         this.surveillanceMapper = surveillanceMapper;
         this.dailyMapper = dailyMapper;
         this.stockMapper = stockMapper;
+        this.dailyBarService = dailyBarService;
         this.tencent = tencent;
     }
 
@@ -444,7 +447,7 @@ public class SurveillanceTrackService {
         if (symbol == null) {
             return new ArrayList<>();
         }
-        List<DayBar> bars = tencent.dailyBars(symbol, begin, end);
+        List<DayBar> bars = dailyBarService.bars(symbol, begin, end);
         return bars == null ? new ArrayList<>() : bars;
     }
 

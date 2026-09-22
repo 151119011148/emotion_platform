@@ -80,6 +80,18 @@ market:
   pool-size: 5
   intraday-ttl-ms: 60000
   cache-max-entries: 256
+  # ---- 日 K 落库缓存（t_daily_bar / t_daily_bar_fetch）----
+  daily-bar:
+    # 关掉后所有日 K 直接打上游（排查「是不是缓存给了旧值」时先关它）
+    enabled: true
+    # 落库时往前多要的自然日：窗口首日也要有前收可比，否则首日涨幅恒为 null
+    lead-days: 20
+    # 最近这几个自然日视为易变（腾讯个股日线当天滞后），一律回源、不信任库
+    volatile-days: 3
+    # 拉取留痕的保鲜天数：过期重拉一次，用来吸收除权导致的 qfq 整体重算
+    max-age-days: 30
+    # 易变段的进程内短缓存，避免刷新一下页面就把同一只票打一遍上游
+    volatile-ttl-ms: 120000
   tencent:
     base: http://qt.gtimg.cn
     chunk-size: 50

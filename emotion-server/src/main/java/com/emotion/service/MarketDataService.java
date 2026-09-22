@@ -89,6 +89,7 @@ public class MarketDataService {
 
     private final EastmoneyClient eastmoney;
     private final TencentClient tencent;
+    private final DailyBarService dailyBarService;
     private final StockPoolWriter stockPoolWriter;
     private final PremiumTierStore premiumTierStore;
     private final ZtPerfStore ztPerfStore;
@@ -104,6 +105,7 @@ public class MarketDataService {
 
     public MarketDataService(EastmoneyClient eastmoney,
                              TencentClient tencent,
+                             DailyBarService dailyBarService,
                              StockPoolWriter stockPoolWriter,
                              PremiumTierStore premiumTierStore,
                              ZtPerfStore ztPerfStore,
@@ -115,6 +117,7 @@ public class MarketDataService {
                              @Value("${market.cache-max-entries:256}") int maxCacheEntries) {
         this.eastmoney = eastmoney;
         this.tencent = tencent;
+        this.dailyBarService = dailyBarService;
         this.stockPoolWriter = stockPoolWriter;
         this.premiumTierStore = premiumTierStore;
         this.ztPerfStore = ztPerfStore;
@@ -295,10 +298,21 @@ public class MarketDataService {
 
     /** 一段日 K。上游那套"忽略 start、只认截至 end 的最近 N 根"的怪脾气只在这里处理一次。 */
     public List<TencentClient.DayBar> dailyBars(String symbol, LocalDate start, LocalDate end) {
+        return dailyBars(symbol, start, end, false);
+    }
+
+    /**
+     * 一段日 K。{@code forceRefresh=true} 跳过缓存直接回源。
+     *
+     * <p>这个开关的唯一用途是「怀疑库里是旧值时手动重拉一次」。日 K 走的是带保鲜期的缓存，
+     * 除权会让历史 qfq 价整体重算，万一保鲜期内就除权了，得有人能绕过缓存拿一次真值。
+     */
+    public List<TencentClient.DayBar> dailyBars(String symbol, LocalDate start, LocalDate end,
+                                                boolean forceRefresh) {
         if (symbol == null || symbol.trim().isEmpty() || start == null || end == null) {
             throw new MarketDataException("日 K 需要 symbol、start、end 三个参数");
         }
-        return tencent.dailyBars(symbol.trim(), start, end);
+        return dailyBarService.bars(symbol.trim(), start, end, forceRefresh);
     }
 
     /**

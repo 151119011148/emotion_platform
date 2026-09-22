@@ -17,6 +17,19 @@
 - 不要配 `spring.quartz.startup-delay`：ApplicationRunner 会先于 Quartz 起来导致装载失败。
 - 任务在后端进程内跑，**到点时后端必须开着**；没跑先看 `t_scheduler_run` 有没有那天的行。
 
+## 行情取数：写入侧与读取侧是两条路（别以为落库了就不会再打上游）
+- 落库侧：`MarketDataService.compute()` → `stockPoolWriter`(t_market_stock) / t_premium_tier / t_zt_perf / t_index_close，
+  再由 `MarketController` 补 `marketDailyStore.upsertSnapshot`（t_market_daily 客观九数，涨跌家数只在 liveBreadth=true 时写）。
+- 读取侧：`snapshot(date, refresh)` **只查 JVM 内存缓存**（`ConcurrentHashMap`，历史日不过期、当天按 `market.intraday-ttl-ms`），
+  **没有任何「先读库」分支**；`refresh=true` 还会先 `cache.remove(date)`。所以进程重启 / 缓存被 `cache-max-entries` 淘汰 / 一键拉取，都会重打上游——哪怕库里那天数据是齐的。
+- t_market_daily 的读者是打分（DailyRecordService）、NodeService、NodeSuggestService、ReviewController，**snapshot 自己从不读它**。
+- 走库的读口：`/market/stocks`、`/premium-tiers`、`/indexes`（都是本地表）。
+- 必然打上游的读口：`/market/breadth`（东财只有实时口径，无历史）、`/market/daily-bars`、
+  `/market/score-context` 与 `/d5/high`（阵眼/监管逐只打腾讯日 K，**既不落库也没缓存**，每次开页面都打，是「请求行情源」日志刷屏的大头）、
+  `/surveillance/refresh`（公告，一次十几到三十几次）。
+- 一键拉取（ReviewFetchService）与定时任务（DailyMarketPullTask）都显式 `snapshot(date, true)`——拉取=去源取最新，不是读历史；
+  只有 T1 回补先查库（`hasZtPool()`）决定要不要补。
+
 ## 行情取数的一个事实
 `MarketDataService.snapshot(date, true)` 负责写 `t_market_stock / t_premium_tier / t_zt_perf / t_index_close`，
 但 **`t_market_daily` 的 upsert 原本挂在 `MarketController` 里**——任何不走 HTTP 的调用（定时任务这类）必须自己补这一步，
@@ -70,6 +83,26 @@
   现成脚本：`%TEMP%/check_sfc.js <绝对路径.vue>`（含 parse/script/template 三段错误与差集检查）。
 - Edit 工具同一条消息里对**同一个文件**连发两次会互相覆盖，改多处的同一文件必须串行改完再 grep 复核。
 
+## 日 K 取数：一律走 DailyBarService（落库缓存，带保鲜期）
+- 入口唯一：`DailyBarService.bars(symbol, start, end)`。新代码**不要再直接调 `tencent.dailyBars()`**——那是无缓存无落库的裸上游调用，一只票一次网络往返。
+- 两张表（迁移 V31）：`t_daily_bar`（qfq 四价）+ `t_daily_bar_fetch`（拉取覆盖留痕）。V29/V30 已预留给 WaveRider，所以表建在 V31。
+- 三条硬设计：①命中判定只看 `t_daily_bar_fetch` 有无覆盖记录，**不看行数**——停牌日天然缺行且永久缺，按行数判会让停牌股永远回源；②qfq 不是真静态，除权会整体重算历史价，所以留痕有 30 天保鲜期（`market.daily-bar.max-age-days`），过期重拉；③近 3 个自然日（`volatile-days`）一律回源且**不留痕**，免得盘中拉一次把当天终值钉死。
+- 只存四价、不存涨跌幅：pct / lowPct 读时按库内前一根现算。派生值落库会出现两处真相，除权后错得更隐蔽。
+- 落库时向前多要 `lead-days=20` 天一并存下，保证窗口首日也有前收可比。
+- 退路：配置 `market.daily-bar.enabled=false` 全关；`/api/market/daily-bars?refresh=1` 强制回源；`DailyBarService.evict(symbol)` 清留痕。
+- **它是缓存不是档案**：任何新逻辑别把它当不可变历史事实表用（成交额那两个方法 `twoMarketDayAmountBillion` / `dayAmountBillion` 仍走裸日 K，没接进来）。
+## 日 K 复权（qfq）：涨跌幅安全，绝对价和跨段拼接不安全
+- 实测：腾讯日 K 第 6 段留空 = 不复权（`day`），`qfq` = 前复权（`qfqday`）；响应带 `version`（复权版本号）和 `prec`（区间前一日收盘）。8 只票 6 只在 3 个月内除过权（茅台 6/1 bfq 1309.60 / qfq 1281.58，差 2.14%）。
+- **pct 是安全的**：相邻两日共享同一复权因子，比值里抵消，未来除权不会改变历史区间的涨跌幅。除权日当天只有用 bfq 才会算出假跌幅，我们走 qfq 所以对。
+- **两件会错的事**：①拿缓存的 qfq 价当"当时真实股价"做绝对价比较（会随新除权漂移）；②不同时间拉的段拼在一起，衔接处因子不同 → 假跳变。
+- 应对（V32）：行级 `fq_version`；读一段时校验版本唯一，两种即判未命中整段重拉；回源时比对重叠日收盘价，对不上就整只票作废旧行与留痕。检测只能挂回源路径——命中路径不打上游，发现不了。
+- 别改存不复权价 + 因子表：上游不给因子，要双口径各拉一次或引除权事件源，成本远大于收益。
+
+## 写文件：多行文本一律用 Write 落脚本，别用内联 node -e
+- 本机 Git Bash 的转义链会把 `node -e "..."` 里字符串中的 `\n` 变成**字面的 `/n`（正斜杠+n）**写进文件。
+- 已踩一次：09-21 给 application.yml 加 `market.daily-bar` 段时踩了，09-22 启动直接 `ScannerException: while scanning a simple key ... daily-bar:/n` 拒启。纯文本/配置文件没有编译期保护，只有运行时炸。
+- 正确姿势：要改多行文本，先用 Write 工具写一份 .js 到临时目录，再用绝对路径 node 执行它（脚本里还能顺手处理 BOM / CRLF 保持原样）。单行替换才可以用内联。
+- 校验手段：yml 用 `PYTHONHOME= PYTHONPATH= .../envs/default/Scripts/python.exe -c "import yaml;yaml.safe_load(...)"`（已装 pyyaml）；.vue 用 `%TEMP%/check_sfc.js`；Java 用 mvn test。
 ## 数据就绪度：t_zt_perf 只有 3 天（重要，任何依赖它的新功能先确认）
 - 2026-09-21 实测：`t_zt_perf` 仅有 09-14 / 09-18 / 09-21 三天行（`t_market_stock` 从 08-24 起是齐的）。它是「昨日涨停股（**含首板**）今日表现」的唯一来源，也是 `prev_consecutive` 的唯一出处。
 - 任何读它的新逻辑上线前必须先回填历史，否则历史区间静默失效，且症状是「规则永远不命中」而非报错，非常难查。注意能力边界：**晋级率可以靠三池跨日自连接算出**，但「昨日高位股（≥3板）今日平均涨幅」只有它能给。

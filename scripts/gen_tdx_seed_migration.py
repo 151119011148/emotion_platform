@@ -15,7 +15,7 @@ DB = ["--protocol=tcp", "--host=127.0.0.1", "-u", "root", "-p123456",
       "--default-character-set=utf8mb4", "-D", "emotion_dashboard"]
 OUT = os.path.join(os.path.dirname(__file__), "..",
                    "emotion-server/src/main/resources/migration",
-                   "init_tdx_industry_concept_data.sql")
+                   "V33__init_tdx_industry_concept_data.sql")
 
 # (表名, INSERT 列, 注释)
 TABLES = [

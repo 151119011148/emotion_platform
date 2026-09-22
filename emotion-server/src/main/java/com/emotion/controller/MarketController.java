@@ -165,8 +165,9 @@ public class MarketController {
     @GetMapping("/daily-bars")
     public ApiResponse<List<TencentClient.DayBar>> dailyBars(@RequestParam String symbol,
                                                              @RequestParam String start,
-                                                             @RequestParam String end) {
-        return ApiResponse.ok(marketDataService.dailyBars(symbol, parse(start), parse(end)));
+                                                             @RequestParam String end,
+                                                             @RequestParam(required = false, defaultValue = "false") boolean refresh) {
+        return ApiResponse.ok(marketDataService.dailyBars(symbol, parse(start), parse(end), refresh));
     }
 
     /**

@@ -299,6 +299,8 @@ public class TencentClient {
             if (!rows.isArray()) {
                 rows = node.path("qfqday");
             }
+            // 复权版本号是 symbol 级的，一段里所有行共用同一个值
+            String version = node.path("version").asText(null);
             BigDecimal prevClose = null;
             for (JsonNode row : rows) {
                 if (!row.isArray() || row.size() <= IDX_KLINE_LOW) {
@@ -313,6 +315,7 @@ public class TencentClient {
                 }
                 DayBar bar = new DayBar();
                 bar.setDate(date);
+                bar.setFqVersion(version);
                 bar.setOpen(toDecimal(row.get(1).asText()));
                 bar.setClose(toDecimal(row.get(2).asText()));
                 bar.setHigh(toDecimal(row.get(3).asText()));
@@ -355,6 +358,14 @@ public class TencentClient {
         private BigDecimal pct;
         /** 盘中最低涨幅 %，用于判「触板没触板」。 */
         private BigDecimal lowPct;
+        /**
+         * 上游这次返回所用的复权版本号（{@code data.version}）。
+         *
+         * <p>前复权价不是静态值：分红送股会让上游把历史整段重算，而这个号就是重算后的版本。
+         * 落库时随行存下来，读一段时用它判断"这几根是不是同一批复权基准下算出来的"——
+         * 一段里出现两种号说明是不同时间拉的段拼在一起的，衔接处会有一次凭空的假跳变。
+         */
+        private String fqVersion;
     }
 
     /** 包级可见，便于用 fixture 离线单测。 */

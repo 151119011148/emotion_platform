@@ -75,20 +75,23 @@ public class HighEcoMetricsService {
 
     private final MarketStockMapper marketStockMapper;
     private final AnchorService anchorService;
-    /** 补阵眼当日涨跌幅用的日 K 客户端；测试构造（无客户端）时为 null，补数那一步整体跳过。 */
+    /** 补阵眼当日涨跌幅用的日 K 取数；测试构造（无客户端）时为 null，补数那一步整体跳过。 */
+    private final DailyBarService dailyBarService;
+    /** 实时快照兜底用的行情客户端；同上传入为 null 时跳过。 */
     private final TencentClient tencent;
 
     @Autowired
     public HighEcoMetricsService(MarketStockMapper marketStockMapper, AnchorService anchorService,
-                                 TencentClient tencent) {
+                                 DailyBarService dailyBarService, TencentClient tencent) {
         this.marketStockMapper = marketStockMapper;
         this.anchorService = anchorService;
+        this.dailyBarService = dailyBarService;
         this.tencent = tencent;
     }
 
     /** 测试可见：不连行情源的构造，日 K 补涨跌幅自动跳过。 */
     HighEcoMetricsService(MarketStockMapper marketStockMapper, AnchorService anchorService) {
-        this(marketStockMapper, anchorService, null);
+        this(marketStockMapper, anchorService, null, null);
     }
 
     /** 取数结果：metrics 进引擎，vo 直接给 /api/d5/high。 */
@@ -152,7 +155,7 @@ public class HighEcoMetricsService {
      * 补的是纯展示字段，不进 metrics，因此不影响 D5 任何评分。
      */
     private void backfillAnchorChg(LocalDate date, List<HighEcoVO.AnchorItem> items) {
-        if (tencent == null || date == null || items == null || items.isEmpty()) {
+        if (dailyBarService == null || date == null || items == null || items.isEmpty()) {
             return;
         }
         List<HighEcoVO.AnchorItem> missing = new ArrayList<>();
@@ -165,7 +168,7 @@ public class HighEcoMetricsService {
                 continue;
             }
             try {
-                List<TencentClient.DayBar> bars = tencent.dailyBars(symbol, date, date);
+                List<TencentClient.DayBar> bars = dailyBarService.bars(symbol, date, date);
                 if (bars != null) {
                     for (TencentClient.DayBar bar : bars) {
                         if (bar != null && date.equals(bar.getDate()) && bar.getPct() != null) {
