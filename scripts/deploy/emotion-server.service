@@ -1,0 +1,26 @@
+[Unit]
+Description=Emotion Platform Server (Spring Boot)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=emotion
+WorkingDirectory=/opt/emotion
+EnvironmentFile=/etc/emotion/emotion.env
+# current 是指向 releases/<时间戳> 的软链，回滚就是把软链指回上一版再 restart
+ExecStart=/usr/bin/java -Xms256m -Xmx900m \
+  -Dfile.encoding=UTF-8 -Duser.timezone=Asia/Shanghai \
+  -jar /opt/emotion/current/emotion-server.jar \
+  --spring.profiles.active=prod
+# 行情拉取是定时任务，挂了要自己爬起来；但别无限重启刷日志
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=0
+SuccessExitStatus=143
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=emotion-server
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,42 @@
+name: deploy
+
+# 方案三：push 到 main 就自动构建 + 发到阿里云 ECS。
+# 需要在仓库 Settings → Secrets 里配三个：
+#   ECS_HOST      ECS 公网 IP 或域名
+#   ECS_USER      登录用户名（server-init.sh 里那个部署用户）
+#   ECS_SSH_KEY   私钥全文（-----BEGIN OPENSSH PRIVATE KEY----- ... 一起贴进去）
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '8'
+          distribution: temurin
+          cache: maven
+          cache-dependency-path: emotion-server/pom.xml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: emotion-web/package-lock.json
+
+      - name: 构建 jar 与前端产物
+        run: bash scripts/deploy/build.sh
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.ECS_SSH_KEY }}
+
+      - name: 传到服务器并切版本
+        run: |
+          ssh-keyscan -H "${{ secrets.ECS_HOST }}" >> ~/.ssh/known_hosts
+          DEPLOY_HOST="${{ secrets.ECS_USER }}@${{ secrets.ECS_HOST }}" bash scripts/deploy/deploy.sh

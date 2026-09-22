@@ -1,0 +1,43 @@
+# 生产 profile：只写「和 local 不一样」的部分，其余继承 application.yml。
+# 启用方式：SPRING_PROFILES_ACTIVE=prod（systemd 的 EnvironmentFile 里已设）
+#
+# 真值一律走环境变量，不落库：MYSQL_IP / MYSQL_USERNAME / MYSQL_PASSWORD / JWT_SECRET
+# 都写在 /etc/emotion/emotion.env（chmod 600），application.yml 里只是 ${...} 占位。
+
+server:
+  port: 8080
+  # 走 nginx 反代时必须开：否则 Spring 把请求的 scheme/host 当成 http://127.0.0.1:8080，
+  # 重定向和生成的链接会漏成内网地址。
+  forward-headers-strategy: native
+
+spring:
+  flyway:
+    # 线上库只允许向前迁移，清库动作永远关着（继承值，这里显式再钉一次防误改）
+    clean-disabled: true
+
+mybatis-plus:
+  configuration:
+    # StdOutImpl 会把每条 SQL 打到 stdout；systemd 下 stdout 直连 journald，
+    # 线上行情刷新一天能刷出几百 MB 日志。生产关掉。
+    log-impl: org.apache.ibatis.logging.nolog.NoLoggingImpl
+
+logging:
+  level:
+    root: INFO
+    com.emotion: INFO
+    # Quartz 每个 trigger  firing 都打 INFO，开在 INFO 上纯粹是噪音
+    org.quartz: WARN
+    org.springframework.web: WARN
+
+# 行情刷新走的是外部 http，云端网络比本机稳，预算可以放宽一点
+market:
+  budget-ms: 15000
+  connect-timeout-ms: 2000
+  read-timeout-ms: 5000
+
+# 跨域白名单：nginx 同域部署时浏览器根本不发跨域请求，这条是给「前端单独起端口 /
+# 临时用 IP 直连 8080」留的口子。填实际访问地址，多个用逗号分隔，不要写 *（配了
+# allowCredentials(true) 之后 * 会被浏览器直接拒）。
+emotion:
+  cors:
+    origins: ${EMOTION_CORS_ORIGINS:http://127.0.0.1:8080}

@@ -2,6 +2,8 @@
 target/
 node_modules/
 dist/
+# 部署产物（scripts/deploy/build.sh 归集出来的一坨，只在本地/CI 上临时存在）
+dist-deploy/
 
 # 本地凭据。application.yml 里只有 ${MYSQL_PASSWORD:} / ${JWT_SECRET:} 两个占位，
 # 真值在这一份；文件名不带路径，将来换目录也不漏。填法见 application-local.yml.example。
