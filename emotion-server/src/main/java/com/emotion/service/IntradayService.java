@@ -54,15 +54,18 @@ public class IntradayService {
     private final MarketStockMapper marketStockMapper;
     private final StockConceptMapper stockConceptMapper;
     private final ThemeSnapshotService themeSnapshotService;
+    private final IndustryClassifyService industryClassify;
 
     public IntradayService(ThemeMapper themeMapper, ThemeStockMapper themeStockMapper,
                            MarketStockMapper marketStockMapper, StockConceptMapper stockConceptMapper,
-                           ThemeSnapshotService themeSnapshotService) {
+                           ThemeSnapshotService themeSnapshotService,
+                           IndustryClassifyService industryClassify) {
         this.themeMapper = themeMapper;
         this.themeStockMapper = themeStockMapper;
         this.marketStockMapper = marketStockMapper;
         this.stockConceptMapper = stockConceptMapper;
         this.themeSnapshotService = themeSnapshotService;
+        this.industryClassify = industryClassify;
     }
 
     // ================= 自动回填 =================
@@ -109,6 +112,9 @@ public class IntradayService {
         List<MarketStock> zt = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
                 .eq(MarketStock::getTradeDate, date)
                 .eq(MarketStock::getPool, MarketStock.POOL_LIMIT_UP));
+        if (industryClassify != null) {
+            industryClassify.apply(zt);
+        }
         if (zt.isEmpty()) {
             return 0;
         }
@@ -199,6 +205,9 @@ public class IntradayService {
         List<MarketStock> zt = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
                 .eq(MarketStock::getTradeDate, date)
                 .eq(MarketStock::getPool, MarketStock.POOL_LIMIT_UP));
+        if (industryClassify != null) {
+            industryClassify.apply(zt);
+        }
         Map<String, MarketStock> byCode = new HashMap<>();
         for (MarketStock s : zt) {
             byCode.put(s.getCode(), s);
@@ -288,7 +297,7 @@ public class IntradayService {
         return vo;
     }
 
-    /** 把一个题材的全部绑定行加工成一行：只统计主题材；辅题材仅影响梯队展示。 */
+    /** 把一个题材的全部绑定行加工成一行：ztCount 取该概念今日<b>全部涨停成员</b>（原始成员计数，一票入多概念时各概念都计，对齐通达信）。is_primary 仍用于 aggregate 的"已覆盖"统计与连续活跃天数。 */
     private IntradayVO.ThemeRow buildRow(List<ThemeStock> binds, Map<String, MarketStock> byCode,
                                          String themeName, Integer hardness, String status,
                                          boolean mainLine, TreeMap<LocalDate, Integer> dailyPrimary,
@@ -309,9 +318,6 @@ public class IntradayService {
         Set<String> industries = new java.util.TreeSet<>();
         MarketStock leader = null;
         for (ThemeStock ts : binds) {
-            if (ts.getIsPrimary() == null || ts.getIsPrimary() != 1) {
-                continue;
-            }
             MarketStock s = byCode.get(ts.getCode());
             if (s == null) {
                 continue;
@@ -499,6 +505,9 @@ public class IntradayService {
         List<MarketStock> zt = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
                 .eq(MarketStock::getTradeDate, date)
                 .eq(MarketStock::getPool, MarketStock.POOL_LIMIT_UP));
+        if (industryClassify != null) {
+            industryClassify.apply(zt);
+        }
         List<ThemeStockVO.StockLine> out = new ArrayList<>();
         for (MarketStock s : zt) {
             if (bound.contains(s.getCode())) {
@@ -533,6 +542,9 @@ public class IntradayService {
         List<MarketStock> zt = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
                 .eq(MarketStock::getTradeDate, date)
                 .eq(MarketStock::getPool, MarketStock.POOL_LIMIT_UP));
+        if (industryClassify != null) {
+            industryClassify.apply(zt);
+        }
         Map<String, MarketStock> byCode = new HashMap<>();
         for (MarketStock s : zt) {
             byCode.put(s.getCode(), s);

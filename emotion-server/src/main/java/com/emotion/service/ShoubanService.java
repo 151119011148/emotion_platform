@@ -31,9 +31,11 @@ public class ShoubanService {
     private static final ZoneId CN = ZoneId.of("Asia/Shanghai");
 
     private final MarketStockMapper marketStockMapper;
+    private final IndustryClassifyService industryClassify;
 
-    public ShoubanService(MarketStockMapper marketStockMapper) {
+    public ShoubanService(MarketStockMapper marketStockMapper, IndustryClassifyService industryClassify) {
         this.marketStockMapper = marketStockMapper;
+        this.industryClassify = industryClassify;
     }
 
     public ShoubanVO vo(Long userId, LocalDate requested) {
@@ -177,8 +179,10 @@ public class ShoubanService {
     }
 
     private List<MarketStock> listPool(LocalDate date, String pool) {
-        return marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
+        List<MarketStock> rows = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
                 .eq(MarketStock::getTradeDate, date)
                 .eq(MarketStock::getPool, pool));
+        industryClassify.apply(rows);
+        return rows;
     }
 }
