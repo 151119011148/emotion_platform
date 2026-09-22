@@ -134,11 +134,11 @@ footer{margin-top:40px;padding-top:18px;border-top:1px solid var(--line);color:v
       <div class="desc">将「身位板」与「节点票」两条短线审美原则产品化：可配置规则、可回溯回测、可每日自动产出候选池。
         v1.1 已使用 emotion_platform 生产库真实数据对全部默认阈值完成回归标定。</div>
       <div class="chips">
-        <span class="chip">版本 v1.1</span>
-        <span class="chip">2026-09-21</span>
+        <span class="chip">版本 v1.2</span>
+        <span class="chip">2026-09-22</span>
         <span class="chip">状态：待评审</span>
         <span class="chip">宿主：emotion_platform 策略层模块</span>
-        <span class="chip">数据基准：2026-08-20 ~ 2026-09-21 / 19 个交易日</span>
+        <span class="chip">数据基准：2026-08-20 ~ 2026-09-21 / 19 个交易日（含情绪温度联合回测）</span>
       </div>
     </div>
 
@@ -220,6 +220,8 @@ footer{margin-top:40px;padding-top:18px;border-top:1px solid var(--line);color:v
             <tr><td class="ctr">C5</td><td>自定义 Python 脚本能力从 v1 范围降级为「延后 + 外部 Webhook 替代」</td><td class="ctr"><span class="b b-red">移除</span></td><td>任意代码执行等同服务端提权，见 <a href="#s9">§9.4</a></td></tr>
             <tr><td class="ctr">C6</td><td>新增数据模型、API、调度、异常分支、验收用例章节</td><td class="ctr"><span class="b b-green">新增</span></td><td>工程落地所需</td></tr>
             <tr><td class="ctr">C7</td><td>所有示例数据替换为生产库真实数据</td><td class="ctr"><span class="b b-green">新增</span></td><td>可复算、可验收</td></tr>
+            <tr><td class="ctr">C8</td><td>接入 <code>t_daily_record</code> 情绪温度作为<strong>择时/仓位</strong>输入（不做个股筛选），新增 §12.4 联合回测</td><td class="ctr"><span class="b b-green">新增</span></td><td><a href="#s12">§12.4</a> 方差分解：温度只能解释日间 11% 的收益方差</td></tr>
+            <tr><td class="ctr">C9</td><td><code>filter_min_amount</code> 由「1.0 亿硬剔」改为「0.5 亿 + MARK」，并把成交额纳入负向评分</td><td class="ctr"><span class="b b-amber">修改</span></td><td><a href="#s12">§12.4</a> 因子实测：成交额 IC −0.285</td></tr>
           </tbody>
         </table>
       </div>
@@ -345,6 +347,7 @@ footer{margin-top:40px;padding-top:18px;border-top:1px solid var(--line);color:v
             <tr><td>交易日历</td><td><code>t_trading_holidays</code> + <code>utils/tradingCalendar.js</code></td><td>交易日 = 周一~周五 且 不在休市表</td><td class="ctr"><span class="b b-green">就绪</span></td></tr>
             <tr><td>人工节点标记（对照）</td><td><code>t_node_event</code> + <code>NodeService</code></td><td>现有复盘链路的人工节点，作为策略的对照与覆盖输入</td><td class="ctr"><span class="b b-green">就绪</span></td></tr>
             <tr><td>总龙头 / 周期阵眼</td><td><code>t_manual_leader</code> / <code>t_anchor</code></td><td><code>degrade_on_dragon_death</code> 判据</td><td class="ctr"><span class="b b-green">就绪</span></td></tr>
+            <tr><td>每日情绪温度（九维打分）</td><td><code>t_daily_record</code></td><td><code>temperature, prev_temperature, stage, stage_direction, signal_flags, score_height, score_premium, score_breadth</code>；择时与仓位输入，见 <a href="#s12">§12.4</a></td><td class="ctr"><span class="b b-amber">依赖人工复盘</span></td></tr>
             <tr><td>上市日期（新股过滤）</td><td><span class="b b-red">缺</span></td><td><code>t_stock</code> 无 <code>listed_at</code> 字段</td><td class="ctr"><span class="b b-red">需补列</span></td></tr>
           </tbody>
         </table>
@@ -614,6 +617,23 @@ risk_penalty：一字缩量（换手&lt;2% 且成交额&lt;filter_min_amount）=
 suggest_position = max_position_per_stock × (score / 当日最高分) × (存在风险标记时 × 0.5)</div>
       <p class="small">所有 W_* 均为可配置项。v1.1 先把「与原配置项一一对应」的结构立起来，权重初值取经验值；
         上线运行 20 个交易日后，用 <code>t_candidate_t1</code> 的实际收益数据回归修订。</p>
+
+      <div class="callout c-warn">
+        <div class="ttl">v1.2 调整：因子方向已由回测锁定（依据 <a href="#s12">§12.4.5</a>）</div>
+        <p style="margin:4px 0 6px">上式权重是经验值。226 条真实样本的单因子实测给出三条必须修正的方向：</p>
+        <ul style="margin:0 0 6px">
+          <li><strong><code>W_board</code> 应下调，封单强度必须补进来。</strong>连板数对次日收益的秩相关仅 <strong>+0.100</strong>，
+            是候选因子里最弱的一档；而 <code>封单额 / 成交额</code> 的秩相关为 <strong>+0.308</strong>，是全部因子里最强的一个。
+            一级因子排序建议改为：<code>封单强度 &gt; 成交额（负向） &gt; 连板数 &gt; 封板时序</code>。</li>
+          <li><strong>成交额是负向项，不是正向过滤项。</strong>其 IC 为 <strong>−0.285</strong>
+            （低半组 +4.06% / 胜率 70.6%，高半组 +2.65% / 59.1%）。v1.1 把它做成「≥1 亿才要」，方向正好相反，
+            已同步修正 <code>filter_min_amount</code> 默认值与冲突策略（§17）。</li>
+          <li><strong>情绪温度不进个股评分。</strong>它是市场级变量，同日全部候选共享同一取值，
+            对「选哪只」没有区分度（§12.4.3），只参与仓位计算（<code>position_scale_by_temperature</code>）。</li>
+        </ul>
+        <p style="margin:0">具体权重数值待第二批标定（需 ≥40 个交易日样本 + 分温度环境分组回归），
+          本版只锁定<strong>因子方向与量级排序</strong>，避免再一次把方向做反。</p>
+      </div>
 
       <h3>6.3 真实样例：2026-09-21 候选池</h3>
       <p class="small">当日标定为<strong>切换日</strong>；<code>max_board_of_day = 5</code>；基准分（当日最高分）= 0.80；单票上限 5%。</p>
@@ -1109,20 +1129,23 @@ suggest_position = max_position_per_stock × (score / 当日最高分) × (存�
             <tr><td>600127</td><td>金健米业</td><td class="ctr">2</td><td>农产品加工</td><td class="ctr num" style="color:#b91c1c">+9.99%</td><td class="ctr"><span class="b b-red">晋级 3 板</span></td></tr>
             <tr><td>600448</td><td>华纺股份</td><td class="ctr">2</td><td>纺织制造</td><td class="ctr num" style="color:#b91c1c">+9.89%</td><td class="ctr"><span class="b b-red">晋级 3 板</span></td></tr>
             <tr><td>600630</td><td>龙头股份</td><td class="ctr">2</td><td>服装家纺</td><td class="ctr num" style="color:#b91c1c">+10.01%</td><td class="ctr"><span class="b b-red">晋级 3 板</span></td></tr>
-            <tr><td>603248</td><td>锡华科技</td><td class="ctr">4</td><td>风电设备</td><td class="ctr num" style="color:#047857">−3.62%</td><td class="ctr"><span class="b b-green">未连板</span></td></tr>
-            <tr><td>002836</td><td>新宏泽</td><td class="ctr">2</td><td>包装印刷</td><td class="ctr num" style="color:#047857">−3.86%</td><td class="ctr"><span class="b b-green">未连板</span></td></tr>
-            <tr><td>301390</td><td>经纬股份</td><td class="ctr">2</td><td>工程咨询</td><td class="ctr num" style="color:#047857">−5.83%</td><td class="ctr"><span class="b b-green">未连板</span></td></tr>
-            <tr><td>603626</td><td>科森科技</td><td class="ctr">2</td><td>消费电子</td><td class="ctr num" style="color:#047857">−0.56%</td><td class="ctr"><span class="b b-green">未连板</span></td></tr>
+            <tr><td>603248</td><td>锡华科技</td><td class="ctr">4</td><td>风电设备</td><td class="ctr num" style="color:#047857">−1.30%</td><td class="ctr"><span class="b b-green">未连板</span></td></tr>
+            <tr><td>002836</td><td>新宏泽</td><td class="ctr">2</td><td>包装印刷</td><td class="ctr num" style="color:#b91c1c">+0.50%</td><td class="ctr"><span class="b b-green">未连板</span></td></tr>
+            <tr><td>301390</td><td>经纬股份</td><td class="ctr">2</td><td>工程咨询</td><td class="ctr num" style="color:#047857">−6.69%</td><td class="ctr"><span class="b b-green">未连板</span></td></tr>
+            <tr><td>603626</td><td>科森科技</td><td class="ctr">2</td><td>消费电子</td><td class="ctr num" style="color:#047857">−0.30%</td><td class="ctr"><span class="b b-green">未连板</span></td></tr>
           </tbody>
         </table>
       </div>
       <div class="grid3" style="margin-top:12px">
         <div class="stat"><div class="lab">晋级成功率</div><div class="val" style="color:#b91c1c">8 / 12 · 66.7%</div></div>
-        <div class="stat"><div class="lab">平均涨幅</div><div class="val">+5.50%</div></div>
-        <div class="stat"><div class="lab">盈亏比（均盈 9.98% / 均亏 3.47%）</div><div class="val">2.88</div></div>
+        <div class="stat"><div class="lab">平均涨幅</div><div class="val">+6.01%</div></div>
+        <div class="stat"><div class="lab">盈亏比（均盈 8.93% / 均亏 2.76%）</div><div class="val">3.23</div></div>
       </div>
-      <p class="small">失败样本明细：锡华科技 −3.62%、新宏泽 −3.86%、经纬股份 −5.83%、科森科技 −0.56%。
-        注意 4 板高位（锡华科技）与 2 板低位（经纬股份）都有失败案例，说明<strong>单靠身位高度不足以过滤风险</strong>，
+      <p class="small">受挫样本明细（已按 <code>t_zt_perf</code> 的 QUOTE 口径与腾讯 qfq 日 K 双向复核）：
+        <strong>经纬股份 −6.69%</strong>、锡华科技 −1.30%、科森科技 −0.30%；新宏泽为 <strong>+0.50%</strong>
+        （未连板但收红，不计入亏损样本）。真正的重挫只有 1 只，其余 2 只属平盘级回撤。
+        4 板高位（锡华科技）与 2 板低位（经纬股份）都有受挫案例，<strong>单靠身位高度不足以过滤风险</strong>——
+        本次回测给出量化依据：连板数对次日收益的秩相关仅 <strong>+0.100</strong>（见 <a href="#s12">§12.4</a> 因子表）。
         这也是 §6 引入多因子评分而非仅按连板数排序的原因。</p>
 
       <h3>12.3 复盘指标定义</h3>
@@ -1143,6 +1166,205 @@ suggest_position = max_position_per_stock × (score / 当日最高分) × (存�
         <div class="ttl">最重要的一条</div>
         <p style="margin:4px 0 0">把「规则触发频次」做成<strong>常驻功能</strong>而不是一次性分析。v1.0 那三条规则的失效，
           如果有这个视图，第一周就能被发现。建议在配置界面与周期报里都默认展示 recent 20 日的触发次数。</p>
+      </div>
+
+      <h3>12.4 情绪温度 × 身位板：联合回测（v1.2 新增）</h3>
+      <p>宿主系统已有一套<strong>九维情绪打分引擎</strong>（<code>TemperatureCalculator</code>）：九个维度各取 −3 ~ +3，
+        按权重加权后线性映射成 <strong>0~100 的情绪温度</strong>，每日落库到 <code>t_daily_record.temperature</code>，
+        并按 40 / 60 / 85 切出<strong>退潮 / 混沌 / 发酵 / 高潮</strong>四带。本节回答一个问题：
+        <strong>身位板的候选质量，能不能用情绪温度筛出来？</strong></p>
+
+      <div class="callout c-info">
+        <div class="ttl">回测口径（全部可复算）</div>
+        <ul style="margin:6px 0 0">
+          <li><strong>样本</strong>：2026-08-25 ~ 2026-09-21 共 19 个交易日，<code>t_market_stock</code> 涨停池中
+            <code>consecutive ≥ 2</code> 的全部个股（去重 153 只），有效样本 <strong>226 条</strong>。</li>
+          <li><strong>T+1 表现</strong>：腾讯 qfq 日 K 的 <code>close(T+1)/close(T) − 1</code>；「次日涨停」= T+1 出现在涨停池。
+            与 <code>t_zt_perf</code>（QUOTE 口径）交叉复核，2026-09-21 的 12 只逐只一致。</li>
+          <li><strong>无未来函数</strong>：T 日温度在 T 日收盘后算出，T+1 才交易。</li>
+          <li><strong>剔除</strong>：09-21 的 21 只候选无次日数据；09-15 三池缺失，09-14 的候选只有涨幅、无涨停判定。</li>
+        </ul>
+      </div>
+
+      <h4>12.4.1 日级明细：T 日温度 → T+1 身位候选整体表现</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>日期</th><th class="ctr">温度</th><th class="ctr">参与维数</th><th>阶段</th><th class="ctr">方向</th>
+            <th class="ctr">候选</th><th class="ctr">次日均涨</th><th class="ctr">胜率</th><th class="ctr">次日涨停率</th><th class="ctr">最差</th></tr></thead>
+          <tbody>
+            <tr><td>2026-08-25</td><td class="ctr num">62.5</td><td class="ctr">2</td><td>发酵</td><td class="ctr">上升</td><td class="ctr">9</td><td class="ctr num" style="color:#b91c1c">+2.90%</td><td class="ctr">55.6%</td><td class="ctr">33.3%</td><td class="ctr num" style="color:#047857">-5.67%</td></tr>
+            <tr><td>2026-08-26</td><td class="ctr num">64.6</td><td class="ctr">5</td><td>发酵</td><td class="ctr">横盘</td><td class="ctr">13</td><td class="ctr num" style="color:#b91c1c">+4.86%</td><td class="ctr">69.2%</td><td class="ctr">61.5%</td><td class="ctr num" style="color:#047857">-6.43%</td></tr>
+            <tr><td>2026-08-27</td><td class="ctr num">75.1</td><td class="ctr">5</td><td>发酵</td><td class="ctr">上升</td><td class="ctr">16</td><td class="ctr num" style="color:#b91c1c">+5.06%</td><td class="ctr">75.0%</td><td class="ctr">50.0%</td><td class="ctr num" style="color:#047857">-3.44%</td></tr>
+            <tr><td>2026-08-28</td><td class="ctr num">59.0</td><td class="ctr">5</td><td>混沌</td><td class="ctr">下降</td><td class="ctr">17</td><td class="ctr num" style="color:#b91c1c">+2.12%</td><td class="ctr">52.9%</td><td class="ctr">47.1%</td><td class="ctr num" style="color:#047857">-9.94%</td></tr>
+            <tr><td>2026-08-31</td><td class="ctr num">61.7</td><td class="ctr">5</td><td>退潮(强制)</td><td class="ctr">—</td><td class="ctr">18</td><td class="ctr num" style="color:#b91c1c">+5.65%</td><td class="ctr">83.3%</td><td class="ctr">50.0%</td><td class="ctr num" style="color:#047857">-9.04%</td></tr>
+            <tr><td>2026-09-01</td><td class="ctr num">—</td><td class="ctr">—</td><td>—</td><td class="ctr">—</td><td class="ctr">18</td><td class="ctr num" style="color:#b91c1c">+3.51%</td><td class="ctr">66.7%</td><td class="ctr">33.3%</td><td class="ctr num" style="color:#047857">-6.65%</td></tr>
+            <tr><td>2026-09-02</td><td class="ctr num">49.0</td><td class="ctr">5</td><td>混沌</td><td class="ctr">下降</td><td class="ctr">13</td><td class="ctr num" style="color:#b91c1c">+1.98%</td><td class="ctr">69.2%</td><td class="ctr">23.1%</td><td class="ctr num" style="color:#047857">-7.12%</td></tr>
+            <tr><td>2026-09-03</td><td class="ctr num">54.5</td><td class="ctr">5</td><td>退潮(强制)</td><td class="ctr">上升</td><td class="ctr">9</td><td class="ctr num" style="color:#047857">-0.89%</td><td class="ctr">33.3%</td><td class="ctr">11.1%</td><td class="ctr num" style="color:#047857">-9.99%</td></tr>
+            <tr><td>2026-09-04</td><td class="ctr num">42.5</td><td class="ctr">5</td><td>混沌</td><td class="ctr">下降</td><td class="ctr">7</td><td class="ctr num" style="color:#b91c1c">+7.19%</td><td class="ctr">85.7%</td><td class="ctr">57.1%</td><td class="ctr num" style="color:#047857">-3.48%</td></tr>
+            <tr><td>2026-09-07</td><td class="ctr num">72.2</td><td class="ctr">5</td><td>发酵</td><td class="ctr">—</td><td class="ctr">13</td><td class="ctr num" style="color:#b91c1c">+6.62%</td><td class="ctr">92.3%</td><td class="ctr">46.2%</td><td class="ctr num" style="color:#047857">-0.18%</td></tr>
+            <tr><td>2026-09-08</td><td class="ctr num">59.8</td><td class="ctr">5</td><td>混沌</td><td class="ctr">下降</td><td class="ctr">18</td><td class="ctr num" style="color:#b91c1c">+1.07%</td><td class="ctr">44.4%</td><td class="ctr">27.8%</td><td class="ctr num" style="color:#047857">-9.08%</td></tr>
+            <tr><td>2026-09-09</td><td class="ctr num">64.1</td><td class="ctr">5</td><td>发酵</td><td class="ctr">上升</td><td class="ctr">15</td><td class="ctr num" style="color:#047857">-0.45%</td><td class="ctr">53.3%</td><td class="ctr">20.0%</td><td class="ctr num" style="color:#047857">-10.02%</td></tr>
+            <tr><td>2026-09-10</td><td class="ctr num">47.9</td><td class="ctr">5</td><td>退潮(强制)</td><td class="ctr">下降</td><td class="ctr">9</td><td class="ctr num" style="color:#b91c1c">+0.38%</td><td class="ctr">55.6%</td><td class="ctr">33.3%</td><td class="ctr num" style="color:#047857">-9.86%</td></tr>
+            <tr><td>2026-09-11</td><td class="ctr num">60.1</td><td class="ctr">5</td><td>退潮(强制)</td><td class="ctr">横盘</td><td class="ctr">7</td><td class="ctr num" style="color:#b91c1c">+3.53%</td><td class="ctr">71.4%</td><td class="ctr">57.1%</td><td class="ctr num" style="color:#047857">-9.99%</td></tr>
+            <tr><td>2026-09-14</td><td class="ctr num">—</td><td class="ctr">—</td><td>—</td><td class="ctr">—</td><td class="ctr">11</td><td class="ctr num" style="color:#b91c1c">+3.35%</td><td class="ctr">63.6%</td><td class="ctr">0.0%</td><td class="ctr num" style="color:#047857">-6.06%</td></tr>
+            <tr><td>2026-09-16</td><td class="ctr num">—</td><td class="ctr">—</td><td>—</td><td class="ctr">—</td><td class="ctr">12</td><td class="ctr num" style="color:#b91c1c">+4.13%</td><td class="ctr">58.3%</td><td class="ctr">33.3%</td><td class="ctr num" style="color:#047857">-6.12%</td></tr>
+            <tr><td>2026-09-17</td><td class="ctr num">—</td><td class="ctr">—</td><td>—</td><td class="ctr">—</td><td class="ctr">9</td><td class="ctr num" style="color:#b91c1c">+3.88%</td><td class="ctr">66.7%</td><td class="ctr">44.4%</td><td class="ctr num" style="color:#047857">-2.79%</td></tr>
+            <tr><td>2026-09-18</td><td class="ctr num">67.6</td><td class="ctr">5</td><td>发酵</td><td class="ctr">上升</td><td class="ctr">12</td><td class="ctr num" style="color:#b91c1c">+6.01%</td><td class="ctr">75.0%</td><td class="ctr">66.7%</td><td class="ctr num" style="color:#047857">-6.69%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">可见：温度高的日子（08-27 75.1°、09-07 72.2°）次日表现确实更好（+5.06% / +6.62%）；
+        但温度最低的 09-04（42.5°）次日反而是全样本最好的 <strong>+7.19%</strong>（胜率 85.7%），
+        而 09-09（64.1° 发酵上升）次日是 <strong>−0.45%</strong>。温度与次日强弱并非简单正比。</p>
+
+      <h4>12.4.2 按温度分档（按「天」统计，避免同日样本伪独立）</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>温度档</th><th class="ctr">天数</th><th class="ctr">候选合计</th><th class="ctr">日级均涨</th>
+            <th class="ctr">日级胜率</th><th class="ctr">涨停率</th><th>涉及交易日</th></tr></thead>
+          <tbody>
+            <tr><td>T &lt; 55（混沌及以下）</td><td class="ctr">4</td><td class="ctr">38</td><td class="ctr num" style="color:#b91c1c">+2.16%</td><td class="ctr">61.0%</td><td class="ctr">31.2%</td><td class="small">09-02(49.0°)、09-03(54.5°)、09-04(42.5°)、09-10(47.9°)</td></tr>
+            <tr><td>55 ≤ T &lt; 60</td><td class="ctr">2</td><td class="ctr">35</td><td class="ctr num" style="color:#b91c1c">+1.59%</td><td class="ctr">48.7%</td><td class="ctr">37.4%</td><td class="small">08-28(59.0°)、09-08(59.8°)</td></tr>
+            <tr><td>60 ≤ T &lt; 70（发酵带）</td><td class="ctr">6</td><td class="ctr">74</td><td class="ctr num" style="color:#b91c1c">+3.75%</td><td class="ctr">68.0%</td><td class="ctr">48.1%</td><td class="small">08-25、08-26、08-31、09-09、09-11、09-18</td></tr>
+            <tr><td>T ≥ 70（发酵上沿 / 高潮）</td><td class="ctr">2</td><td class="ctr">29</td><td class="ctr num" style="color:#b91c1c">+5.84%</td><td class="ctr">83.7%</td><td class="ctr">48.1%</td><td class="small">08-27(75.1°)、09-07(72.2°)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">方向单调（温度越高、次日越强），但<strong>每档只有 2~6 天</strong>，
+        且 T ≥ 70 那档实际只由 08-27、09-07 两天构成。<strong>这不构成可用规律</strong>，只能视为方向性提示。</p>
+
+      <h4>12.4.3 能力边界：温度最多只能解释 11% 的收益方差</h4>
+      <div class="grid3">
+        <div class="stat"><div class="lab">日间（选时）方差贡献</div><div class="val">11.0%</div></div>
+        <div class="stat"><div class="lab">日内（选股）方差贡献</div><div class="val" style="color:#b91c1c">89.0%</div></div>
+        <div class="stat"><div class="lab">全样本 226 条</div><div class="val">均涨 +3.36% · σ 6.69</div></div>
+      </div>
+      <div class="callout c-bad">
+        <div class="ttl">这是本次回测最重要的一条</div>
+        <p>情绪温度是<strong>市场级同步变量</strong>：同一天的 7~21 只候选共享同一个温度，
+          它在数学上就不可能回答「这一天该买哪只」。身位板次日收益的方差里，
+          <strong>89% 来自同一批候选内部的离散</strong>，只有 11% 来自「哪一天做」。由此得出两条硬结论：</p>
+        <ul style="margin:6px 0 0">
+          <li><strong>温度无法替代个股评分</strong>——§6 的多因子评分不是可选优化，是必需品。</li>
+          <li><strong>个股评分也替代不了温度</strong>——那 11% 决定了仓位与波动，是组合层面的事。</li>
+        </ul>
+      </div>
+
+      <h4>12.4.4 温度有没有「增量信息」？和它的原料比</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>市场级变量</th><th class="ctr">样本（天）</th><th class="ctr">vs 次日均涨 Pearson</th><th class="ctr">Spearman</th></tr></thead>
+          <tbody>
+            <tr><td><strong>合成情绪温度 T</strong></td><td class="ctr">14</td><td class="ctr num">+0.280</td><td class="ctr num">+0.371</td></tr>
+            <tr><td>原始涨停家数（温度的 breadth / volume 原料）</td><td class="ctr">18</td><td class="ctr num" style="color:#b91c1c">+0.396</td><td class="ctr num">+0.366</td></tr>
+            <tr><td>当日最高连板数</td><td class="ctr">18</td><td class="ctr num">+0.236</td><td class="ctr num">+0.356</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">温度与涨停家数本身相关系数 <strong>+0.674</strong>——两者高度同源。
+        而<strong>原始涨停家数单独使用的相关性（+0.396）反而略高于合成后的温度（+0.280）</strong>。
+        也就是说，在「预测次日身位股收益」这个具体任务上，温度<strong>没有跑赢自己的原料</strong>。
+        这不构成「温度无用」的结论——它的设计目的本就不是预测个股次日收益，而是定位周期阶段、约束仓位与回撤（见 12.4.6）。
+        但它确实否掉了「把温度当成选股因子喂进评分公式」这个方案。</p>
+
+      <h4>12.4.5 那 89% 靠什么？单因子区分度实测（n = 226）</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th>因子</th><th class="ctr">n</th><th class="ctr">IC（秩相关）</th>
+            <th class="ctr">低半组均涨（胜率）</th><th class="ctr">高半组均涨（胜率）</th><th class="ctr">多空差</th></tr></thead>
+          <tbody>
+            <tr style="background:rgba(185,28,28,0.07)"><td>封单 / 成交额</td><td class="ctr">219</td><td class="ctr num"><strong>+0.308</strong></td><td class="ctr">+2.12% <span class="small">(56.0%)</span></td><td class="ctr">+4.58% <span class="small">(73.6%)</span></td><td class="ctr num">+2.46%</td></tr>
+            <tr><td>成交额（亿）</td><td class="ctr">219</td><td class="ctr num"><strong>-0.285</strong></td><td class="ctr">+4.06% <span class="small">(70.6%)</span></td><td class="ctr">+2.65% <span class="small">(59.1%)</span></td><td class="ctr num">−1.41%</td></tr>
+            <tr><td>换手率 %</td><td class="ctr">33</td><td class="ctr num"><strong>-0.223</strong></td><td class="ctr">+5.68% <span class="small">(87.5%)</span></td><td class="ctr">+3.86% <span class="small">(47.1%)</span></td><td class="ctr num">−1.82%</td></tr>
+            <tr><td>封单额（亿）</td><td class="ctr">226</td><td class="ctr num"><strong>+0.222</strong></td><td class="ctr">+2.38% <span class="small">(57.5%)</span></td><td class="ctr">+4.34% <span class="small">(72.6%)</span></td><td class="ctr num">+1.96%</td></tr>
+            <tr><td>首次封板时间</td><td class="ctr">34</td><td class="ctr num"><strong>+0.196</strong></td><td class="ctr">+3.37% <span class="small">(64.7%)</span></td><td class="ctr">+5.12% <span class="small">(70.6%)</span></td><td class="ctr num">+1.75%</td></tr>
+            <tr><td>情绪温度 T（市场级）</td><td class="ctr">176</td><td class="ctr num"><strong>+0.131</strong></td><td class="ctr">+2.21% <span class="small">(58.0%)</span></td><td class="ctr">+4.32% <span class="small">(72.7%)</span></td><td class="ctr num">+2.11%</td></tr>
+            <tr><td>连板数 board</td><td class="ctr">226</td><td class="ctr num"><strong>+0.100</strong></td><td class="ctr">+2.52% <span class="small">(61.9%)</span></td><td class="ctr">+4.20% <span class="small">(68.1%)</span></td><td class="ctr num">+1.68%</td></tr>
+            <tr><td>宽度分 b（市场级）</td><td class="ctr">176</td><td class="ctr num"><strong>+0.001</strong></td><td class="ctr">+2.72% <span class="small">(65.9%)</span></td><td class="ctr">+3.81% <span class="small">(64.8%)</span></td><td class="ctr num">+1.10%</td></tr>
+            <tr><td>流通市值（亿）</td><td class="ctr">33</td><td class="ctr num"><strong>-0.055</strong></td><td class="ctr">+4.54% <span class="small">(62.5%)</span></td><td class="ctr">+4.94% <span class="small">(70.6%)</span></td><td class="ctr num">+0.40%</td></tr>
+            <tr><td>高度分 h + 溢价分 p</td><td class="ctr">43</td><td class="ctr num"><strong>-0.159</strong></td><td class="ctr">+3.59% <span class="small">(66.7%)</span></td><td class="ctr">+0.82% <span class="small">(59.1%)</span></td><td class="ctr num">−2.77%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout c-warn">
+        <div class="ttl">三条直接改写配置默认值的发现</div>
+        <ol style="margin:6px 0 0">
+          <li><strong>连板数 IC 仅 +0.100</strong>——身位高度几乎是所有候选因子中最弱的一个。
+            这正是 <a href="#s12">§12.2</a> 那句「单靠身位高度不足以过滤风险」的量化证据。</li>
+          <li><strong>成交额 IC 为负（−0.285）</strong>：成交额越小的身位股，次日表现越好（低半组 +4.06% / 胜率 70.6%，
+            高半组 +2.65% / 59.1%）。这意味着 v1.1 的 <code>filter_min_amount = 1.0 亿</code>
+            <strong>方向是反的</strong>——它系统性地剔掉了表现更好的小成交额票。已下调为 0.5 亿并默认走 <code>MARK</code>（见 §17），
+            同时把成交额作为<strong>负向</strong>项纳入 §6 评分。</li>
+          <li><strong>封单 / 成交额是最强因子（IC +0.308，n = 219）</strong>，强度是温度的 2.3 倍。
+            它衡量的是「涨停被资金真实锁定」的程度，应当作为 §6 评分的第一大权重项。
+            <code>封单额</code>单用（+0.222）与<code>首次封板时间</code>（+0.196，越晚越好）可作为次级项。</li>
+        </ol>
+      </div>
+      <p class="small">口径说明：<code>换手率</code>、<code>流通市值</code>、<code>首次封板时间</code> 三项的 n 只有 33~34，
+        是因为 <code>t_market_stock</code> 中仅部分记录带这几个字段，样本不足，仅供参考，不与前四项同等采信。</p>
+
+      <h4>12.4.6 温度当「仓位旋钮」的组合回测</h4>
+      <p>规则：每日等权买入当日全部身位候选，次日收盘卖出；仓位系数由 T 日温度决定。
+        <strong>这是信号有效性检验，不是可实现收益</strong>——它假设在涨停价能足额买入、无滑点无冲击成本。</p>
+      <div class="tw">
+        <table>
+          <thead><tr><th>仓位规则</th><th class="ctr">有仓天数</th><th class="ctr">期末净值</th>
+            <th class="ctr">累计</th><th class="ctr">日均</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>P1 恒满仓（有温度的 14 天全做）</td><td class="ctr">14</td><td class="ctr num">1.5659</td><td class="ctr num" style="color:#b91c1c">+56.59%</td><td class="ctr num">+3.26%</td><td class="small">—</td></tr>
+            <tr><td>P2 T≥55 开仓，满仓</td><td class="ctr">10</td><td class="ctr num">1.4400</td><td class="ctr num" style="color:#b91c1c">+44.00%</td><td class="ctr num">+3.71%</td><td class="small">剔除 09-03 / 09-04 / 09-10 / 09-02</td></tr>
+            <tr><td>P3 T≥55 开仓，55~60 降为 6 成</td><td class="ctr">10</td><td class="ctr num">1.4220</td><td class="ctr num" style="color:#b91c1c">+42.20%</td><td class="ctr num">+3.58%</td><td class="small">同上</td></tr>
+            <tr><td>P5 T≥60 开仓</td><td class="ctr">8</td><td class="ctr num">1.3952</td><td class="ctr num" style="color:#b91c1c">+39.52%</td><td class="ctr num">+4.24%</td><td class="small">再剔 08-28 / 09-08</td></tr>
+            <tr><td>P4 线性仓位 (T−40)/30 截断 0~1</td><td class="ctr">14</td><td class="ctr num">1.3725</td><td class="ctr num" style="color:#b91c1c">+37.25%</td><td class="ctr num">+2.29%</td><td class="small">不空仓，只调权重</td></tr>
+            <tr><td>P6 T≥60 开仓，半仓</td><td class="ctr">8</td><td class="ctr num">1.1837</td><td class="ctr num" style="color:#b91c1c">+18.37%</td><td class="ctr num">+2.13%</td><td class="small">同上</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">读法与结论：<strong>温度过滤提高了单日质量，但降低了总收益</strong>——
+        T≥60 才做，日均从 +3.26% 升到 +4.24%，累计却从 +56.59% 掉到 +39.52%。
+        原因是它剔掉的日子里包含 09-04（42.5°，次日 +7.19%）这种「冰点修复日」，
+        而冰点期恰恰是身位板<strong>赔率最高</strong>的位置。
+        所以<strong>温度不是「做不做」的开关</strong>（简单的「低温就不做」在样本内是负贡献），
+        而是<strong>「用多大仓位、准备承担多大波动」的调节器</strong>：
+        温度低 → 胜率低但赔率高，小仓位试错；温度高 → 胜率高但空间收窄，可上仓位但需防高位抱团瓦解。</p>
+
+      <h4>12.4.7 与 2026-09-18 那 12 只候选的对照</h4>
+      <p>09-18 温度 67.6°、发酵带、方向上升，九维中 <code>height = −1</code>（最高板 3~4 板）、
+        <code>premium = −1</code>（分档溢价为负）、<code>breadth = 2</code>、<code>loss = 3</code>——
+        这是一个<strong>「宽度撑起来的温暖」</strong>：涨停家数高（78 家）、大面少，但高度与溢价两个决定接力赚钱效应的维度都是负的。
+        实际结果 12 只中 8 只晋级（66.7%），与该温度档的历史胜率 68.0% 吻合度极高（差 1.3 个百分点）。</p>
+      <div class="callout c-ok">
+        <div class="ttl">温度做对了什么、没做什么</div>
+        <p style="margin:4px 0 0">温度<strong>正确给出了这天的成功概率</strong>（约 2/3），
+          也正确提示了这天的性质（发酵带上升，不是退潮）；
+          但它<strong>无法指出失败的会是哪几只</strong>——12 只共享同一个温度，温度对它们没有任何区分度。
+          失败的 3 只（经纬股份 −6.69%、锡华科技 −1.30%、科森科技 −0.30%）与成功的 9 只在
+          成交额、换手、封单强度上都<strong>没有统计上显著的分野</strong>（封单/成交额：受挫组 60% vs 成功组 18%，
+          方向甚至与全样本 IC 相反，属单日噪声）。
+          <strong>结论：择时交给温度，选股交给个股因子，两者不可互相替代。</strong></p>
+      </div>
+
+      <h4>12.4.8 对本文档其他章节的影响</h4>
+      <div class="tw">
+        <table>
+          <thead><tr><th class="ctr" style="width:60px">章节</th><th>调整</th><th style="width:200px">依据</th></tr></thead>
+          <tbody>
+            <tr><td class="ctr">§3.2</td><td>数据源新增 <code>t_daily_record</code>（情绪温度），标注为<strong>择时输入、非选股输入</strong></td><td>12.4.3 方差分解</td></tr>
+            <tr><td class="ctr">§6</td><td>评分公式的一级因子改为「封单/成交额」，成交额改为负向项；<strong>温度不进个股评分</strong></td><td>12.4.5 因子 IC</td></tr>
+            <tr><td class="ctr">§6 / §17</td><td>新增 <code>position_scale_by_temperature</code>：按温度档给出建议仓位系数（默认 55~60 → 0.6、60~70 → 0.8、≥70 → 1.0、&lt;55 → 0.5），<strong>只降不做 0</strong></td><td>12.4.6 组合回测</td></tr>
+            <tr><td class="ctr">§13</td><td>新增异常分支：「T 日无情绪温度记录」时，候选池照常产出，但<code>suggest_position</code> 置空并标 <code>NO_TEMPERATURE</code>，不按 0 仓位处理</td><td>温度依赖人工复盘</td></tr>
+            <tr><td class="ctr">§17</td><td><code>filter_min_amount</code>：1.0 → <strong>0.5</strong>，默认策略 <code>MARK</code></td><td>12.4.5 IC −0.285</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout c-warn">
+        <div class="ttl">落地障碍（必须在 v1 就设计好）</div>
+        <p style="margin:4px 0 0">情绪温度<strong>不是纯自动产物</strong>：<code>TemperatureCalculator</code> 中
+          <code>manual_first_sealed_rate</code>（首板封板率）、<code>manual_top_high_break</code>（极高位爆量断板）、
+          <code>manual_anchor_supervision_discount</code> 等子指标必须人工填写。
+          实测 19 个交易日里<strong>只有 14 天有温度</strong>（09-01、09-14~09-17 缺），且早期记录只有 1~2 个维度参与打分。
+          因此：<strong>温度只能当「锦上添花」的仓位调节项，不能作为候选池产出的前置条件</strong>，
+          否则用户某天没复盘，当天就整片不可用。</p>
       </div>
     </section>
 
@@ -1167,6 +1389,8 @@ suggest_position = max_position_per_stock × (score / 当日最高分) × (存�
             <tr><td>F12</td><td>重复运行同一交易日</td><td>幂等：清当日候选后重插，运行记录累加保留</td><td>§8.4</td></tr>
             <tr><td>F13</td><td>候选人过多（超选拔率）</td><td>按评分截断并写 <code>CANDIDATE_TRUNCATED</code>，前端显式提示「已截断 N 只」</td><td>§5.4</td></tr>
             <tr><td>F14</td><td>跨月 / 跨年回 Lookback 越过数据起点</td><td>动态基准统计量样本不足时（不足 20 日）自动缩短窗口并在结果注明，<strong>不得静默用更少样本假装 20 日</strong></td><td>首次上线必然遇到</td></tr>
+            <tr><td>F15</td><td>当日无情绪温度记录</td><td>候选池<strong>照常产出</strong>；<code>suggest_position</code> 置空并标 <code>NO_TEMPERATURE</code>，
+              <strong>不得按 0 仓位或退潮处理</strong></td><td>温度含人工填报子指标，实测 19 个交易日中仅 14 天有值（<a href="#s12">§12.4.8</a>）</td></tr>
           </tbody>
         </table>
       </div>
@@ -1186,7 +1410,7 @@ suggest_position = max_position_per_stock × (score / 当日最高分) × (存�
             <tr><td>AC-5</td><td>切换日识别（收紧 B）回跑同期</td><td>命中 <strong>6 / 18</strong> 个交易日（08-27、08-28、08-31、09-01、09-08、09-21），误报率 33%</td></tr>
             <tr><td>AC-6</td><td>节点票选拔率控制</td><td>启动日 09-07 ≤ 10%（实测 9.7%，9 / 93）；分歧日 09-14 ≤ 20%（实测 16.4%，9 / 55）；切换日 09-21 ≥ 1%（实测 2.1%，2 / 96）</td></tr>
             <tr><td>AC-7</td><td>版本管理与回滚</td><td>改任一参数保存 → 产生新版本号；<code>config_json</code> 差异可在 diff 接口看到具体 key；回滚后 <code>current_version_id</code> 指向新版本、历史版本仍可查；重跑结果与原版本<strong>逐行一致</strong></td></tr>
-            <tr><td>AC-8</td><td>复盘链路完整性</td><td>以 2026-09-18 候选回看 09-21：12 只 ≥2 板候选中 <strong>8 只晋级（66.7%）</strong>、平均涨幅 <strong>+5.50%</strong>、盈亏比 <strong>2.88</strong>；晋级率/平均涨幅/盈亏比三项在 review 接口可直接取到</td></tr>
+            <tr><td>AC-8</td><td>复盘链路完整性</td><td>以 2026-09-18 候选回看 09-21：12 只 ≥2 板候选中 <strong>8 只晋级（66.7%）</strong>、平均涨幅 <strong>+6.01%</strong>、盈亏比 <strong>3.23</strong>；晋级率/平均涨幅/盈亏比三项在 review 接口可直接取到</td></tr>
             <tr><td>AC-9</td><td>幂等 &amp; 重跑</td><td>对同一 <code>(strategy_id, trade_date)</code> 连续运行 3 次：<code>t_candidate_stock</code> 行数不变（≤100 行），<code>t_strategy_run</code> 增到 3 行，每次 <code>version_id</code> 一致</td></tr>
             <tr><td>AC-10</td><td>调度幂等与 skip</td><td>把任务在非交易日触发 → <code>t_scheduler_run</code> 记 skip 且不写候选；缺数据时同样 skip 而非 FAILED</td></tr>
             <tr><td>AC-11</td><td>参数死分支检测</td><td>配置界面与 review 接口均能读到「近 20 日各规则触发次数」；把 <code>min_board_count</code> 临时改成 8 时，界面提示近 20 日命中 0 次</td></tr>
@@ -1278,7 +1502,7 @@ suggest_position = max_position_per_stock × (score / 当日最高分) × (存�
             <tr><td><code>max_select_rate</code></td><td>float</td><td><span class="b b-gray">无</span></td><td><code>0.15</code> <span class="b b-blue">新增</span></td></tr>
             <tr><td rowspan="4">过滤</td><td><code>filter_st</code></td><td>bool</td><td><code>true</code></td><td>不变</td></tr>
             <tr><td><code>filter_new_stock_days</code></td><td>int</td><td><code>30</code></td><td>暂用替代口径，待 <code>listed_at</code> 上线</td></tr>
-            <tr><td><code>filter_min_amount</code></td><td>float(亿)</td><td><code>1.0</code></td><td>不变</td></tr>
+            <tr><td><code>filter_min_amount</code></td><td>float(亿)</td><td><code>1.0</code></td><td><strong>下调至 0.5</strong> 且默认走 <code>MARK</code>：成交额对次日收益秩相关 <strong>−0.285</strong>（越小越好），见 <a href="#s12">§12.4</a></td></tr>
             <tr><td><code>filter_conflict_policy</code></td><td>enum</td><td><span class="b b-gray">无</span></td><td><code>MARK</code>（KEEP/DROP/MARK）<span class="b b-blue">新增</span></td></tr>
             <tr><td rowspan="2">排序</td><td><code>sort_by</code></td><td>enum</td><td><code>principle_count</code></td><td><code>weighted_score</code> <span class="b b-blue">C3</span></td></tr>
             <tr><td><code>score_weights</code></td><td>dict</td><td><span class="b b-gray">无</span></td><td><code>{board:0.50,position:0.30,node:0.20,timing:0.10,risk:0.20}</code> <span class="b b-blue">新增</span></td></tr>
