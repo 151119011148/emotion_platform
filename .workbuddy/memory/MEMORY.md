@@ -109,7 +109,7 @@
 - 判定前期与课程表 `t_premium_tier` 不一样：后者不含首板、只到 8+ 档；两者别混用。
 
 ## WaveRider（连板周期选股策略引擎）待办状态
-- PRD v1.1 已定稿在 `prd/WaveRider-PRD.html`，定位是 emotion_platform 的策略层模块，**尚未写任何代码**。
+- PRD v1.1 已定稿在 `../../prd/短线连板周期选股策略引擎/短线连板周期选股策略引擎-PRD.html`，定位是 emotion_platform 的策略层模块，**尚未写任何代码**。
 - 迁移预留 **V29**（t_strategy / t_strategy_version / t_strategy_template / t_strategy_run / t_node_detect / t_candidate_stock / t_candidate_t1）+ **V30**（waveriderDailyScanTask 排班）。V28 已被 position_quantity 占用。
 - 两条硬经验（做别的功能也适用）：①**节点/阈值类规则必须配「近 20 日触发次数」面板**，否则参数变成死分支没人知道（v1.0 三条规则就是这么失效的）；②**写死的绝对阈值几乎必然过期**，凡涉及市场量级的都要有「动态基准（近 N 日分位数）」模式。
 
