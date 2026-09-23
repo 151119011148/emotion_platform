@@ -46,6 +46,15 @@ public class NodeVO extends NodeEvent {
     /** 监管说明：谁、哪类、公告日。 */
     private String surveillanceDesc;
 
+    // ---- 节点类型展示（读时派生，不入库）----
+    /**
+     * nodeType 的中文展示名：破局日·观察 / 破局次日·出手 / 启动日 / 切换日 / 分歧日。
+     *
+     * <p>查不到就返回 null，前端显示「未识别」。这里刻意不回落任何兜底文案——
+     * 「未识别」是事实陈述，「普通节点」是反义定义，两者不是一回事。
+     */
+    private String nodeTypeLabel;
+
     // ---- T+1 自动判定（仅 getCurrent 填充；list 里为空）----
     /** 平台按盘面自动复算的建议；已 ready 时后端已把结论写进 status_note 并记为"待采纳"。 */
     private NodeSuggestVO suggestion;

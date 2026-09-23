@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>节点追踪页 · 空间破局节点改造预览</title>
+<style>
+:root{
+  --bg:#0f1419; --card:#1a2332; --panel:#0f1419; --border:#2a3a52; --border2:#2b3a4a;
+  --text:#e1e8ed; --text2:#c6d2de; --muted:#8899a6; --muted2:#5f7488; --dim:#5c6e84;
+  --gold:#ffd166; --green:#52b06a; --red:#f87171; --amber:#e6a23c; --blue:#60a5fa;
+  --sb:#a78bfa;  --sb-bg:rgba(167,139,250,.15);
+  --nxt:#34d399; --nxt-bg:rgba(52,211,153,.13);
+  --fail:#fb923c;--fail-bg:rgba(251,146,60,.13);
+  --hover:#22303f;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:-apple-system,"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
+  font-size:14px; line-height:1.6; padding-bottom:60px;
+}
+/* ---------- 原型说明条 / 场景切换 ---------- */
+.mockbar{
+  background:#141d28; border-bottom:1px solid var(--border); padding:10px 0;
+  position:sticky; top:0; z-index:50;
+}
+.mockbar-in{ max-width:1060px; margin:0 auto; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.mockbar .t{ color:var(--gold); font-size:12px; font-weight:600; white-space:nowrap; }
+.mockbar .d{ color:var(--muted2); font-size:11px; }
+.tabs{ display:flex; gap:6px; flex-wrap:wrap; }
+.tab{
+  background:#0f1720; border:1px solid var(--border); color:var(--muted);
+  padding:5px 12px; border-radius:6px; font-size:12px; cursor:pointer; transition:.15s;
+}
+.tab:hover{ border-color:#3d5470; color:var(--text2); }
+.tab.on{ background:rgba(255,209,102,.12); border-color:var(--gold); color:var(--gold); font-weight:600; }
+.switch{ margin-left:auto; display:flex; align-items:center; gap:6px; color:var(--muted); font-size:12px; cursor:pointer; }
+.switch input{ accent-color:var(--gold); cursor:pointer; }
+
+/* ---------- 页面容器（复刻 .node-page） ---------- */
+.node-page{ max-width:1060px; margin:0 auto; padding:24px 20px 0; }
+.page-header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+.page-header h2{ margin:0; color:var(--text); font-size:22px; font-weight:600; }
+.btn{ border-radius:6px; padding:8px 16px; font-size:13px; cursor:pointer; border:1px solid var(--border); }
+.btn.primary{ background:#409eff; border-color:#409eff; color:#fff; }
+.btn.ghost{ background:transparent; color:var(--text2); }
+.btn.sm{ padding:5px 11px; font-size:12px; }
+
+/* ---------- 新增①：破局状态条 ---------- */
+.sb-bar{
+  background:var(--card); border:1px solid var(--border); border-radius:12px;
+  padding:14px 18px; margin-bottom:20px;
+}
+.sb-head{ display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.sb-head .t{ color:var(--text); font-size:13px; font-weight:600; }
+.sb-head .s{ color:var(--muted2); font-size:11px; }
+.sb-grid{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+.sb-cell{ background:#0f1720; border:1px solid var(--border2); border-radius:8px; padding:10px 12px; }
+.sb-cell .k{ display:block; color:var(--muted); font-size:11px; margin-bottom:4px; }
+.sb-cell .v{ color:var(--text); font-size:15px; font-weight:600; line-height:1.35; }
+.sb-cell .sub{ display:block; color:var(--muted2); font-size:11px; font-weight:400; margin-top:2px; }
+.sb-cell.ok  { border-color:rgba(52,211,153,.35); }
+.sb-cell.bad { border-color:rgba(251,146,60,.35); }
+.sb-cell.wait{ border-color:var(--border2); }
+.sb-note{ margin-top:10px; font-size:12px; color:var(--muted); line-height:1.7; }
+.sb-note b{ color:var(--text2); font-weight:600; }
+
+/* ---------- 六态色带（原样复刻） ---------- */
+.evolution{ background:var(--card); border-radius:12px; padding:16px 20px; margin-bottom:20px; }
+.evolution-title{ color:var(--muted); font-size:13px; margin-bottom:10px; }
+.evolution-band{ display:flex; border-radius:8px; overflow:hidden; }
+.evo-seg{ flex:1; text-align:center; padding:10px 0; color:#fff; font-size:13px; opacity:.55; }
+.evo-seg.active{ opacity:1; box-shadow:inset 0 -3px 0 var(--gold); }
+.evolution-hint{ color:var(--muted); font-size:12px; margin-top:8px; }
+.evolution-hint b{ color:var(--text); }
+
+/* ---------- 活跃节点卡片 ---------- */
+.current-node{
+  background:var(--card); border-radius:12px; padding:20px 24px; margin-bottom:20px;
+  border:1px solid var(--border);
+}
+.current-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+.current-tags{ display:flex; gap:8px; flex-wrap:wrap; }
+.recalc{ color:var(--muted); font-size:12px; }
+.card-grid{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; margin-bottom:8px; }
+.card-cell{ display:flex; flex-direction:column; gap:4px; }
+.card-cell .k{ color:var(--muted); font-size:12px; }
+.card-cell .v{ color:var(--text); font-size:14px; font-weight:600; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.muted{ color:var(--muted); font-weight:400; font-size:12px; }
+
+/* ---------- tag ---------- */
+.tag{
+  display:inline-flex; align-items:center; gap:4px; height:24px; padding:0 8px; border-radius:4px;
+  font-size:12px; line-height:1; white-space:nowrap;
+  background:rgba(255,255,255,.07); color:var(--text2);
+}
+.tag.info{ background:rgba(144,147,153,.16); color:#a6adb5; }
+.tag.success{ background:rgba(82,176,106,.16); color:var(--green); }
+.tag.warning{ background:rgba(230,162,60,.15); color:var(--amber); }
+.tag.danger{ background:rgba(248,113,113,.15); color:var(--red); }
+.tag.primary{ background:rgba(96,165,250,.15); color:var(--blue); }
+.tag.sb{ background:var(--sb-bg); color:var(--sb); }
+.tag.nxt{ background:var(--nxt-bg); color:var(--nxt); }
+.tag.fail{ background:var(--fail-bg); color:var(--fail); }
+.tag.l1{ background:rgba(255,209,102,.16); color:var(--gold); }
+.tag.l2{ background:rgba(96,165,250,.16); color:var(--blue); }
+.tag.l3{ background:rgba(34,211,238,.16); color:#22d3ee; }
+.tag.l4{ background:rgba(148,163,184,.13); color:#94a3b8; }
+
+/* ---------- 新增②：破局锚信息条 ---------- */
+.break-anchor{
+  margin-top:14px; background:#0f1720; border:1px solid var(--border2); border-radius:10px;
+  padding:12px 14px; display:flex; flex-wrap:wrap; gap:10px 22px; align-items:center;
+}
+.ba-item{ display:flex; flex-direction:column; gap:2px; }
+.ba-item .k{ color:var(--muted); font-size:11px; }
+.ba-item .v{ color:var(--text2); font-size:13px; font-weight:600; }
+.ba-item .v.ok{ color:var(--green); }
+.ba-item .v.no{ color:var(--fail); }
+.ba-conds{ display:flex; gap:8px; flex-wrap:wrap; }
+.ba-cond{ font-size:11px; padding:3px 8px; border-radius:4px; border:1px solid var(--border2); color:var(--muted); }
+.ba-cond.ok{ border-color:rgba(82,176,106,.4); color:var(--green); background:rgba(82,176,106,.08); }
+.ba-cond.no{ border-color:rgba(251,146,60,.4); color:var(--fail); background:rgba(251,146,60,.08); }
+
+/* ---------- 时间线（新增观察日空心态） ---------- */
+.node-timeline{ display:flex; position:relative; margin:20px 0 4px; }
+.node-timeline::before{ /* 新增：虚线连接 */
+  content:''; position:absolute; left:16.6%; right:16.6%; top:7px; height:0;
+  border-top:2px dashed #33465e; z-index:0;
+}
+.timeline-step{ flex:1; display:flex; flex-direction:column; align-items:center; position:relative; padding:0 12px; z-index:1; }
+.step-dot{ width:16px; height:16px; border-radius:50%; margin-bottom:12px; z-index:1; border:0 solid transparent; }
+.step-dot.d0{ background:#3b82f6; }
+.step-dot.t1{ background:#f59e0b; }
+.step-dot.t2{ background:#2d8a4e; }
+.step-dot.observe{ background:transparent; border:3px solid var(--sb); }
+.step-dot.repairfail{ background:transparent; border:3px solid var(--fail); }
+.timeline-step:not(.active) .step-dot{ background:#4a5568; border-color:#4a5568; }
+.step-content{ text-align:center; display:flex; flex-direction:column; gap:4px; align-items:center; }
+.step-label{ color:var(--text); font-weight:600; font-size:14px; }
+.step-date{ color:var(--muted); font-size:13px; }
+.step-desc{ color:var(--muted); font-size:12px; }
+.candidates{ display:flex; flex-wrap:wrap; gap:4px; justify-content:center; margin-top:8px; }
+/* 新增③：观察日提示盒 */
+.observe-box{
+  margin-top:8px; padding:8px 14px; border-radius:8px; font-size:12px; display:flex;
+  align-items:center; gap:8px; flex-wrap:wrap; justify-content:center;
+}
+.observe-box.purple{ background:var(--sb-bg); color:var(--sb); border:1px solid rgba(167,139,250,.3); }
+.observe-box.orange{ background:var(--fail-bg); color:var(--fail); border:1px solid rgba(251,146,60,.3); }
+.observe-box .sub{ color:var(--muted2); font-size:11px; }
+/* 新增③：四档候选盒 */
+.tier-box{ margin-top:8px; display:flex; flex-direction:column; gap:6px; width:100%; }
+.tier-row{ display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text2); }
+.tier-row .who{ color:var(--text); font-weight:600; }
+.tier-row .meta{ color:var(--muted2); }
+
+/* ---------- 复算面板 ---------- */
+.suggest{
+  margin-top:16px; padding:14px 16px; background:var(--panel);
+  border:1px solid var(--border2); border-radius:10px;
+}
+.sg-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.sg-title{ color:var(--text); font-weight:600; font-size:14px; }
+.spacer{ flex:1; }
+.reason{ margin:10px 0 0; font-size:12px; line-height:1.6; color:var(--text2); }
+.list{ margin:8px 0 0; padding-left:18px; font-size:12px; line-height:1.7; }
+.list.missing li{ color:var(--amber); }
+.list.warn li{ color:var(--muted); }
+.basis{ margin:8px 0 0; font-size:12px; line-height:1.6; color:var(--muted); }
+.hint{ margin:10px 0 0; font-size:11px; color:var(--dim); line-height:1.6; }
+/* 新增④：破局提示行 */
+.sb-tip{
+  margin-top:10px; padding:8px 12px; border-radius:8px; font-size:12px; line-height:1.6;
+  display:flex; gap:8px; align-items:flex-start;
+}
+.sb-tip.purple{ background:var(--sb-bg); border-left:3px solid var(--sb); color:#c9bcf5; }
+.sb-tip.green{ background:var(--nxt-bg); border-left:3px solid var(--nxt); color:#a7e8cd; }
+.sb-tip.orange{ background:var(--fail-bg); border-left:3px solid var(--fail); color:#f7cba4; }
+
+/* ---------- 表格 ---------- */
+.tbl{ width:100%; border-collapse:collapse; font-size:12px; margin-top:10px; }
+.tbl th{
+  background:#16202e; color:var(--muted); font-weight:600; text-align:left;
+  padding:9px 10px; border-bottom:1px solid var(--border); white-space:nowrap;
+}
+.tbl td{ padding:9px 10px; border-bottom:1px solid #1f2b38; color:var(--text2); vertical-align:middle; }
+.tbl tbody tr:hover{ background:var(--hover); }
+.tbl tr.hlrow{ background:rgba(255,209,102,.07); }
+.tbl .nm{ color:var(--text); font-weight:600; }
+.tbl .up{ color:var(--green); }
+.tbl .down{ color:var(--red); }
+.tbl .dash{ color:var(--dim); }
+
+/* ---------- 历史节点 ---------- */
+.history-section{ background:var(--card); border-radius:12px; padding:20px 24px; margin-top:20px; }
+.history-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:12px; }
+.history-head h3{ margin:0; color:var(--text); font-size:16px; font-weight:600; }
+.filters{ display:flex; gap:8px; flex-wrap:wrap; }
+.sel{ background:#0f1720; border:1px solid var(--border); color:var(--text2); border-radius:6px; padding:5px 10px; font-size:12px; }
+
+/* ---------- 改动高亮 ---------- */
+.new-block{ position:relative; }
+body.hl .new-block{ outline:1px dashed rgba(255,209,102,.5); outline-offset:5px; border-radius:8px; }
+body.hl .new-block::before{
+  content:attr(data-new); position:absolute; top:-10px; left:12px; z-index:3;
+  background:var(--card); color:var(--gold); font-size:10px; line-height:1;
+  padding:3px 6px; border:1px dashed var(--gold); border-radius:4px; white-space:nowrap;
+}
+body.hl .current-node .new-block::before,
+body.hl .suggest .new-block::before{ background:var(--card); }
+body.hl .suggest .new-block::before{ background:var(--panel); }
+
+.legend{
+  max-width:1060px; margin:18px auto 0; padding:14px 20px; background:#141d28;
+  border:1px solid var(--border); border-radius:12px; color:var(--muted); font-size:12px; line-height:1.9;
+}
+.legend b{ color:var(--text2); }
+.legend code{ color:var(--gold); font-size:11px; }
+</style>
+</head>
+<body>
+
+<div class="mockbar">
+  <div class="mockbar-in">
+    <span class="t">原型预览</span>
+    <div class="tabs" id="tabs"></div>
+    <label class="switch"><input type="checkbox" id="hl" checked> 高亮改动点</label>
+  </div>
+</div>
+
+<div class="node-page">
+  <div class="page-header">
+    <h2>节点追踪</h2>
+    <button class="btn primary">新增节点事件</button>
+  </div>
+
+  <!-- 新增① 破局状态条 -->
+  <div class="sb-bar new-block" data-new="新增① 破局状态条" id="sbBar"></div>
+
+  <!-- 六态色带（原样） -->
+  <div class="evolution">
+    <div class="evolution-title">节点演变路径</div>
+    <div class="evolution-band">
+      <div class="evo-seg" style="background:#0e7490"><span class="evo-label">冰点</span></div>
+      <div class="evo-seg" style="background:#15803d"><span class="evo-label">启动</span></div>
+      <div class="evo-seg" style="background:#b45309"><span class="evo-label">发酵</span></div>
+      <div class="evo-seg" style="background:#b91c1c"><span class="evo-label">高潮</span></div>
+      <div class="evo-seg active" style="background:#a16207"><span class="evo-label">分歧</span></div>
+      <div class="evo-seg" style="background:#475569"><span class="evo-label">退潮</span></div>
+    </div>
+    <div class="evolution-hint" id="evoHint"></div>
+  </div>
+
+  <!-- 活跃节点卡片 -->
+  <div class="current-node">
+    <div class="current-head">
+      <div class="current-tags new-block" data-new="新增② 节点类型标签" id="tagBox"></div>
+      <span class="recalc">上次复算：2026-09-21 15:40</span>
+    </div>
+
+    <div class="card-grid" id="cardGrid"></div>
+
+    <!-- 新增② 破局锚信息条 -->
+    <div id="anchorBox"></div>
+
+    <!-- 时间线（新增观察日空心态） -->
+    <div class="node-timeline new-block" data-new="新增③ 观察日空心态" id="timeline"></div>
+  </div>
+
+  <!-- 复算面板（新增档位列 + 破局提示行） -->
+  <div class="suggest">
+    <div class="sg-row">
+      <span class="sg-title">平台复算</span>
+      <span id="sgTop"></span>
+      <span class="spacer"></span>
+      <button class="btn ghost sm">重新复算</button>
+      <button class="btn primary sm">采纳</button>
+    </div>
+    <p class="reason" id="sgReason"></p>
+    <div id="sgTip"></div>
+    <p class="basis" id="sgBasis"></p>
+    <div id="sgTable"></div>
+    <p class="hint">采纳只写这一条节点自己的字段，不动你填的备注；点了「有效/失效」之后这条会从「当前追踪」进「历史节点」。</p>
+  </div>
+
+  <!-- 历史节点（新增节点类型列） -->
+  <div class="history-section">
+    <div class="history-head">
+      <h3>历史节点</h3>
+      <div class="filters">
+        <select class="sel"><option>全部类型</option><option>破局日</option><option>破局次日</option></select>
+        <select class="sel"><option>全部状态</option><option>待验证</option><option>有效</option><option>失效</option></select>
+        <button class="btn ghost sm">重置</button>
+      </div>
+    </div>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>D0日期</th>
+          <th class="new-block" data-new="新增⑤ 节点类型列">节点类型</th>
+          <th>锚定龙头</th>
+          <th>节点票</th>
+          <th>状态</th>
+          <th>D0情绪</th>
+          <th>T+1</th>
+        </tr>
+      </thead>
+      <tbody id="histBody"></tbody>
+    </table>
+  </div>
+
+  <div class="legend">
+    <b>改动点一览（对应 PRD §15.4）</b><br>
+    ① 顶部 <code>.sb-bar</code> 破局状态条：当前空间板 / 是否断板 / 次日修复状态 —— 挂在 <code>page-header</code> 与六态色带之间。<br>
+    ② 卡片标签区加节点类型标签（紫＝破局日·观察 / 绿＝破局次日·出手 / 橙＝修复失败），卡片下方加破局锚信息条（破局股·板数·断板形态·R1/R2/R3）。<br>
+    ③ 时间线加「观察日」态：<code>.step-dot.observe</code> 空心紫圈 + 虚线连接（原灰点＝未达成，语义不同，不能复用）。<br>
+    ④ <code>NodeSuggestPanel</code> 加破局提示行 + 候选表「档位」列（L1 金 / L2 蓝 / L3 青 / L4 灰不入表）。<br>
+    ⑤ 历史表格加「节点类型」列，类型筛选器并入原有 filters。该列<b>只显示具体 node_type</b>，
+    策略未识别的行显示灰色「未识别」<span class="tag l4">未识别</span>，<b>不用「普通节点」</b>——那是反义定义，每加一类就得回来改口径（见 PRD §2 命名约定）。<br>
+    <b>已先行下线</b>：板块节点（<code>systemType='B'</code>）整套入口已移除——类型标签、A/B 筛选器、表格「类型」列、
+    新增弹窗的系统类型单选、天梯双方案卡片（原两张卡今只留一张）。
+    库内 B 类历史数据为 <b>0 条</b>，无清理成本。原 A/B 分类所占的标签位与表格列位，正好留给 <code>node_type</code>。
+    <b>颜色来源</b>：紫 <code>--sb #a78bfa</code>、绿 <code>--nxt #34d399</code>、橙 <code>--fail #fb923c</code> 均为新增语义变量，需按项目约定在 <code>App.vue</code> 全局段统一压，不硬编码。
+  </div>
+</div>
+
+<script>
+const SCEN = {
+  A:{ tab:'① 破局日 · 观察',
+    bar:{ c1:['wait','当前空间板（T-1）','闽东电力 000993','6 板 · 09-16 唯一最高'],
+          c2:['bad','断板状态（D0）','09-17 已断板','温和断板 · 三池均无'],
+          c3:['wait','次日修复（T+1）','待判定','09-18 收盘后计算'] },
+    note:'C3 三条件 <b>✓ 涨停 47 ≥ 40</b> · <b>✓ 跌停 1 ≤ 10</b> · <b>✓ 炸板率 29.9% ≤ 45%</b> → 成立<b>破局日</b>。当日为高度真空期，<b>不产任何候选</b>。',
+    tags:['<span class="tag warning">待验证</span>','<span class="tag info">电力 · 福建国资</span>','<span class="tag sb">◌ 破局日 · 观察</span>'],
+    cards:[['D0 日期','2026-09-17'],['锚定龙头','闽东电力 000993 <span class="tag sb">破局股·锚</span>'],['节点票（当前）','<span class="muted">观察日不出票</span>'],
+           ['D0 情绪','涨停 47 · 跌停 1 <span class="muted">· 炸板 29.9%</span>'],['T+1 验证','<span class="muted">明日待走完</span>'],['监管标记','—']],
+    anchor:{ stock:'闽东电力 000993', board:'6 板', form:'温和断板（09-17）', attrs:'电力 / 福建国资',
+             conds:[['ok','R1 待定'],['ok','R2 待定'],['ok','R3 待定']] },
+    tl:[['observe','active','D0（破局日 · 观察）','2026-09-17','闽东电力（6板）温和断板','observe-purple'],
+        ['t1','','T+1（破局次日）','待验证','修复判定：R1 未A杀 / R2 宽度未腰斩 / R3 有承接身位',''],
+        ['t2','','确认','—','待确认','']],
+    sgTop:'<span class="tag sb">建议：观察日（0 候选）</span>',
+    sgReason:'空间板断板当天是高度真空期——老龙已死、新龙未定，当日所有涨停都只是情绪余温，次日大概率被新龙头吸走资金。<b>当天买 = 买在高度最不确定的一天。</b>',
+    sgTip:'purple|破局日规则|当日 t_candidate_stock 恒为 0 行，运行记录 status=EMPTY、warning=SPACE_BREAK_OBSERVE。节点仍须打标落库，作为破局次日的前置锚。',
+    sgBasis:'前置过滤器（平台复算）通过 2 · 不通过 2 —— 跌停 1 &lt; 10 ✓｜涨停 47 &gt; 60 ✗｜非A杀 ✓｜高度未压缩 ✗。<b>现有过滤器第 4 条「连板高度未连续压缩 3 天」已自动拦下破局日，无需新增逻辑。</b>',
+    hist:'2026-09-17'
+  },
+  B:{ tab:'② 破局次日 · 出手',
+    bar:{ c1:['ok','破局股（T-1 空间板）','澳弘电子 605058','5 板 · 09-18 温和断板'],
+          c2:['ok','修复判定（T+1）','09-21 修复成功','R1 ✓ / R2 ✓ / R3 ✓'],
+          c3:['ok','今日处置','出手日','单票 ≤3% · 总仓 ≤30%'] },
+    note:'R1 澳弘电子次日未跌停 ✓｜R2 涨停 78 → <b>103</b>（≥ 62.4）✓、炸板 24.3% → <b>19.5%</b>（≤ 29.3%）✓｜R3 最高板 5、3~5 板承接 <b>8 只</b> ✓。<br>同位 ∩ 切换日 → 按 <b>space_break_next(0.9) &gt; switch(0.8)</b> 取破局次日，切换日候选并入 L3。',
+    tags:['<span class="tag warning">待验证</span>','<span class="tag info">电子 · 家居用品</span>','<span class="tag nxt">◆ 破局次日 · 出手</span>'],
+    cards:[['D0 日期','2026-09-18 <span class="muted">（破局日）</span>'],['锚定龙头','澳弘电子 605058 <span class="tag sb">破局股·锚</span>'],['节点票（当前）','华瓷股份 001216 <span class="tag l1">L1</span>'],
+           ['D0 情绪','涨停 78 · 跌停 0 <span class="muted">· 炸板 24.3%</span>'],['T+1 验证','09-21 · <span class="tag success">修复成功</span>'],['监管标记','—']],
+    anchor:{ stock:'澳弘电子 605058', board:'5 板', form:'温和断板（09-18）', attrs:'电子 / PCB',
+             conds:[['ok','R1 未A杀 ✓'],['ok','R2 78→103 / 24.3→19.5% ✓'],['ok','R3 最高5板 · 8只 ✓']] },
+    tl:[['observe','active','D0（破局日 · 观察）','2026-09-18','澳弘电子（5板）温和断板',''],
+        ['t1','active','T+1（破局次日 · 出手）','2026-09-21','涨停 103 · 炸板 19.5% · 最高 5 板','tiers'],
+        ['t2','active','确认','2026-09-21','华瓷股份（5板 · 09:25:00 一字）','']],
+    sgTop:'<span class="tag nxt">建议：出手（四档候选 24 只）</span><span class="tag warning">入选率 23% &gt; 15% 上限</span>',
+    sgReason:'修复三条件全部成立，按四档选法产出候选。<b>L1 为一字板无法竞价成交</b> → 按买点规则转「半路买」：取 L2 中首封最早的换手板。',
+    sgTip:'green|破局次日仓位规则|scale <b>0.7</b> · 单票硬上限 <b>3%</b>（低于全局 5%）· 当日总仓 <b>30%</b>。原因：高度刚被重新打开，后排确定性远低于已走三天的成熟主线。',
+    sgBasis:'判据：zt(D) ≥ zt(T)×0.8 且 zbr(D) ≤ zbr(T)+5pp 且 存在 3~5 板承接。四档按 L1 身位承接 &gt; L2 身位跟随 &gt; L3 新支线首板 &gt; L4 独立首板（过滤）。',
+    hist:'2026-09-18'
+  },
+  C:{ tab:'③ 修复失败',
+    bar:{ c1:['ok','破局股（T-1 空间板）','海鸥住工 002084','7 板 · 09-02 温和断板'],
+          c2:['bad','修复判定（T+1）','09-03 修复失败','R2 炸板率恶化 20.5pp'],
+          c3:['bad','今日处置','降级为观察日','repair_failed · 0 候选'] },
+    note:'R1 海鸥住工次日未跌停 ✓｜R2 涨停 52 → 44（≥41.6 ✓）但炸板率 <b>22.4% → 42.9%</b>（容忍上限 27.4%）✗｜R3 最高板 5、承接 3 只 ✓。<br>任一不满足即判 <b>repair_failed</b>，当日<b>不产候选</b>，并在 hit_expr 注明失败条件。',
+    tags:['<span class="tag warning">待验证</span>','<span class="tag info">家居用品</span>','<span class="tag fail">⚠ 修复失败 · 观察</span>'],
+    cards:[['D0 日期','2026-09-02 <span class="muted">（破局日）</span>'],['锚定龙头','海鸥住工 002084 <span class="tag sb">破局股·锚</span>'],['节点票（当前）','<span class="muted">修复失败不出票</span>'],
+           ['D0 情绪','涨停 52 · 跌停 8 <span class="muted">· 炸板 22.4%</span>'],['T+1 验证','09-03 · <span class="tag fail">修复失败</span>'],['监管标记','—']],
+    anchor:{ stock:'海鸥住工 002084', board:'7 板', form:'温和断板（09-02）', attrs:'家居用品',
+             conds:[['ok','R1 未A杀 ✓'],['no','R2 炸板 22.4→42.9% ✗'],['ok','R3 最高5板 · 3只 ✓']] },
+    tl:[['observe','active','D0（破局日 · 观察）','2026-09-02','海鸥住工（7板）温和断板',''],
+        ['repairfail','active','T+1（破局次日）','2026-09-03','涨停 44 · 炸板 42.9% · 修复失败','observe-orange'],
+        ['t2','','确认','—','不产候选，无节点票','']],
+    sgTop:'<span class="tag fail">建议：修复失败（0 候选）</span>',
+    sgReason:'炸板率从 22.4% 恶化到 42.9%（+20.5pp，容忍 +5pp），是退潮延续而非修复。若没有 R1~R3 判定，这天会被当成「破局后接力日」自动发候选——<b>等于在退潮里接盘</b>。',
+    sgTip:'orange|修复失败处置|标记 repair_failed，当日降级为观察日，不产候选，并在 t_node_detect.hit_expr 注明失败的具体条件。已产出的候选一律作废。',
+    sgBasis:'判据：zt(D) ≥ zt(T)×0.8 且 zbr(D) ≤ zbr(T)+5pp 且 存在 3~5 板承接。<b>修复判定把出手日从 5 天收敛到 3 天。</b>',
+    hist:'2026-09-02'
+  },
+  D:{ tab:'④ 周期节点（对照）',
+    bar:{ c1:['wait','当前空间板（T-1）','华瓷股份 001216','5 板 · 未断板'],
+          c2:['wait','断板状态（D0）','未断板','不在破局窗口'],
+          c3:['wait','次日修复（T+1）','—','非破局窗口'] },
+    note:'当日无 ≥5 板空间板断板事件，<b>不走破局逻辑</b>。破局状态条常驻显示，缺数据时显示「—」而不是隐藏，避免用户以为功能没生效。',
+    tags:['<span class="tag warning">待验证</span>','<span class="tag info">家居用品</span>'],
+    cards:[['D0 日期','2026-09-21'],['锚定龙头','华瓷股份 001216 <span class="tag success">总龙头</span>'],['节点票（当前）','锡华科技 603248'],
+           ['D0 情绪','涨停 103 · 跌停 2 <span class="muted">· 炸板 19.5%</span>'],['T+1 验证','<span class="muted">明日待走完</span>'],['监管标记','—']],
+    anchor:null,
+    tl:[['d0','active','D0（断板日）','2026-09-21','华瓷股份（5板）','cand-tags'],
+        ['t1','','T+1（验证日）','待验证','老龙反包 —｜晋级数量 —',''],
+        ['t2','','确认','待确认','','']],
+    sgTop:'<span class="tag warning">建议 待验证</span>',
+    sgReason:'T+1 尚未走完，判据不齐，不能采纳。',
+    sgTip:'',
+    sgBasis:'判据：晋级数量 ≥ 3 只且晋级率 ≥ 40%。',
+    hist:'2026-09-21'
+  }
+};
+
+const TIERS = {
+  tiers:[
+    ['l1','L1 身位承接','华瓷股份 001216','家居用品 · 5板 · 09:25:00 一字 · 全市场最高身位','1 只'],
+    ['l2','L2 身位跟随','锡华科技 603248 等','2~4板 · 按题材分组各取首封最早 1 只','20 只'],
+    ['l3','L3 新支线首板','（题材当日涨停≥3、昨日≤1）','首板 + 题材内首封最早 · 含切换日候选并入','3 只'],
+    ['l4','L4 独立首板（过滤）','不入候选池','所属题材当日涨停 &lt; 3 只 · 写 EXCLUDED_L4 明细','43 只']
+  ]
+};
+
+const HIST = [
+  ['2026-09-21','<span class="tag nxt">破局次日 · 出手</span>','澳弘电子 605058 <span class="muted">5板</span>','华瓷股份 <span class="tag l1">L1</span>','<span class="tag warning">待验证</span>','103','修复成功 · 承接 8 只'],
+  ['2026-09-18','<span class="tag sb">破局日 · 观察</span>','澳弘电子 605058 <span class="muted">5板</span>','<span class="dash">不产候选</span>','<span class="tag warning">待验证</span>','78','温和断板 ∩ 启动日'],
+  ['2026-09-17','<span class="tag sb">破局日 · 观察</span>','闽东电力 000993 <span class="muted">6板</span>','<span class="dash">不产候选</span>','<span class="tag warning">待验证</span>','47','温和断板（闽东样本）'],
+  ['2026-09-09','<span class="tag fail">修复失败</span>','龙版传媒 605577 <span class="muted">6板</span>','<span class="dash">作废</span>','<span class="tag danger">失效</span>','48','涨停腰斩 73 → 48'],
+  ['2026-09-08','<span class="tag sb">破局日 · 观察</span>','龙版传媒 605577 <span class="muted">6板</span>','<span class="dash">不产候选</span>','<span class="tag warning">待验证</span>','73','炸板断板 ∩ 切换日'],
+  ['2026-09-03','<span class="tag fail">修复失败</span>','海鸥住工 002084 <span class="muted">7板</span>','<span class="dash">作废</span>','<span class="tag danger">失效</span>','44','炸板 22.4 → 42.9%'],
+  ['2026-09-02','<span class="tag sb">破局日 · 观察</span>','海鸥住工 002084 <span class="muted">7板</span>','<span class="dash">不产候选</span>','<span class="tag warning">待验证</span>','52','温和断板'],
+  ['2026-08-27','<span class="tag nxt">破局次日 · 出手</span>','汉森制药 002412 <span class="muted">5板</span>','<span class="tag l2">L2</span> 15 只','<span class="tag success">有效</span>','77','L1 空档：最高 6 板 &gt; 上限 5'],
+  ['2026-08-26','<span class="tag sb">破局日 · 观察</span>','汉森制药 002412 <span class="muted">5板</span>','<span class="dash">不产候选</span>','<span class="tag warning">待验证</span>','52','炸板断板'],
+  ['2026-08-25','<span class="tag l4">未识别</span>','— <span class="muted">—</span>','宝鼎科技','<span class="tag success">有效</span>','61','非破局窗口']
+];
+
+function renderBar(b){
+  const cells=[b.c1,b.c2,b.c3].map(c=>`<div class="sb-cell ${c[0]}"><span class="k">${c[1]}</span><span class="v">${c[2]}<span class="sub">${c[3]}</span></span></div>`).join('');
+  return `<div class="sb-head"><span class="t">破局状态</span><span class="s">space_break · 收盘后自动判定</span></div>
+    <div class="sb-grid">${cells}</div><div class="sb-note">${b.note}</div>`;
+}
+function renderAnchor(a){
+  if(!a) return '';
+  const conds=a.conds.map(c=>`<span class="ba-cond ${c[0]}">${c[1]}</span>`).join('');
+  return `<div class="break-anchor new-block" data-new="新增② 破局锚信息条">
+    <div class="ba-item"><span class="k">破局股（锚）</span><span class="v">${a.stock}</span></div>
+    <div class="ba-item"><span class="k">断板前板数</span><span class="v">${a.board}</span></div>
+    <div class="ba-item"><span class="k">断板形态</span><span class="v">${a.form}</span></div>
+    <div class="ba-item"><span class="k">破局属性</span><span class="v">${a.attrs}</span></div>
+    <div class="ba-item" style="flex:1;min-width:260px"><span class="k">修复三条件</span><span class="ba-conds">${conds}</span></div>
+  </div>`;
+}
+function renderTL(tl){
+  return tl.map(s=>{
+    const [dot,act,label,date,desc,extra]=s;
+    let box='';
+    if(extra==='observe-purple') box=`<div class="observe-box purple">◌ 观察日 · 不产候选<span class="sub">空间板断板当天＝高度真空期</span></div>`;
+    else if(extra==='observe-orange') box=`<div class="observe-box orange">⚠ 修复失败 · 不产候选<span class="sub">炸板率恶化 20.5pp，退潮延续</span></div>`;
+    else if(extra==='tiers') box=`<div class="tier-box">${TIERS.tiers.map(t=>`<div class="tier-row"><span class="tag ${t[0]}">${t[1]}</span><span class="who">${t[2]}</span><span class="meta">${t[3]}</span><span class="muted">${t[4]}</span></div>`).join('')}</div>`;
+    else if(extra==='cand-tags') box=`<div class="candidates"><span class="tag info">锡华科技</span><span class="tag info">瑞尔特</span><span class="tag info">百花医药</span></div>`;
+    return `<div class="timeline-step ${act}"><div class="step-dot ${dot}"></div>
+      <div class="step-content"><span class="step-label">${label}</span><span class="step-date">${date}</span>
+      <span class="step-desc">${desc}</span>${box}</div></div>`;
+  }).join('');
+}
+function renderSgTable(key){
+  if(key!=='B') return '';
+  const rows=[
+    ['华瓷股份','001216','家居用品','5板','5板','是','l1','L1 身位承接'],
+    ['锡华科技','603248','风电设备','4板','4板','是','l2','L2 身位跟随'],
+    ['瑞尔特','002790','家居用品','3板','—','未知','l2','L2 身位跟随'],
+    ['百花医药','600721','医药商业','首板','—','未知','l3','L3 新支线首板'],
+    ['宝鼎科技','002552','通用设备','首板','—','未知','l3','L3 新支线首板']
+  ].map(r=>`<tr><td class="nm">${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td>
+    <td class="${r[5]==='是'?'up':r[5]==='未知'?'dash':'down'}">${r[5]}</td>
+    <td class="new-cell" style="background:rgba(255,209,102,.05)"><span class="tag ${r[6]}">${r[7]}</span></td></tr>`).join('');
+  return `<table class="tbl new-block" data-new="新增④ 候选表档位列">
+    <thead><tr><th>名称</th><th>代码</th><th>行业</th><th>T+1</th><th>之后最高</th><th>晋级</th><th>档位</th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
+}
+
+let cur='A';
+function render(k){
+  const s=SCEN[k];
+  document.getElementById('sbBar').innerHTML=renderBar(s.bar);
+  document.getElementById('sbBar').style.display='block';
+  document.getElementById('tagBox').innerHTML=s.tags.join('');
+  document.getElementById('cardGrid').innerHTML=s.cards.map(c=>`<div class="card-cell"><span class="k">${c[0]}</span><span class="v">${c[1]}</span></div>`).join('');
+  document.getElementById('anchorBox').innerHTML=renderAnchor(s.anchor);
+  document.getElementById('timeline').innerHTML=renderTL(s.tl);
+  document.getElementById('sgTop').innerHTML=s.sgTop;
+  document.getElementById('sgReason').innerHTML=s.sgReason;
+  document.getElementById('sgTip').innerHTML=s.sgTip?(()=>{const p=s.sgTip.split('|');return `<div class="sb-tip ${p[0]} new-block" data-new="新增④ 破局提示行"><b>${p[1]}</b>${p[2]}</div>`;})():'';
+  document.getElementById('sgBasis').innerHTML=s.sgBasis;
+  document.getElementById('sgTable').innerHTML=renderSgTable(k);
+  document.getElementById('evoHint').innerHTML=(k==='D')
+    ? '活跃节点 D0（2026-09-21）落在 <b>高潮</b>，当日情绪 103 分'
+    : '活跃节点 D0 落在 <b>分歧</b>' + (k==='A'?'，当日情绪 47 分':'') + '<span class="muted"> · 破局是事件不是阶段，不并入此色带</span>';
+  document.getElementById('histBody').innerHTML=HIST.map(h=>`<tr class="${h[0]===s.hist?'hlrow':''}"><td>${h[0]}</td><td>${h[1]}</td><td>${h[2]}</td><td>${h[3]}</td><td>${h[4]}</td><td>${h[5]}</td><td class="muted">${h[6]}</td></tr>`).join('');
+}
+document.getElementById('tabs').innerHTML=Object.keys(SCEN).map(k=>`<button class="tab ${k===cur?'on':''}" data-k="${k}">${SCEN[k].tab}</button>`).join('');
+document.getElementById('tabs').addEventListener('click',e=>{
+  const b=e.target.closest('.tab'); if(!b) return;
+  cur=b.dataset.k; render(cur);
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.k===cur));
+});
+document.getElementById('hl').addEventListener('change',e=>document.body.classList.toggle('hl',e.target.checked));
+document.body.classList.add('hl');
+render('A');
+</script>
+</body>
+</html>

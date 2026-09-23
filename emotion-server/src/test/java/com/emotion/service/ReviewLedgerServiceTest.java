@@ -291,7 +291,15 @@ class ReviewLedgerServiceTest {
     // ---- fixture ----
 
     private static ReviewLedgerService service(RecordingPositionStore p, RecordingPredictionStore pr) {
-        return new ReviewLedgerService(p, pr, stockMapper(), marketStockMapper());
+        // 补 IndustryClassifyService：该构造器参数后加，本用例用不到行业兜底，
+        // 给一个不查库的空实现即可（直接 new 会因为没有 mapper 而 NPE）。
+        IndustryClassifyService noDict = new IndustryClassifyService(null) {
+            @Override
+            public String of(String code) {
+                return null;
+            }
+        };
+        return new ReviewLedgerService(p, pr, stockMapper(), marketStockMapper(), noDict);
     }
 
     private static PositionRequest position(String code, String cost, String current, String floatPct,

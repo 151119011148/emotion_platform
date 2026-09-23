@@ -60,7 +60,13 @@ public class NodeSuggestService {
     static final int A_STRONG_PROMOTION = 3;
     /** §三 系统A 操作流程 T+1「收盘确认：D0 二板晋级率 ≥ 30% → 节点有效」。百分数。 */
     static final BigDecimal A_MIN_RATE = new BigDecimal("30.00");
-    /** §四 系统B 判定规则 T+1「看该板块首板的一进二 ≥2 只晋级 → 板块节点有效」。 */
+    /**
+     * §四 系统B 判定规则 T+1「看该板块首板的一进二 ≥2 只晋级 → 板块节点有效」。
+     *
+     * <p><strong>2026-09-23 已下线</strong>：板块节点不再对外提供（NodeView 已移除全部 B 类入口，
+     * 生产库 B 类历史数据 0 条）。此处分支保留只为兼容存量脏数据——只要没人再写 B，
+     * systemB 恒为 false，这段就走不到。整体删除排在破局节点（V34）之后，不混在同一次改动里。
+     */
     static final int B_MIN_PROMOTION = 2;
 
     /** 老龙反查的左边界：往前 30 天足够覆盖一轮 7 板周期的起爆。 */
@@ -74,6 +80,7 @@ public class NodeSuggestService {
     static final String STATUS_VALID = "有效";
     static final String STATUS_INVALID = "失效";
     static final String SYSTEM_A = "A";
+    /** 板块节点类型码。已下线：仅供识别存量脏数据，不得用于新建分支。 */
     static final String SYSTEM_B = "B";
 
     /** 采纳要落的八个字段。指纹、比对、写库三处共用这一张表——漏一个字段就是点了个假的采纳。 */

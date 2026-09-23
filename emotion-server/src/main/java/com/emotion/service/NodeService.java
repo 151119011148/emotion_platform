@@ -135,6 +135,11 @@ public class NodeService {
         if (event.getNote() != null) existing.setNote(event.getNote());
         if (event.getD0Candidates() != null) existing.setD0Candidates(event.getD0Candidates());
         if (event.getTheme() != null) existing.setTheme(event.getTheme());
+        if (event.getNodeType() != null) existing.setNodeType(event.getNodeType());
+        if (event.getBreakStockCode() != null) existing.setBreakStockCode(event.getBreakStockCode());
+        if (event.getBreakBoard() != null) existing.setBreakBoard(event.getBreakBoard());
+        if (event.getBreakForm() != null) existing.setBreakForm(event.getBreakForm());
+        if (event.getRepairStatus() != null) existing.setRepairStatus(event.getRepairStatus());
         if (event.getLastRecalcAt() != null) existing.setLastRecalcAt(event.getLastRecalcAt());
 
         nodeEventMapper.updateById(existing);
@@ -159,6 +164,7 @@ public class NodeService {
         fillNodeStockLive(vo);
         fillSurveillance(vo);
         fillCauseTags(vo);
+        vo.setNodeTypeLabel(nodeTypeLabel(node.getNodeType()));
         return vo;
     }
 
@@ -178,6 +184,32 @@ public class NodeService {
             tags.add("情绪退潮");
         }
         vo.setCauseTags(tags);
+    }
+
+    /**
+     * 节点类型 → 中文展示名（类型轴只认这 5 个具体值）。
+     *
+     * <p>查不到一律返回 null，由前端显示「未识别」：<strong>绝不回落成「普通节点」</strong>——
+     * 反义定义只说明它不是什么，而且每加一个 node_type 这个词的所指就要变一次（PRD §2 命名约定）。
+     */
+    static String nodeTypeLabel(String nodeType) {
+        if (nodeType == null) {
+            return null;
+        }
+        switch (nodeType) {
+            case "SPACE_BREAK":
+                return "破局日 · 观察";
+            case "SPACE_BREAK_NEXT":
+                return "破局次日 · 出手";
+            case "START":
+                return "启动日";
+            case "SWITCH":
+                return "切换日";
+            case "DIVERGE":
+                return "分歧日";
+            default:
+                return null;
+        }
     }
 
     /** 阵眼血缘：由 anchor_id 取 t_anchor 回填名称、角色码/标签、跨度。 */

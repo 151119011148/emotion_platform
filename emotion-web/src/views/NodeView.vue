@@ -27,7 +27,8 @@
       <div class="current-head">
         <div class="current-tags">
           <el-tag :type="statusType(activeNode.status)" size="small">{{ activeNode.status }}</el-tag>
-          <el-tag size="small">{{ activeNode.systemType === 'A' ? '系统A · 市场总节点' : '系统B · 板块节点' }}</el-tag>
+          <!-- 类型轴：五个具体 node_type；策略没识别出来显示「未识别」，不回落「普通节点」 -->
+          <span class="ntag" :class="nodeTypeClass(activeNode)">{{ nodeTypeLabel(activeNode) }}</span>
           <el-tag v-if="activeNode.theme" size="small" type="info">{{ activeNode.theme }}</el-tag>
         </div>
         <span class="recalc">上次复算：{{ fmtTime(activeNode.lastRecalcAt) || '—' }}</span>
@@ -91,8 +92,8 @@
       <p class="surv-desc" v-if="activeNode.surveillanceDesc">{{ activeNode.surveillanceDesc }}</p>
 
       <div class="node-timeline">
-        <div class="timeline-step" :class="{ active: true }">
-          <div class="step-dot d0"></div>
+        <div class="timeline-step" :class="{ active: true, observe: isObserveDay(activeNode) }">
+          <div class="step-dot d0" :class="{ observe: isObserveDay(activeNode) }"></div>
           <div class="step-content">
             <span class="step-label">D0（断板日）</span>
             <span class="step-date">{{ activeNode.d0Date }}</span>
@@ -102,6 +103,8 @@
             <div class="candidates" v-if="parsedCandidates.length">
               <el-tag v-for="c in parsedCandidates" :key="c" size="small" type="info">{{ c }}</el-tag>
             </div>
+            <!-- 破局日＝观察日：0 候选是规则本身，不是数据缺失，必须显式说清楚 -->
+            <div class="observe-note" v-else-if="isObserveDay(activeNode)">◌ 观察日 · 不产候选</div>
           </div>
         </div>
         <div class="timeline-step" :class="{ active: activeNode.t1Date }">
@@ -151,10 +154,10 @@
       <div class="history-head">
         <h3>历史节点</h3>
         <div class="filters">
-          <el-select v-model="typeFilter" size="small" style="width: 120px" placeholder="类型">
-            <el-option label="全部" value="" />
-            <el-option label="市场总节点" value="A" />
-            <el-option label="板块节点" value="B" />
+          <el-select v-model="nodeTypeFilter" size="small" style="width: 130px" placeholder="节点类型">
+            <el-option label="全部类型" value="" />
+            <el-option v-for="t in NODE_TYPES" :key="t.value" :label="t.label" :value="t.value" />
+            <el-option label="未识别" :value="NONE_KEY" />
           </el-select>
           <el-select v-model="statusFilter" size="small" style="width: 110px" placeholder="状态">
             <el-option label="全部" value="" />
@@ -186,9 +189,9 @@
           </template>
         </el-table-column>
         <el-table-column prop="d0Date" label="D0日期" width="104" />
-        <el-table-column label="类型" width="76">
+        <el-table-column label="节点类型" width="104">
           <template #default="{ row }">
-            <el-tag size="small">{{ row.systemType === 'A' ? '总节点' : '板块节点' }}</el-tag>
+            <span class="ntag" :class="nodeTypeClass(row)">{{ nodeTypeLabel(row) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="锚定龙头" min-width="150" show-overflow-tooltip>
@@ -251,12 +254,6 @@
 
     <el-dialog v-model="showNodeDialog" title="新增节点事件" width="600px" class="dark-node-dialog">
       <el-form :model="nodeForm" label-position="top">
-        <el-form-item label="系统类型">
-          <el-radio-group v-model="nodeForm.systemType">
-            <el-radio value="A">系统A · 市场总节点</el-radio>
-            <el-radio value="B">系统B · 板块节点</el-radio>
-          </el-radio-group>
-        </el-form-item>
         <el-form-item label="锚定龙头（从当日生效的人工阵眼里选；也可不关联手填）">
           <el-select v-model="nodeForm.anchorId" clearable filterable placeholder="选择阵眼，或留空手填下方名称"
             style="width: 100%" @change="onAnchorChange">
@@ -269,7 +266,7 @@
         <el-form-item label="锚定龙头最高板数">
           <el-input-number v-model="nodeForm.anchorMaxBoard" :min="1" :max="30" />
         </el-form-item>
-        <el-form-item :label="nodeForm.systemType === 'B' ? '所属题材/板块（B类必填）' : '所属题材/板块（可选）'">
+        <el-form-item label="所属题材/板块（可选）">
           <el-input v-model="nodeForm.theme" placeholder="如：元件 / 华为链" />
         </el-form-item>
         <el-form-item label="D0 日期">
@@ -377,30 +374,20 @@
             <el-checkbox v-model="ladderHeightOk">高度未压缩</el-checkbox>
           </el-form-item>
         </el-form>
-        <div class="dual-plans">
-          <div class="plan-card">
-            <div class="plan-title">方案 · 总节点（系统A）</div>
-            <div class="plan-row">锚定龙头：{{ planA.anchorStock || '—' }}（{{ planA.anchorMaxBoard }}板）</div>
-            <div class="plan-row">题材/板块：{{ planA.theme || '（可不填）' }}</div>
-            <div class="plan-row">D0 日期：{{ planA.d0Date || '—' }}</div>
-            <div class="plan-row">候选票：{{ planA.candsText }}</div>
-            <div class="plan-row">前置过滤器：涨停{{ planA.limitUpCount ?? '未知' }} / 跌停{{ planA.limitDownCount ?? '未知' }}</div>
-          </div>
-          <div class="plan-card">
-            <div class="plan-title">方案 · 板块节点（系统B）</div>
-            <div class="plan-row">锚定龙头：{{ planB.anchorStock || '—' }}（{{ planB.anchorMaxBoard }}板）</div>
-            <div class="plan-row">题材/板块：{{ planB.theme || '（需选龙头后自动填）' }}</div>
-            <div class="plan-row">D0 日期：{{ planB.d0Date || '—' }}</div>
-            <div class="plan-row">候选票：{{ planB.candsText }}</div>
-            <div class="plan-row">前置过滤器：涨停{{ planB.limitUpCount ?? '未知' }} / 跌停{{ planB.limitDownCount ?? '未知' }}</div>
-          </div>
+        <div class="plan-card">
+          <div class="plan-title">方案预览（市场总节点）</div>
+          <div class="plan-row">锚定龙头：{{ plan.anchorStock || '—' }}（{{ plan.anchorMaxBoard }}板）</div>
+          <div class="plan-row">题材/板块：{{ plan.theme || '（可不填）' }}</div>
+          <div class="plan-row">D0 日期：{{ plan.d0Date || '—' }}</div>
+          <div class="plan-row">候选票：{{ plan.candsText }}</div>
+          <div class="plan-row">前置过滤器：涨停{{ plan.limitUpCount ?? '未知' }} / 跌停{{ plan.limitDownCount ?? '未知' }}</div>
         </div>
       </template>
       <div v-else class="intel-empty">该 D0 无涨停池明细（≥2 板为空），请换日期或先拉取当日行情。</div>
       <template #footer>
         <el-button @click="showLadderDialog = false">取消</el-button>
         <el-button @click="openCreate">高级手填（细分原因/登记阵眼）</el-button>
-        <el-button type="primary" :disabled="!ladderPickedCode" @click="createTwoPlans">生成两条节点（总节点 + 板块节点）</el-button>
+        <el-button type="primary" :disabled="!ladderPickedCode" @click="createPlan">生成节点</el-button>
       </template>
     </el-dialog>
   </div>
@@ -453,9 +440,41 @@ const ANCHOR_ROLES = [
   { value: 'CYCLE', label: '周期阵眼' }
 ]
 
-const typeFilter = ref('')
 const statusFilter = ref('')
 const dateRange = ref(null)
+
+/**
+ * 类型轴的五个取值（PRD §2）。后端 NodeService.nodeTypeLabel 认的就是这五个，
+ * 落库也是这五个原值；筛选器选项与展示文案共用这一份，避免前后端口径漂移。
+ * 周期节点 = 启动/分歧/切换（横向），空间节点 = 破局日/破局次日（纵向）。
+ */
+const NODE_TYPES = [
+  { value: 'START', label: '启动日' },
+  { value: 'DIVERGE', label: '分歧日' },
+  { value: 'SWITCH', label: '切换日' },
+  { value: 'SPACE_BREAK', label: '破局日 · 观察' },
+  { value: 'SPACE_BREAK_NEXT', label: '破局次日 · 出手' }
+]
+/** 筛「未识别」的哨兵值：node_type 为 NULL 的行，不能用一个空字符串糊过去。 */
+const NONE_KEY = '__NONE__'
+const nodeTypeFilter = ref('')
+
+/**
+ * 展示文案。后端已按 nodeTypeLabel() 算好中文名；取不到就是「未识别」。
+ * 刻意不回落「普通 / 常规 / 其他」：反义定义只说明它不是什么，
+ * 而且每加一个 node_type，这个词的所指就要跟着变一次。
+ */
+function nodeTypeLabel(row) {
+  return row?.nodeTypeLabel || '未识别'
+}
+/** 配色类名，按 node_type 原值拼；没有类型就是 nt-none（灰）。 */
+function nodeTypeClass(row) {
+  return 'nt-' + (row?.nodeType || 'none')
+}
+/** 观察日（破局日）：当天 0 候选是规则要求，不是数据缺失。 */
+function isObserveDay(row) {
+  return row?.nodeType === 'SPACE_BREAK'
+}
 
 /** 六态路径：节点在情绪周期里的位置。active 命中 D0 周期。 */
 const EVOLVE = [
@@ -499,7 +518,6 @@ function resetNodeForm() {
   nodeForm.theme = ''
   nodeForm.d0Date = ''
   nodeForm.candidatesStr = ''
-  nodeForm.systemType = 'A'
   nodeForm.anchorMaxBoard = 7
   nodeForm.limitDownCount = null
   nodeForm.limitUpCount = null
@@ -515,7 +533,7 @@ function resetNodeForm() {
   nodeForm.anchorStart = ''
   nodeForm.anchorEnd = ''
 }
-/** 从天梯新建：先选 D0 日期，龙头下拉只给「昨日最高板(默认)/D0最高板」两项，选后自动生效各字段并生成总节点+板块节点。 */
+/** 从天梯新建：先选 D0 日期，龙头下拉只给「昨日最高板(默认)/D0最高板」两项，选后自动生效各字段并生成一条市场总节点。 */
 async function openLadderCreate(date) {
   ladderLeaders.value = []
   leaderChoices.value = []
@@ -553,30 +571,20 @@ function pickedLeader() {
   const c = leaderChoices.value.find(x => x.ld.code === ladderPickedCode.value)
   return c ? c.ld : null
 }
-/** 方案A 总节点 / 方案B 板块节点：同龙头，A=全市场候选，B=龙头板块内候选。 */
-const planA = computed(() => buildPlan('A', pickedLeader()))
-const planB = computed(() => buildPlan('B', pickedLeader()))
-function buildPlan(system, ld) {
+/** 天梯方案预览：以所选龙头为锚，候选取自全市场涨停池。板块节点（原系统B）已下线，不再产出同板块收敛版本。 */
+const plan = computed(() => buildPlan(pickedLeader()))
+function buildPlan(ld) {
   const d0 = ladderPreview.value.date || ''
   const limitUp = ladderPreview.value.limitUpCount
   const limitDown = ladderPreview.value.limitDownCount
   if (!ld) {
     return { anchorStock: '', anchorMaxBoard: 0, theme: '', d0Date: d0, candsText: '', limitUpCount: limitUp, limitDownCount: limitDown, cands: [] }
   }
-  const sameIndustry = system === 'B'
-    ? ladderLeaders.value.filter(x => x.industry && x.industry === ld.industry)
-    : ladderLeaders.value
-  const cands = sameIndustry.map(x => x.name)
-  let candsText
-  if (cands.length) {
-    candsText = cands.slice(0, 6).join('、') + (cands.length > 6 ? ' 等' + cands.length + '只' : '')
-  } else if (system === 'B' && ld.industry) {
-    candsText = `（候选为空：板块「${ld.industry}」今日涨停池无≥2板，板块当日退潮）`
-  } else {
-    candsText = '（候选为空）'
-  }
+  const cands = ladderLeaders.value.map(x => x.name)
+  const candsText = cands.length
+    ? cands.slice(0, 6).join('、') + (cands.length > 6 ? ' 等' + cands.length + '只' : '')
+    : '（候选为空）'
   return {
-    systemType: system,
     anchorStock: ld.name,
     anchorMaxBoard: ld.board,
     theme: ld.industry || '',
@@ -596,11 +604,11 @@ function ladderLabel(c) {
 function goTianti() {
   openLadderCreate()
 }
-/** 把双方案里的一张计划页打包成 create 的 payload（判据沿用弹窗勾选，未计数的项保留未知）。 */
-function buildLadderPayload(plan) {
+/** 把方案预览打包成 create 的 payload（判据沿用弹窗勾选，未计数的项保留未知）。systemType 恒为 A——板块节点（B）已下线。 */
+function buildLadderPayload(p) {
   const filterDetail = {
-    limitDownCount: plan.limitDownCount ?? null,
-    limitUpCount: plan.limitUpCount ?? null,
+    limitDownCount: p.limitDownCount ?? null,
+    limitUpCount: p.limitUpCount ?? null,
     anchorKill: !ladderNoKill.value,
     heightCompress: !ladderHeightOk.value
   }
@@ -611,29 +619,26 @@ function buildLadderPayload(plan) {
     !filterDetail.heightCompress
   ]
   return {
-    systemType: plan.systemType,
+    systemType: 'A',
     anchorId: null,
-    anchorStock: plan.anchorStock,
-    anchorMaxBoard: plan.anchorMaxBoard,
-    theme: plan.systemType === 'B' ? plan.theme : (plan.theme || undefined),
-    d0Date: plan.d0Date,
-    d0Candidates: JSON.stringify(plan.cands || []),
+    anchorStock: p.anchorStock,
+    anchorMaxBoard: p.anchorMaxBoard,
+    theme: p.theme || undefined,
+    d0Date: p.d0Date,
+    d0Candidates: JSON.stringify(p.cands || []),
     filterPassed: flags.every(f => f === true) ? 1 : 0,
     filterDetail: JSON.stringify(filterDetail),
     status: '待验证',
     note: ''
   }
 }
-async function createTwoPlans() {
+async function createPlan() {
   if (!pickedLeader()) return
-  let a = false
-  let b = false
-  try { await nodeApi.create(buildLadderPayload(planA.value)); a = true } catch (e) { /* 单个失败不影响另一个 */ }
-  try { await nodeApi.create(buildLadderPayload(planB.value)); b = true } catch (e) { /* 同上 */ }
-  if (a || b) {
-    ElMessage.success(`已生成${a ? '总节点' : ''}${a && b ? ' + ' : ''}${b ? '板块节点' : ''}${a && b ? '' : '（部分失败）'}，均为待验证`)
-  } else {
-    ElMessage.error('两条节点都创建失败')
+  try {
+    await nodeApi.create(buildLadderPayload(plan.value))
+    ElMessage.success('已生成节点，状态为待验证')
+  } catch (e) {
+    ElMessage.error('创建失败')
   }
   showLadderDialog.value = false
   loadNodes()
@@ -642,13 +647,12 @@ function goHighEco() {
   router.push({ name: 'HighEco' })
 }
 function resetFilters() {
-  typeFilter.value = ''
+  nodeTypeFilter.value = ''
   statusFilter.value = ''
   dateRange.value = null
 }
 
 const nodeForm = reactive({
-  systemType: 'A',
   anchorId: null,
   anchorStock: '',
   anchorMaxBoard: 7,
@@ -690,8 +694,11 @@ function anchorLabel(a) {
 
 const filteredNodes = computed(() => {
   return nodeList.value.filter(row => {
-    if (typeFilter.value && row.systemType !== typeFilter.value) return false
     if (statusFilter.value && row.status !== statusFilter.value) return false
+    if (nodeTypeFilter.value) {
+      const hit = nodeTypeFilter.value === NONE_KEY ? !row.nodeType : row.nodeType === nodeTypeFilter.value
+      if (!hit) return false
+    }
     if (dateRange.value) {
       const [s, e] = dateRange.value
       if (row.d0Date && (row.d0Date < s || row.d0Date > e)) return false
@@ -760,7 +767,7 @@ function evaluateFilters(detail) {
 }
 
 async function handleDelete(row) {
-  const label = `${row.d0Date || ''} ${row.anchorName || row.anchorStock || ''} ${row.systemType === 'A' ? '总节点' : '板块节点'}`.trim()
+  const label = `${row.d0Date || ''} ${row.anchorName || row.anchorStock || ''}`.trim()
   try {
     await ElMessageBox.confirm(`确定删除节点「${label}」？此操作不可撤销。`, '删除节点事件', {
       confirmButtonText: '删除',
@@ -791,10 +798,6 @@ async function loadNodes() {
 }
 
 async function handleCreateNode() {
-  if (nodeForm.systemType === 'B' && !nodeForm.theme && !nodeForm.anchorId) {
-    ElMessage.warning('板块节点请填写所属题材')
-    return
-  }
   if (!nodeForm.anchorId && !nodeForm.anchorStock) {
     ElMessage.warning('请选择或填写锚定龙头')
     return
@@ -847,11 +850,11 @@ async function handleCreateNode() {
   else if (origin) statusNote = origin
   else if (originNote) statusNote = originNote
   const payload = {
-    systemType: nodeForm.systemType,
+    systemType: 'A',
     anchorId: anchorId || null,
     anchorStock: anchorId ? undefined : nodeForm.anchorStock,
     anchorMaxBoard: nodeForm.anchorMaxBoard,
-    theme: nodeForm.theme || (nodeForm.systemType === 'A' ? undefined : ''),
+    theme: nodeForm.theme || undefined,
     d0Date: nodeForm.d0Date,
     d0Candidates: candidates,
     filterPassed: flags.every(f => f === true) ? 1 : 0,
@@ -906,6 +909,15 @@ onMounted(() => {
 .muted { color: #8899a6; font-weight: 400; font-size: 12px; }
 .surv-desc { color: #f87171; font-size: 12px; margin: 6px 0 0; }
 
+.ntag {
+  display: inline-flex; align-items: center; align-self: center; padding: 1px 8px; border-radius: 4px;
+  font-size: 12px; line-height: 1.7; white-space: nowrap; border: 1px solid transparent;
+}
+.nt-SPACE_BREAK { color: var(--node-sb, #a78bfa); background: rgba(167, 139, 250, .14); border-color: rgba(167, 139, 250, .35); }
+.nt-SPACE_BREAK_NEXT { color: var(--node-nxt, #34d399); background: rgba(52, 211, 153, .14); border-color: rgba(52, 211, 153, .35); }
+.nt-START, .nt-SWITCH, .nt-DIVERGE { color: var(--node-phase, #60a5fa); background: rgba(96, 165, 250, .14); border-color: rgba(96, 165, 250, .35); }
+.nt-none { color: var(--node-none, #8899a6); background: rgba(136, 153, 166, .12); border-color: rgba(136, 153, 166, .28); }
+
 .node-timeline { display: flex; position: relative; margin: 16px 0; }
 .timeline-step { flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; padding: 0 12px; }
 .step-dot { width: 16px; height: 16px; border-radius: 50%; margin-bottom: 12px; z-index: 1; }
@@ -913,6 +925,16 @@ onMounted(() => {
 .step-dot.t1 { background: #f59e0b; }
 .step-dot.t2 { background: #2d8a4e; }
 .timeline-step:not(.active) .step-dot { background: #4a5568; }
+
+/* 观察日（破局日）态：空心紫圈 + 虚线连接。
+   语义要和上面的灰点彻底分开：灰点＝这一步还没走到；空心紫＝走到了，
+   但规则要求这一天不出手。两者复用会让「为什么今天没票」变成一笔糊涂账。 */
+.step-dot.observe { background: transparent; border: 3px solid var(--node-sb, #a78bfa); }
+.timeline-step.observe::before {
+  content: ''; position: absolute; top: 7px; left: 0; width: 100%; height: 0;
+  border-top: 1px dashed var(--node-sb, #a78bfa); opacity: .55;
+}
+.observe-note { color: var(--node-sb, #a78bfa); font-size: 12px; margin-top: 8px; }
 .step-content { text-align: center; display: flex; flex-direction: column; gap: 4px; }
 .step-label { color: #e1e8ed; font-weight: 600; font-size: 14px; }
 .step-date { color: #8899a6; font-size: 13px; }
@@ -958,7 +980,6 @@ onMounted(() => {
   background: #0f1720; border: 1px solid #2a3a52; border-radius: 8px; }
 .intel-head b { color: #e1e8ed; }
 .intel-empty { color: #8899a6; padding: 24px; text-align: center; }
-.dual-plans { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .plan-card { background: #0f1720; border: 1px solid #2a3a52; border-radius: 10px; padding: 14px 16px; }
 .plan-title { color: #ffd166; font-weight: 600; font-size: 13px; margin-bottom: 10px; }
 .plan-row { color: #e1e8ed; font-size: 12px; line-height: 1.9; }

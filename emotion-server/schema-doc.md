@@ -376,7 +376,7 @@
 | id | bigint PK | 否 | |
 | user_id | bigint·MUL | 否 | 用户 |
 | cycle_id | bigint | 是 | 所属周期 |
-| system_type | varchar(10) | 是 | A=市场总节点 / B=板块节点 |
+| system_type | varchar(10) | 是 | A=市场总节点 / B=板块节点（**B 已于 2026-09-23 下线**，此后恒为 A） |
 | anchor_stock | varchar(50) | 是 | 锚定龙头 |
 | anchor_max_board | int | 是 | 锚定龙头最高板数 |
 | d0_date | date | 是 | D0 日期 |
@@ -393,6 +393,11 @@
 | status | varchar(20)·MUL | 是 | 待验证/有效/失效 |
 | status_note | varchar(300) | 是 | 状态来路一句话 |
 | note | text | 是 | 备注 |
+| node_type | varchar(16) | 是 | 节点类型（V34）：类型轴只认 START / DIVERGE / SWITCH（周期节点）、SPACE_BREAK（破局日·观察，0 候选）、SPACE_BREAK_NEXT（破局次日·出手）五个值；NULL＝策略未识别，UI 显示「未识别」，禁止回填「普通/常规/其他」这类反义定义 |
+| break_stock_code | varchar(16) | 是 | 破局股代码（V34）：破了板的那只空间板本身，它是锚、不进候选池 |
+| break_board | int | 是 | 破局股断板前的连板数（V34） |
+| break_form | varchar(16) | 是 | 断板形态（V34）：ZB_BREAK 炸板断板 / MILD_BREAK 温和断板 / A_KILL A杀（判退潮，不判破局） |
+| repair_status | varchar(16) | 是 | 破局次日修复判定（V34）：PENDING 待判定 / SUCCESS 可出手 / FAILED 降级为观察日；周期节点恒 NULL |
 | created_at | datetime | 是 | |
 
 ---

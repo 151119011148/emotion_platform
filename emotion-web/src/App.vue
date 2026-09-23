@@ -3,6 +3,17 @@
 </template>
 
 <style>
+/* ===== 节点类型语义色（破局节点 V34）=====
+   类型轴的展示色，NodeView 与后续 NodeSuggestPanel 共用。
+   放 :root 而不是页面 scoped：scoped 里的变量别的组件读不到，
+   而这些色不止一处要用，硬编码在两处迟早会走轮。 */
+:root {
+  --node-sb: #a78bfa;
+  --node-nxt: #34d399;
+  --node-phase: #60a5fa;
+  --node-none: #8899a6;
+}
+
 body {
   margin: 0;
   padding: 0;
