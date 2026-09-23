@@ -73,7 +73,7 @@ class IntradayServiceTest {
         themeMapper = Mockito.mock(ThemeMapper.class);
         tsMapper = Mockito.mock(ThemeStockMapper.class);
         scMapper = Mockito.mock(StockConceptMapper.class);
-        service = new IntradayService(themeMapper, tsMapper, msMapper, scMapper, null);
+        service = new IntradayService(themeMapper, tsMapper, msMapper, scMapper, null, null);
     }
 
     /** 跨行业题材：一只票可归多个题材，主题材去重计数；辅题材不计数不占未归类。 */

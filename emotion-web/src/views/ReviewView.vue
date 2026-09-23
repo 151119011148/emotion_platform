@@ -123,7 +123,7 @@
       <div v-else class="empty-note">全市场统计未拉取</div>
     </section>
 
-    <!-- ============ D2 日内核心（题材 Top5 + 核心板块 Top5） ============ -->
+    <!-- ============ D2 日内核心（行业板块 + 概念板块 Top5） ============ -->
     <section class="dim-block" :class="readinessClass('D2')">
       <div class="block-head">
         <h3>D2 · 日内核心 <span class="slice">(T 日)</span></h3>
@@ -131,22 +131,10 @@
         <ReadinessBadge :note="readiness.D2" />
         <ScoreChip :score="scoreOf('D2')" />
       </div>
-      <!-- D2 双列表：题材热度 + 核心板块 同时展示（概念 / 行业两个维度） -->
+      <!-- D2 双列表：行业板块(左) + 概念板块(右) 同时展示（行业 / 概念两个维度） -->
       <div class="d2-grid">
         <div class="d2-col">
-          <h4 class="d2-sub">题材热度 <span class="muted">概念维度 · Top5</span></h4>
-          <div v-if="themesView.length" class="topic-list">
-            <div v-for="(t, i) in themesView" :key="t.name" class="topic-row">
-              <span class="topic-rank" :class="'rk' + (i + 1)">{{ i + 1 }}</span>
-              <span class="topic-name">{{ t.name }}</span>
-              <span class="topic-sub">涨停 {{ t.ztCount }} · 最高 {{ t.maxBoard }} 板</span>
-            </div>
-          </div>
-          <div v-else class="empty-note">今日题材表为空（读取时后端会按热门行业自动回填题材）</div>
-        </div>
-
-        <div class="d2-col">
-          <h4 class="d2-sub">核心板块 <span class="muted">行业维度 · Top5</span></h4>
+          <h4 class="d2-sub">行业板块 <span class="muted">行业维度 · Top5</span></h4>
           <div v-if="d2.industries.length" class="topic-list">
             <div v-for="(b, i) in topIndustries" :key="b.industry" class="topic-row">
               <span class="topic-rank" :class="'rk' + (i + 1)">{{ i + 1 }}</span>
@@ -156,6 +144,18 @@
           </div>
           <div v-else class="empty-note">行业板块快照为空（当日无涨停池，或未拉取三池）</div>
           <p v-if="d2.industries.length > 5" class="dim-more">共 {{ d2.industries.length }} 个板块在涨停池，此处展示涨停数前 5</p>
+        </div>
+
+        <div class="d2-col">
+          <h4 class="d2-sub">概念板块 <span class="muted">概念维度 · Top5</span></h4>
+          <div v-if="themesView.length" class="topic-list">
+            <div v-for="(t, i) in themesView" :key="t.name" class="topic-row">
+              <span class="topic-rank" :class="'rk' + (i + 1)">{{ i + 1 }}</span>
+              <span class="topic-name">{{ t.name }}</span>
+              <span class="topic-sub">涨停 {{ t.ztCount }} · 最高 {{ t.maxBoard }} 板</span>
+            </div>
+          </div>
+          <div v-else class="empty-note">今日概念板块为空（读取时后端会按热门行业自动回填题材）</div>
         </div>
       </div>
     </section>

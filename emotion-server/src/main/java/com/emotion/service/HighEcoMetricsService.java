@@ -79,19 +79,23 @@ public class HighEcoMetricsService {
     private final DailyBarService dailyBarService;
     /** 实时快照兜底用的行情客户端；同上传入为 null 时跳过。 */
     private final TencentClient tencent;
+    /** 行业重映射：把涨停池行业归到通达信二级行业（测试构造为 null 时跳过）。 */
+    private final IndustryClassifyService industryClassify;
 
     @Autowired
     public HighEcoMetricsService(MarketStockMapper marketStockMapper, AnchorService anchorService,
-                                 DailyBarService dailyBarService, TencentClient tencent) {
+                                 DailyBarService dailyBarService, TencentClient tencent,
+                                 IndustryClassifyService industryClassify) {
         this.marketStockMapper = marketStockMapper;
         this.anchorService = anchorService;
         this.dailyBarService = dailyBarService;
         this.tencent = tencent;
+        this.industryClassify = industryClassify;
     }
 
     /** 测试可见：不连行情源的构造，日 K 补涨跌幅自动跳过。 */
     HighEcoMetricsService(MarketStockMapper marketStockMapper, AnchorService anchorService) {
-        this(marketStockMapper, anchorService, null, null);
+        this(marketStockMapper, anchorService, null, null, null);
     }
 
     /** 取数结果：metrics 进引擎，vo 直接给 /api/d5/high。 */
@@ -233,9 +237,13 @@ public class HighEcoMetricsService {
             return Collections.emptyList();
         }
         try {
-            return marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
+            List<MarketStock> rows = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
                     .eq(MarketStock::getTradeDate, date)
                     .eq(MarketStock::getPool, pool));
+            if (industryClassify != null) {
+                industryClassify.apply(rows);
+            }
+            return rows;
         } catch (RuntimeException e) {
             log.warn("D5 读池失败 date={} pool={}：{}", date, pool, e.toString());
             return Collections.emptyList();
@@ -253,9 +261,13 @@ public class HighEcoMetricsService {
     /** 近 14 自然日全部池行：监管股行业回填 + 阵眼生命周期回溯共用。 */
     private List<MarketStock> safeRecent(LocalDate date) {
         try {
-            return marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
+            List<MarketStock> rows = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
                     .ge(MarketStock::getTradeDate, date.minusDays(INDUSTRY_LOOKBACK_DAYS))
                     .le(MarketStock::getTradeDate, date));
+            if (industryClassify != null) {
+                industryClassify.apply(rows);
+            }
+            return rows;
         } catch (RuntimeException e) {
             log.warn("D5 近窗池行读取失败 date={}：{}", date, e.toString());
             return Collections.emptyList();

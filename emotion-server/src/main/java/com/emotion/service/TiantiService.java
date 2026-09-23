@@ -68,15 +68,18 @@ public class TiantiService {
     private final CrossDayQuoteAugmentor crossDayQuote;
     private final ZtPerfStore ztPerfStore;
     private final ManualLeaderService manualLeaderService;
+    private final IndustryClassifyService industryClassify;
 
     public TiantiService(PrdMetricsService prdMetrics, MarketStockMapper marketStockMapper,
                          CrossDayQuoteAugmentor crossDayQuote, ZtPerfStore ztPerfStore,
-                         ManualLeaderService manualLeaderService) {
+                         ManualLeaderService manualLeaderService,
+                         IndustryClassifyService industryClassify) {
         this.prdMetrics = prdMetrics;
         this.marketStockMapper = marketStockMapper;
         this.crossDayQuote = crossDayQuote;
         this.ztPerfStore = ztPerfStore;
         this.manualLeaderService = manualLeaderService;
+        this.industryClassify = industryClassify;
     }
 
     public TiantiVO vo(Long userId, LocalDate requested) {
@@ -478,8 +481,10 @@ public class TiantiService {
     }
 
     private List<MarketStock> listPool(LocalDate date, String pool) {
-        return marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
+        List<MarketStock> rows = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
                 .eq(MarketStock::getTradeDate, date)
                 .eq(MarketStock::getPool, pool));
+        industryClassify.apply(rows);
+        return rows;
     }
 }

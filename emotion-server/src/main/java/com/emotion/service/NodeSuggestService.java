@@ -106,15 +106,18 @@ public class NodeSuggestService {
     private final MarketStockMapper marketStockMapper;
     private final MarketDailyMapper marketDailyMapper;
     private final ObjectMapper json;
+    private final IndustryClassifyService industryClassify;
 
     public NodeSuggestService(NodeEventMapper nodeEventMapper,
-                             MarketStockMapper marketStockMapper,
-                             MarketDailyMapper marketDailyMapper,
-                             ObjectMapper json) {
+                              MarketStockMapper marketStockMapper,
+                              MarketDailyMapper marketDailyMapper,
+                              ObjectMapper json,
+                              IndustryClassifyService industryClassify) {
         this.nodeEventMapper = nodeEventMapper;
         this.marketStockMapper = marketStockMapper;
         this.marketDailyMapper = marketDailyMapper;
         this.json = json;
+        this.industryClassify = industryClassify;
     }
 
     public NodeSuggestVO suggest(Long userId, Long id) {
@@ -237,6 +240,9 @@ public class NodeSuggestService {
                 .ge(MarketStock::getTradeDate, from)
                 .le(MarketStock::getTradeDate, to)
                 .and(w -> w.eq(MarketStock::getName, input).or().like(MarketStock::getName, input)));
+        if (industryClassify != null) {
+            industryClassify.apply(rows);
+        }
         Map<String, List<MarketStock>> byCode = new TreeMap<>();
         for (MarketStock row : rows) {
             byCode.computeIfAbsent(row.getCode(), key -> new ArrayList<>()).add(row);
@@ -314,6 +320,9 @@ public class NodeSuggestService {
                 .eq(MarketStock::getTradeDate, r.d0)
                 .eq(MarketStock::getPool, MarketStock.POOL_LIMIT_UP)
                 .eq(MarketStock::getConsecutive, wantBoard));
+        if (industryClassify != null) {
+            industryClassify.apply(d0Rows);
+        }
         for (MarketStock row : d0Rows) {
             if (systemB && !r.sector.equals(row.getIndustry())) {
                 continue;

@@ -7,7 +7,9 @@ import com.emotion.entity.Position;
 import com.emotion.entity.Stock;
 import com.emotion.mapper.MarketStockMapper;
 import com.emotion.mapper.StockMapper;
+import com.emotion.service.IndustryClassifyService;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import java.lang.reflect.Proxy;
 import java.math.BigDecimal;
@@ -71,6 +73,11 @@ class ReviewLedgerServiceTest {
                     }
                     return defaultValue(method.getReturnType());
                 });
+    }
+
+    /** 行业重映射桩：测试台账不走行业归属，of() 返回 null（不触发板块回填）即可。 */
+    private static IndustryClassifyService industryClassifyService() {
+        return Mockito.mock(IndustryClassifyService.class);
     }
 
     // ---- 持仓 ----
@@ -299,7 +306,7 @@ class ReviewLedgerServiceTest {
                 return null;
             }
         };
-        return new ReviewLedgerService(p, pr, stockMapper(), marketStockMapper(), noDict);
+        return new ReviewLedgerService(p, pr, stockMapper(), marketStockMapper(), industryClassifyService());
     }
 
     private static PositionRequest position(String code, String cost, String current, String floatPct,
