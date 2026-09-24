@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>情绪温度 × 身位板 · 联合回测</title>
+<style>
+:root{
+  --bg:#f5f6f8; --panel:#ffffff; --ink:#111827; --ink2:#374151; --muted:#6b7280;
+  --line:#e5e7eb; --line2:#eef1f5;
+  --brand:#4f46e5; --brand-soft:#eef2ff; --brand-line:#c7d2fe;
+  --blue:#2563eb; --blue-soft:#eff6ff;
+  --green:#047857; --green-soft:#ecfdf5; --green-line:#a7f3d0;
+  --amber:#b45309; --amber-soft:#fffbeb; --amber-line:#fde68a;
+  --red:#b91c1c;  --red-soft:#fef2f2;   --red-line:#fecaca;
+  --code-bg:#f8fafc;
+  --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;
+  font-size:14px;line-height:1.75;-webkit-font-smoothing:antialiased}
+a{color:var(--brand);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{display:flex;max-width:1440px;margin:0 auto}
+.side{width:250px;flex:0 0 250px;position:sticky;top:0;height:100vh;overflow-y:auto;
+  background:var(--panel);border-right:1px solid var(--line);padding:22px 0 60px}
+.side h4{margin:0 0 10px;padding:0 20px;font-size:11.5px;letter-spacing:.08em;color:var(--muted);text-transform:uppercase}
+.side a{display:block;padding:5px 20px;color:var(--ink2);font-size:13px;line-height:1.5;border-left:3px solid transparent}
+.side a:hover{background:var(--brand-soft);text-decoration:none}
+.side a.on{color:var(--brand);border-left-color:var(--brand);background:var(--brand-soft);font-weight:600}
+.side .back{margin-top:14px;padding:0 20px;font-size:12px;color:var(--muted)}
+main{flex:1;min-width:0;padding:0 44px 120px}
+.masthead{background:linear-gradient(135deg,#4f46e5 0%,#4338ca 55%,#3730a3 100%);color:#fff;
+  padding:32px 44px;margin:0 -44px 28px}
+.masthead .kicker{font-size:11.5px;letter-spacing:.16em;opacity:.82;text-transform:uppercase}
+.masthead h1{margin:6px 0 10px;font-size:26px;line-height:1.3;font-weight:700}
+.masthead .desc{opacity:.92;font-size:13.5px;max-width:880px}
+.chips{margin-top:15px;display:flex;flex-wrap:wrap;gap:8px}
+.chip{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.24);
+  border-radius:999px;padding:3px 11px;font-size:12px}
+section{margin:0 0 34px;scroll-margin-top:16px}
+h2{font-size:19px;margin:34px 0 12px;padding-bottom:9px;border-bottom:2px solid var(--line)}
+h3{font-size:15.5px;margin:22px 0 9px;color:#1f2937}
+h4{font-size:13.5px;margin:16px 0 7px;color:#374151}
+p{margin:9px 0}
+ul,ol{margin:9px 0;padding-left:22px}
+li{margin:4px 0}
+.small{font-size:12.5px;color:var(--muted)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:15px 17px;margin:14px 0}
+.callout{border-radius:10px;padding:12px 15px;margin:14px 0;border:1px solid;font-size:13.5px}
+.callout .ttl{font-weight:700;margin-bottom:5px}
+.c-info{background:var(--blue-soft);border-color:#bfdbfe;color:#1e3a8a}
+.c-warn{background:var(--amber-soft);border-color:var(--amber-line);color:#78350f}
+.c-bad{background:var(--red-soft);border-color:var(--red-line);color:#7f1d1d}
+.c-ok{background:var(--green-soft);border-color:var(--green-line);color:#065f46}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media(max-width:1120px){.grid2,.grid3,.grid4{grid-template-columns:1fr}}
+.tw{overflow-x:auto;margin:12px 0;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{border-bottom:1px solid var(--line2);padding:8px 11px;text-align:left;vertical-align:top}
+thead th{background:#f9fafb;color:#374151;font-weight:600;font-size:12.5px;white-space:nowrap;border-bottom:1px solid var(--line)}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:#fafbfc}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+td.ctr,th.ctr{text-align:center}
+code{font-family:var(--mono);font-size:12.5px;background:var(--code-bg);border:1px solid var(--line);
+  border-radius:4px;padding:1px 5px;color:#9333ea;white-space:nowrap}
+.b{display:inline-block;border-radius:5px;padding:1px 7px;font-size:11.5px;font-weight:600;line-height:1.7;white-space:nowrap}
+.b-red{background:var(--red-soft);color:var(--red);border:1px solid var(--red-line)}
+.b-green{background:var(--green-soft);color:var(--green);border:1px solid var(--green-line)}
+.b-amber{background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)}
+.b-blue{background:var(--blue-soft);color:var(--blue);border:1px solid #bfdbfe}
+.b-gray{background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb}
+.b-brand{background:var(--brand-soft);color:var(--brand);border:1px solid var(--brand-line)}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.stat .lab{font-size:12px;color:var(--muted);margin-bottom:3px}
+.stat .val{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.25}
+.stat .sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+.chart{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px 8px;margin:12px 0}
+.chart .ct{font-size:13px;font-weight:600;color:#1f2937;margin-bottom:2px}
+.chart .cs{font-size:12px;color:var(--muted);margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin:6px 0 2px;font-size:12px;color:var(--ink2)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.fn{font-size:12px;color:var(--muted);margin:8px 0 0;padding-top:8px;border-top:1px dashed var(--line)}
+.fn b{color:var(--ink2);font-weight:600}
+.pos{color:var(--red);font-weight:600}
+.neg{color:var(--green);font-weight:600}
+.mut{color:var(--muted)}
+hr{border:0;border-top:1px solid var(--line);margin:22px 0}
+@media print{
+  .side{display:none} main{padding:0} .masthead{margin:0 0 20px}
+  body{background:#fff;font-size:12px} section{page-break-inside:avoid}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="side">
+  <h4>情绪温度 × 身位板</h4>
+  <a href="#s0">0 · 结论速览</a>
+  <a href="#s1">1 · 口径与样本</a>
+  <a href="#s2">2 · 日级明细</a>
+  <a href="#s3">3 · 择时 vs 选股</a>
+  <a href="#s4">4 · 温度分档</a>
+  <a href="#s5">5 · 温度 vs 原材料</a>
+  <a href="#s6">6 · 单因子 IC 榜</a>
+  <a href="#s7">7 · 温度 × 因子交互</a>
+  <a href="#s8">8 · 组合回测</a>
+  <a href="#s9">9 · 09-18 逐只复盘</a>
+  <a href="#s10">10 · 对配置的影响</a>
+  <a href="#s11">11 · 局限与待办</a>
+  <div class="back">回测脚本：<br><code>回测脚本/06_预览页数据导出.py</code><br>口径同 02 / 03 / 04</div>
+</nav>
+<main>
+
+<div class="masthead">
+  <div class="kicker">WaveRider · 回测附录</div>
+  <h1>情绪温度 × 身位板 · 联合回测</h1>
+  <div class="desc">
+    T 日按「同题材身位板」规则选候选（当日涨停且连板数 ≥ 2），T+1 以收盘价了结，
+    再把 <code>t_daily_record.temperature</code> 作为市场级变量接进来，回答一个问题：
+    <strong>情绪温度能不能替这套选股规则过滤掉个股风险？</strong>
+    全部数字来自生产库 2026-08-25 ~ 09-18 真实行情，可由 <code>回测脚本/</code> 原样复跑。
+  </div>
+  <div class="chips" id="chips"></div>
+</div>
+
+<!-- ============ 0 ============ -->
+<section id="s0">
+  <h2>0 · 结论速览</h2>
+  <div class="grid3" id="headline"></div>
+
+  <div class="callout c-bad">
+    <div class="ttl">一句话版本</div>
+    温度解释了<strong>日间 11%</strong> 的收益方差，剩下的 <strong>89% 在日内个股之间</strong>。
+    同一天的 7~21 只候选共享同一个温度值，它在数学上就不可能回答「该买哪一只」——
+    所以多因子个股评分不是优化项，是必需品；反过来，个股评分也替代不了温度那 11%（决定仓位该压多重）。
+  </div>
+</section>
+
+<!-- ============ 1 ============ -->
+<section id="s1">
+  <h2>1 · 口径与样本</h2>
+  <div class="tw"><table>
+    <thead><tr><th style="width:150px">环节</th><th>口径</th></tr></thead>
+    <tbody>
+      <tr><td>候选池</td><td><code>t_market_stock</code> 当日 <code>pool='ZT'</code> 且 <code>consecutive &ge; 2</code>（即已有身位的高位股，剔首板杂毛）</td></tr>
+      <tr><td>交易日区间</td><td>2026-08-25 ~ 2026-09-21 取候选；因需要 T+1 收盘价，实际样本落在 <strong>08-25 ~ 09-18</strong></td></tr>
+      <tr><td>T+1 表现</td><td>腾讯 qfq 日 K：<code>close(T+1) / close(T) − 1</code>，逐只精确匹配 <code>date</code> 那一根，不用相邻交易日顶替</td></tr>
+      <tr><td>T+1 是否涨停</td><td>该股代码是否出现在 T+1 的 <code>t_market_stock</code> ZT 池</td></tr>
+      <tr><td>温度取值</td><td><code>t_daily_record.temperature</code>（<code>user_id=1</code>），T 日盘后算出、T+1 才交易 → <strong>无未来函数</strong></td></tr>
+      <tr><td>无未来函数的边界</td><td>温度里含人工填报子指标，T 日 15:00 后才可得；本回测把「T 日温度 → T+1 收益」的时序严格分开</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="grid4" id="sample-stats"></div>
+
+  <div class="callout c-warn">
+    <div class="ttl">样本的四处缺口（都影响结论强度，写在前面）</div>
+    <ul>
+      <li><strong>缺 09-15 三池</strong>：<code>t_market_stock</code> 没有 09-15 的涨停池，09-14 的候选拿不到「次日涨停」判定，该日 <code>涨停率=0%</code> 是数据缺失不是事实。</li>
+      <li><strong>09-21 有候选无次日</strong>：19 只候选因窗口末无 T+1 收盘价被剔除，未纳入 226 条样本。</li>
+      <li><strong>4 天没有温度记录</strong>：09-01 / 09-14 / 09-16 / 09-17。<code>temperature</code> 依赖人工填报，18 个样本日里只有 14 天有值，占比 78%。</li>
+      <li><strong>因子覆盖严重不均</strong>：<code>turnover</code> 与 <code>float_mv</code> 只在 09-16~09-18 三天有值（33 条），<code>score_premium</code> 只有 43 条。它们的 IC 与全样本因子的 IC <strong>不可横向比较</strong>。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 2 ============ -->
+<section id="s2">
+  <h2>2 · 日级明细：T 日温度 → T+1 身位候选表现</h2>
+  <div class="chart">
+    <div class="ct">情绪温度（线）与次日候选均涨（柱）</div>
+    <div class="cs">柱：当日全部身位候选在 T+1 的等权平均涨幅；线：T 日情绪温度。左轴涨幅、右轴温度。</div>
+    <div class="legend">
+      <span><i style="background:#c7d2fe"></i>次日均涨（左轴 %）</span>
+      <span><i style="background:#4f46e5"></i>情绪温度 T（右轴）</span>
+      <span><i style="background:#9ca3af"></i>无温度记录</span>
+    </div>
+    <div id="chart-days"></div>
+  </div>
+
+  <div class="tw"><table id="tbl-days">
+    <thead><tr>
+      <th>日期</th><th class="num">温度 T</th><th class="num">ΔT</th><th>结构 h/p/b</th><th>阶段 · 方向</th>
+      <th class="num">候选</th><th class="num">次日均涨</th><th class="num">胜率</th><th class="num">次日涨停率</th>
+      <th class="num">日内 σ</th><th class="num">最差</th><th class="num">当日涨停</th><th class="num">最高板</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="fn"><b>读法：</b>「日内 σ」是当天候选之间涨幅的标准差。它普遍大于「日间」的均涨差异——
+  这就是第 3 节要量化的那件事。09-14 涨停率 0% 系缺 09-15 三池所致。
+  <b>结构 h/p/b</b> 是情绪温度的三个分项（高度分 / 分档溢价分 / 宽度分）；
+  其中 <code>score_premium</code> 全样本只有 43 条有值，故多数日子显示 <code>—</code>，
+  这也是第 6 节 IC 表里 <code>h+p</code> 那一行覆盖率仅 19% 的原因。</p>
+</section>
+
+<!-- ============ 3 ============ -->
+<section id="s3">
+  <h2>3 · 择时 vs 选股：收益方差到底来自哪里</h2>
+  <div class="chart">
+    <div class="ct">收益方差的来源分解</div>
+    <div class="cs">把 226 条样本的总离差平方和拆成「日与日之间的差异」和「同一天内个股之间的差异」。</div>
+    <div id="chart-variance"></div>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <h4>算式</h4>
+      <p class="small" style="font-family:var(--mono)">
+        SS<sub>日间</sub> = Σ n<sub>d</sub>·(mean<sub>d</sub> − mean<sub>总</sub>)²<br>
+        SS<sub>日内</sub> = Σ n<sub>d</sub>·σ<sub>d</sub>²<br>
+        占比 = SS / (SS<sub>日间</sub> + SS<sub>日内</sub>)
+      </p>
+      <p class="small">全样本 n=226，总均值 <span id="v-grand"></span>，总 σ <span id="v-sigma"></span>。</p>
+    </div>
+    <div class="callout c-info" style="margin:0">
+      <div class="ttl">这条结论的可证伪性</div>
+      温度是<strong>市场级</strong>变量：同一天 7~21 只候选拿到的是同一个数值。
+      因此它最多只能解释「日间」那一块——11%。要解释另外 89%，
+      必须引入<strong>个股级</strong>因子（第 6 节的 IC 榜就是在找这批因子）。
+      <p class="small" style="margin-bottom:0">反过来说：任何<em>只</em>做市场级择时的策略，天花板就是 11%。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 4 ============ -->
+<section id="s4">
+  <h2>4 · 温度分档：方向单调，但每档天数太少</h2>
+  <div class="chart">
+    <div class="ct">按温度分档的次日均涨（柱）与日均胜率（线）</div>
+    <div class="cs">按「天」聚合，避免同一天多只样本被当成独立观测（伪独立）。</div>
+    <div class="legend">
+      <span><i style="background:#c7d2fe"></i>日均涨幅（左轴 %）</span>
+      <span><i style="background:#b45309"></i>日均胜率（右轴 %）</span>
+    </div>
+    <div id="chart-bands"></div>
+  </div>
+
+  <div class="tw"><table id="tbl-bands">
+    <thead><tr>
+      <th>温度档</th><th class="num">天数</th><th class="num">候选只数</th>
+      <th class="num">按天 均涨</th><th class="num">按天 胜率</th><th class="num">按天 涨停率</th>
+      <th class="num">按票 均涨</th><th class="num">按票 胜率</th><th>落在这一档的日子</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <div class="callout c-warn">
+    <div class="ttl">为什么「方向单调」依然不能当规律用</div>
+    四档的均涨从 +2.17% 单调升到 +5.84%、胜率从 61.0% 升到 83.7%，方向没问题；
+    但每档只有 <strong>2~6 个交易日</strong>。n=2 的档位，把某一天换掉结论就翻转——
+    样本量不足以支撑「温度越高越该做」的推论。
+    <p style="margin-bottom:0">另一个反直觉点：<strong>温度最低的那天反而是全样本最好的一天</strong>——
+    09-04 温度 42.5°，7 只候选次日均涨 <span class="pos">+7.19%</span>、胜率 85.7%。
+    冰点期恰恰是赔率最高的位置，所以温度不能做成「低就不做」的开关。</p>
+  </div>
+</section>
+
+<!-- ============ 5 ============ -->
+<section id="s5">
+  <h2>5 · 温度 vs 它自己的原材料</h2>
+  <p>情绪温度由九个分项合成，其中 <code>breadth</code> 维度的原料就是「涨停家数」。
+  如果温度对次日收益的预测力还不如它自己的原料，那这层合成就没有增量。</p>
+  <div class="tw"><table id="tbl-corr">
+    <thead><tr><th>自变量</th><th>被解释</th><th class="num">n（天）</th><th class="num">Pearson</th><th class="num">Spearman</th><th>结论</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <div class="callout c-info">
+    <div class="ttl">温度与它的原料高度共线</div>
+    温度 × 涨停家数 的相关性是 <strong id="tvz"></strong>（n=<span id="tvz-n"></span>）——
+    两者几乎是同一个东西的两种表述。
+    而在「预测次日身位股收益」这件事上，涨停家数单独上阵反而更有效。
+    <strong>结论：温度不进个股评分公式</strong>，它保留在仓位/择时侧。
+  </div>
+</section>
+
+<!-- ============ 6 ============ -->
+<section id="s6">
+  <h2>6 · 单因子 IC 榜：那 89% 在哪里</h2>
+  <div class="chart">
+    <div class="ct">各因子对次日收益的秩相关（Spearman IC）</div>
+    <div class="cs">红＝正向（因子越大次日越好），绿＝负向。条形右侧标注样本数 n —— 覆盖度不同的因子不可横比。</div>
+    <div id="chart-ic"></div>
+  </div>
+  <div class="tw"><table id="tbl-ic">
+    <thead><tr>
+      <th>因子</th><th class="ct">层级</th><th class="num">n</th><th class="num">覆盖率</th><th class="num">IC</th>
+      <th class="num">低位组均涨</th><th class="num">低位组胜率</th><th class="num">高位组均涨</th><th class="num">高位组胜率</th><th class="num">多空差</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <div class="callout c-bad">
+    <div class="ttl">本次回测修正：「首次封板」的 IC 原本是在偏样本上算的</div>
+    <code>t_market_stock.first_seal_time</code> 在库里有两种形态：<code>94536</code>（5 位，个位小时）
+    与 <code>104156</code>（6 位）。旧解析只认 6 位，把 <strong>192/226 条</strong>静默判为缺失——
+    于是「首次封板」的 IC 实际是在「10:00 之后才封板」这 34 条偏样本上算出来的，得到 <strong>+0.196</strong>，
+    并被误读为「越晚封板越好」。
+    <p style="margin-bottom:0">用 <code>zfill(6)</code> 归一后全样本 n=226，IC 变为 <strong>−0.150</strong>：
+    低半组（<strong>早</strong>封板）均涨 <span class="pos">+3.68%</span>／胜率 68.1%，
+    高半组（<strong>晚</strong>封板）<span class="pos">+3.04%</span>／胜率 61.9%，多空差 −0.63pp。
+    <strong>方向由「越晚越好」翻转为「越早越好」</strong>——这才与 v1.0 里 <code>first_seal_time ≤ 10:00</code> 加成、
+    以及 §10 保留的封板时序项在逻辑上一致；但强度很弱（10 个因子里排第 6），只能当次级项。
+    主 PRD §12.4.5 的该行已同步更正。</p>
+  </div>
+
+  <div class="callout c-info">
+    <div class="ttl">修正后因子方向反而自洽了，但依然不支持「单因子阈值」</div>
+    封单 / 成交额（+0.308，封得<em>死</em>）、首次封板时间（−0.150，封得<em>早</em>）、封单额（+0.222）三个因子同向，
+    讲的都是同一件事：<strong>一封就锁死的票更好走</strong>。修正前「两个因子方向相反」的矛盾消失了。
+    <p style="margin-bottom:0">但即便如此，最强的 +0.308 也只对应多空差 2.46pp、高低组胜率 56.0% vs 73.6%——
+    <strong>低半组里仍有 56% 的票上涨</strong>。任何单个因子都做不到用阈值把票筛干净，
+    所以 §10「排序依据改多因子加权」的结论不变，只是理由从「因子互相矛盾」换成了「单因子区分度不够」。</p>
+  </div>
+</section>
+
+<!-- ============ 7 ============ -->
+<section id="s7">
+  <h2>7 · 温度 × 个股因子 交互</h2>
+  <p>如果温度真的调节了「什么样的票更好做」，那么把样本按温度切两半后，同一因子的 IC 应该出现明显差异。</p>
+  <div class="tw"><table id="tbl-inter">
+    <thead><tr><th>因子</th><th>低温 T&lt;60</th><th>高温 T≥60</th><th class="num">IC 差</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <div class="callout c-info">
+    <div class="ttl">结论</div>
+    高低温两组的因子结构基本一致：<strong>封单强度始终最强、成交额始终负向</strong>（成交越小越好）。
+    连板数的 IC 从低温 +0.065 升到高温 +0.141，方向为「越热越认高度」，
+    但绝对值仍然很低——这正与主 PRD §6 用多因子评分替代「按连板数排序」的结论一致。
+  </div>
+</section>
+
+<!-- ============ 8 ============ -->
+<section id="s8">
+  <h2>8 · 组合回测：温度当仓位旋钮</h2>
+  <p>每日等权买入当日<strong>全部</strong>身位候选，次日收盘卖出；温度只用来决定仓位系数 w(T)。
+  无温度记录的日子按「不开仓」处理（这是保守假设，第 11 节会说明为何它不理想）。</p>
+
+  <div class="chart">
+    <div class="ct">六种仓位方案的累计收益</div>
+    <div class="cs">横轴为方案，数字为期末累计收益；回撤标在柱顶。</div>
+    <div id="chart-nav"></div>
+  </div>
+  <div class="chart">
+    <div class="ct">P1 恒满仓的净值路径</div>
+    <div class="cs">仅用有温度记录的 14 个交易日，起点 1.000。</div>
+    <div id="chart-path"></div>
+  </div>
+
+  <div class="tw"><table id="tbl-pol">
+    <thead><tr><th>方案</th><th class="num">有仓天数</th><th class="num">期末净值</th><th class="num">累计收益</th><th class="num">最大回撤</th><th>读法</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <div class="callout c-warn">
+    <div class="ttl">反直觉结论：温度过滤提高单日质量，却降低总收益</div>
+    恒满仓（P1）累计 <span class="pos">+56.60%</span>；改成「T≥60 才开仓」（P5）后，
+    <strong>有仓日从 14 天降到 8 天</strong>，日均涨幅确实变好了，但累计收益掉到
+    <span class="pos">+39.52%</span>。
+    <p style="margin-bottom:0">原因就是第 4 节那天：低温日（09-04，+7.19%）被过滤掉的损失大于避开低质日的收益。
+    所以温度的定位是<strong>仓位旋钮</strong>（同一套候选该压多重），
+    <strong>不是开仓开关</strong>（让不让做）。</p>
+  </div>
+</section>
+
+<!-- ============ 9 ============ -->
+<section id="s9">
+  <h2>9 · 2026-09-18 逐只复盘：温度说得出「约 1/3 会失败」，说不出是哪 1/3</h2>
+  <div class="grid4" id="d18-stats"></div>
+
+  <div class="tw"><table id="tbl-d18">
+    <thead><tr>
+      <th>代码</th><th>名称</th><th class="num">板</th><th>题材</th><th class="num">成交额亿</th><th class="num">换手%</th>
+      <th class="num">封单亿</th><th class="num">封单/成交额</th><th class="num">首次封板</th><th class="num">次日涨跌</th><th class="ct">次日涨停</th><th class="ct">判定</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <div class="grid2">
+    <div class="tw"><table id="tbl-cmp" style="margin:0">
+      <thead><tr><th>指标</th><th class="num">走强组（8 只）</th><th class="num">未走出来组（4 只）</th><th class="num">差异</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div class="callout c-warn" style="margin:0">
+      <div class="ttl">为什么这 3 只没走出来</div>
+      当天温度 67.6°（发酵 · 上升）隐含的成功率与该档历史胜率只差约 1 个百分点——
+      <strong>温度正确预告了风险存在</strong>，但两组在成交额、换手率、封单强度、封板时间上
+      <strong>都没有统计显著分野</strong>（n=8 vs n=4，任何差异都在噪声范围内）。
+      <p style="margin-bottom:0">唯一值得记的是重挫的那只：<strong>经纬股份 301390，2 板、−6.69%</strong>。
+      失败并非只发生在高位——4 板的锡华科技只小跌 1.30%，2 板的经纬却重挫。
+      这与「单靠身位高度不足以过滤风险」的判断一致，也正是 §6 走多因子评分的理由。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 10 ============ -->
+<section id="s10">
+  <h2>10 · 对配置的直接影响</h2>
+  <div class="tw"><table>
+    <thead><tr><th>配置项</th><th>原默认</th><th>建议</th><th>依据</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>filter_min_amount</code></td>
+        <td><span class="b b-gray">1.0 亿 · 直接剔除</span></td>
+        <td><span class="b b-amber">0.5 亿 · 改为 MARK</span></td>
+        <td>成交额 IC 为 <strong>−0.285（负向）</strong>，说明<strong>小成交额票平均表现更好</strong>。
+        原阈值系统性剔掉了最好的那一半。而 1 亿硬门槛还会误杀最高身位股
+        （09-21 空间板华瓷股份 5 板，成交额仅 0.49 亿的一字锁仓）。</td>
+      </tr>
+      <tr>
+        <td>排序依据</td>
+        <td><span class="b b-gray">按命中原则数量</span></td>
+        <td><span class="b b-blue">多因子加权评分</span></td>
+        <td>实测身位候选与节点票<strong>交集为空</strong>，「命中数量」恒等于 1，等于没有排序。
+        且最强因子（封单/成交额 +0.308）的低半组里仍有 56% 的票上涨——
+        单因子阈值筛不干净，只能加权。</td>
+      </tr>
+      <tr>
+        <td>连板数权重</td>
+        <td><span class="b b-gray">作为主要排序键</span></td>
+        <td><span class="b b-amber">降权，仅作身位判定</span></td>
+        <td>连板数 IC 仅 <strong>+0.100</strong>，在 10 个因子里排第 8。
+        它适合用来定义「谁是身位」，不适合用来判断「次日谁涨」。</td>
+      </tr>
+      <tr>
+        <td>情绪温度的用法</td>
+        <td><span class="b b-gray">未接入</span></td>
+        <td><span class="b b-blue">只进仓位/择时，不进选股评分</span></td>
+        <td>温度对个股收益无增量（IC +0.131，低于封单强度 0.308，也低于它自己的原料）；
+        且 18 个样本日里只有 14 天有值，不能作为候选产出的前置条件。</td>
+      </tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ 11 ============ -->
+<section id="s11">
+  <h2>11 · 局限与待办</h2>
+  <div class="grid2">
+    <div class="card">
+      <h4>样本层面的局限</h4>
+      <ul>
+        <li><strong>窗口太短</strong>：18 个交易日、226 条样本。温度分档里最小的一档只有 2 天，谈不上统计功效。</li>
+        <li><strong>单边行情</strong>：全样本次日均涨 +3.36%、胜率 65.0%，属于顺风样本；策略在退潮期的表现未被充分检验。</li>
+        <li><strong>日 K 未落库</strong>：本次 141 只票的 qfq 日 K 是脚本现拉腾讯的，<code>t_daily_bar</code> 里只有 10 只阵眼票。要复跑需联网。</li>
+        <li><strong>次日收盘了结</strong>：未区分开盘/盘中买点，实际执行价与收盘价有滑点。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>数据层面的待办</h4>
+      <ul>
+        <li><strong>补 09-15 三池</strong>，否则 09-14 的候选永远拿不到「次日涨停」判定。</li>
+        <li><strong>回填 <code>t_zt_perf</code></strong>：目前只有 09-14 / 09-18 / 09-21 三天，主 PRD 的分歧日规则依赖它。</li>
+        <li><strong>补 <code>turnover_rate</code> / <code>float_mv</code></strong>：只有 3 天有值，导致两个因子的 IC 无法与全样本因子比较。</li>
+        <li><strong>温度填报率</strong>：78%（14/18）。若要把温度用于仓位，缺失日的处理规则必须先定死——本回测按「不开仓」处理是<strong>偏保守</strong>的假设（第 8 节 P1 因此少算了 4 天）。</li>
+        <li><strong><code>first_seal_time</code> 字段形态统一</strong>：5 位 / 6 位混用，是本次 IC 出错的直接原因，建议在写入侧归一为 <code>HHMMSS</code>。</li>
+      </ul>
+    </div>
+  </div>
+  <p class="fn"><b>复算入口：</b><code>回测脚本/00_候选池抽取.py</code> → <code>01_日K批量拉取.py</code> →
+  <code>02_温度联合回测.py</code> → <code>03_日级聚合与组合回测.py</code> → <code>04_单因子IC与交互.py</code>；
+  本页全部数字由 <code>06_预览页数据导出.py</code> 汇总输出，不引入任何新增计算口径。</p>
+</section>
+
+</main>
+</div>
+
+<script>
+const D = __DATA_JSON__;
+const NS = 'http://www.w3.org/2000/svg';
+const RED = '#b91c1c', GREEN = '#047857', INK = '#111827', MUT = '#6b7280';
+const BRAND = '#4f46e5', BSOFT = '#c7d2fe', AMBER = '#b45309', LINE = '#e5e7eb';
+
+function mk(t, a) { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); return e; }
+function el(t, c, h) { const e = document.createElement(t); if (c) e.className = c; if (h !== undefined) e.innerHTML = h; return e; }
+function txt(p, x, y, s, o) {
+  o = o || {};
+  const e = mk('text', { x: x, y: y, fill: o.fill || MUT, 'font-size': o.fs || 11,
+    'text-anchor': o.anchor || 'middle', 'font-family': 'inherit' });
+  if (o.weight) e.setAttribute('font-weight', o.weight);
+  if (o.mono) e.setAttribute('style', 'font-variant-numeric:tabular-nums');
+  e.textContent = s; p.appendChild(e); return e;
+}
+function sgn(v, d) { d = d === undefined ? 2 : d; return (v > 0 ? '+' : '') + v.toFixed(d); }
+function col(v, inv) {
+  if (v === null || v === undefined || v === 0) return MUT;
+  return (v > 0) !== !!inv ? RED : GREEN;
+}
+function pc(v, d) { d = d === undefined ? 2 : d; return (v > 0 ? '+' : '') + v.toFixed(d) + '%'; }
+
+/* ---------- chips ---------- */
+(function () {
+  const h = D.head, P = D.pool_raw;
+  const items = [
+    h.samples + ' 条样本',
+    h.day_count + ' 个选股日',
+    h.stocks + ' 只去重候选',
+    h.start + ' ~ ' + h.end,
+    '候选池原始 ' + P.rows + ' 条 / ' + P.codes + ' 只',
+    'T 日选 · T+1 收盘了结'
+  ];
+  const box = document.getElementById('chips');
+  items.forEach(function (t) { box.appendChild(el('span', 'chip', t)); });
+})();
+
+/* ---------- 0 headline ---------- */
+(function () {
+  const box = document.getElementById('headline');
+  const v = D.variance;
+  const cards = [
+    ['日间方差占比', v.day_pct.toFixed(1) + '%', '温度能触及的上限', 'red'],
+    ['日内方差占比', v.stock_pct.toFixed(1) + '%', '只能靠个股因子', 'amber'],
+    ['温度 IC（个股级）', sgn(D.ic.find(function (r) { return r.name === '情绪温度 T'; }).ic, 3), '排在 10 个因子的第 7 位', 'plain'],
+    ['最强因子 IC', sgn(D.ic[0].ic, 3), D.ic[0].name + '，是温度的 2.3 倍', 'red'],
+    ['P1 恒满仓累计', '+' + D.policies[0].cum.toFixed(2) + '%', '14 个有温度日', 'red'],
+    ['P5 仅 T≥60 累计', '+' + D.policies[4].cum.toFixed(2) + '%', '提高单日质量，降低总收益', 'green']
+  ];
+  cards.forEach(function (c) {
+    const d = el('div', 'stat');
+    d.appendChild(el('div', 'lab', c[0]));
+    const val = el('div', 'val', c[1]);
+    val.style.color = c[3] === 'red' ? RED : (c[3] === 'green' ? GREEN : (c[3] === 'amber' ? AMBER : INK));
+    d.appendChild(val);
+    d.appendChild(el('div', 'sub', c[2]));
+    box.appendChild(d);
+  });
+})();
+
+/* ---------- 1 sample stats ---------- */
+(function () {
+  const h = D.head, box = document.getElementById('sample-stats');
+  const rows = [
+    ['样本条数', h.samples, '有效 T+1 收盘价可取得'],
+    ['覆盖交易日', h.day_count, '其中 4 天无温度记录'],
+    ['去重个股', h.stocks, '剔重后'],
+    ['全样本次日均涨', pc(h.avg), '胜率 ' + h.win.toFixed(1) + '% · 次日涨停率 ' + h.promo_all.toFixed(1) + '%']
+  ];
+  rows.forEach(function (r) {
+    const d = el('div', 'stat');
+    d.appendChild(el('div', 'lab', r[0]));
+    const v = el('div', 'val', r[1]);
+    if (r[0].indexOf('均涨') >= 0) v.style.color = RED;
+    d.appendChild(v);
+    d.appendChild(el('div', 'sub', r[2]));
+    box.appendChild(d);
+  });
+})();
+
+/* ---------- 2 combo chart ---------- */
+(function () {
+  const W = 920, H = 268, ml = 46, mr = 50, mt = 16, mb = 52;
+  const s = mk('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: H });
+  document.getElementById('chart-days').appendChild(s);
+  const days = D.days;
+  const iw = W - ml - mr, ih = H - mt - mb;
+  const gMin = Math.min(-2, Math.min.apply(null, days.map(function (d) { return d.avg; })));
+  const gMax = Math.max(8, Math.max.apply(null, days.map(function (d) { return d.avg; })));
+  const tVals = days.filter(function (d) { return d.T !== null; }).map(function (d) { return d.T; });
+  const tMin = Math.floor(Math.min.apply(null, tVals) / 5) * 5 - 5;
+  const tMax = Math.ceil(Math.max.apply(null, tVals) / 5) * 5 + 5;
+  const step = iw / days.length;
+  function gy(v) { return mt + ih * (1 - (v - gMin) / (gMax - gMin)); }
+  function ty(v) { return mt + ih * (1 - (v - tMin) / (tMax - tMin)); }
+  // grid + left axis
+  [0, 2, 4, 6, 8].forEach(function (v) {
+    if (v < gMin || v > gMax) return;
+    s.appendChild(mk('line', { x1: ml, x2: ml + iw, y1: gy(v), y2: gy(v), stroke: LINE, 'stroke-width': 1 }));
+    txt(s, ml - 8, gy(v) + 4, v + '%', { anchor: 'end', fs: 10.5 });
+  });
+  s.appendChild(mk('line', { x1: ml, x2: ml + iw, y1: gy(0), y2: gy(0), stroke: '#cbd5e1', 'stroke-width': 1.4 }));
+  // bars
+  days.forEach(function (d, i) {
+    const x = ml + i * step + step * 0.22, w = step * 0.56;
+    const y0 = gy(0), y1 = gy(d.avg);
+    s.appendChild(mk('rect', { x: x, y: Math.min(y0, y1), width: w, height: Math.abs(y1 - y0),
+      fill: d.avg >= 0 ? BSOFT : '#a7f3d0', rx: 2 }));
+    txt(s, ml + i * step + step * 0.5, y1 - 5, sgn(d.avg, 1), { fs: 10, fill: col(d.avg) || RED });
+  });
+  // right axis for T
+  for (var i = 0; i <= 4; i++) {
+    var v = tMin + (tMax - tMin) * i / 4;
+    txt(s, ml + iw + 8, ty(v) + 4, v.toFixed(0) + '°', { anchor: 'start', fs: 10.5, fill: BRAND });
+  }
+  // T line
+  var pts = [];
+  days.forEach(function (d, i) {
+    if (d.T === null) { pts.push(null); return; }
+    pts.push([ml + i * step + step * 0.5, ty(d.T)]);
+  });
+  var seg = [];
+  pts.forEach(function (p) {
+    if (p === null) { if (seg.length > 1) drawSeg(seg); seg = []; return; }
+    seg.push(p);
+  });
+  function drawSeg(a) {
+    s.appendChild(mk('polyline', { points: a.map(function (p) { return p.join(','); }).join(' '),
+      fill: 'none', stroke: BRAND, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+  }
+  pts.forEach(function (p, i) {
+    if (p === null) {
+      s.appendChild(mk('circle', { cx: ml + i * step + step * 0.5, cy: gy(days[i].avg), r: 2.6, fill: '#9ca3af' }));
+      return;
+    }
+    s.appendChild(mk('circle', { cx: p[0], cy: p[1], r: 3.2, fill: '#fff', stroke: BRAND, 'stroke-width': 2 }));
+  });
+  // x labels
+  days.forEach(function (d, i) {
+    txt(s, ml + i * step + step * 0.5, H - 32, d.date.slice(5), { fs: 10 });
+    txt(s, ml + i * step + step * 0.5, H - 18, d.n + '只', { fs: 9.5, fill: '#9ca3af' });
+  });
+  txt(s, ml + iw / 2, H - 2, '日期（下方数字为该日候选只数）', { fs: 10.5 });
+})();
+
+/* ---------- daily table ---------- */
+(function () {
+  const tb = document.querySelector('#tbl-days tbody');
+  D.days.forEach(function (d) {
+    const tr = el('tr');
+    const st = (d.h === null) ? '—'
+      : d.h + '/' + (d.p === null ? '—' : d.p) + '/' + (d.b === null ? '—' : d.b);
+    tr.innerHTML =
+      '<td>' + d.date + '</td>' +
+      '<td class="num">' + (d.T === null ? '<span class="mut">—</span>' : d.T.toFixed(1)) + '</td>' +
+      '<td class="num">' + (d.dT === null ? '<span class="mut">—</span>' : sgn(d.dT, 1)) + '</td>' +
+      '<td><code>' + st + '</code></td>' +
+      '<td>' + (d.stage || '<span class="mut">—</span>') + (d.direc ? ' · ' + d.direc : '') + '</td>' +
+      '<td class="num">' + d.n + '</td>' +
+      '<td class="num" style="color:' + col(d.avg) + '">' + pc(d.avg) + '</td>' +
+      '<td class="num">' + d.win.toFixed(1) + '%</td>' +
+      '<td class="num">' + (d.promo === null ? '—' : d.promo.toFixed(1) + '%') + '</td>' +
+      '<td class="num">' + d.sd.toFixed(2) + '</td>' +
+      '<td class="num" style="color:' + (d.worst < 0 ? GREEN : MUT) + '">' + pc(d.worst) + '</td>' +
+      '<td class="num">' + (d.zt === null ? '—' : d.zt) + '</td>' +
+      '<td class="num">' + (d.maxlb === null ? '—' : d.maxlb) + '</td>';
+    tb.appendChild(tr);
+  });
+})();
+
+/* ---------- 3 variance ---------- */
+(function () {
+  document.getElementById('v-grand').textContent = pc(D.variance.grand);
+  document.getElementById('v-sigma').textContent = D.variance.sigma.toFixed(2);
+  const W = 920, H = 96;
+  const s = mk('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: H });
+  document.getElementById('chart-variance').appendChild(s);
+  const x0 = 12, w = W - 24, y = 20, hh = 40;
+  const a = D.variance.day_pct / 100 * w, b = D.variance.stock_pct / 100 * w;
+  s.appendChild(mk('rect', { x: x0, y: y, width: a, height: hh, fill: BRAND }));
+  s.appendChild(mk('rect', { x: x0 + a, y: y, width: b, height: hh, fill: '#fbbf24' }));
+  txt(s, x0 + a / 2, y + 25, '日间（选时）' + D.variance.day_pct + '%', { fill: '#fff', fs: 13, weight: 700 });
+  txt(s, x0 + a + b / 2, y + 25, '日内（选股）' + D.variance.stock_pct + '%', { fill: '#78350f', fs: 13, weight: 700 });
+  txt(s, x0 + a / 2, y + hh + 18, '温度只能作用在这一块', { fs: 11 });
+  txt(s, x0 + a + b / 2, y + hh + 18, '只能靠个股因子解释', { fs: 11 });
+})();
+
+/* ---------- 4 bands ---------- */
+(function () {
+  const bands = D.bands;
+  const W = 920, H = 250, ml = 46, mr = 50, mt = 14, mb = 46;
+  const s = mk('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: H });
+  document.getElementById('chart-bands').appendChild(s);
+  const iw = W - ml - mr, ih = H - mt - mb;
+  const gMax = Math.max.apply(null, bands.map(function (b) { return b.day_avg; })) * 1.35;
+  const step = iw / bands.length;
+  function gy(v) { return mt + ih * (1 - v / gMax); }
+  function wy(v) { return mt + ih * (1 - v / 100); }
+  [0, 2, 4, 6].forEach(function (v) {
+    if (v > gMax) return;
+    s.appendChild(mk('line', { x1: ml, x2: ml + iw, y1: gy(v), y2: gy(v), stroke: LINE }));
+    txt(s, ml - 8, gy(v) + 4, v + '%', { anchor: 'end', fs: 10.5 });
+  });
+  s.appendChild(mk('line', { x1: ml, x2: ml + iw, y1: gy(0), y2: gy(0), stroke: '#cbd5e1' }));
+  bands.forEach(function (b, i) {
+    const x = ml + i * step + step * 0.2, w = step * 0.6;
+    s.appendChild(mk('rect', { x: x, y: gy(b.day_avg), width: w, height: gy(0) - gy(b.day_avg), fill: BSOFT, rx: 3 }));
+    txt(s, x + w / 2, gy(b.day_avg) - 6, pc(b.day_avg, 2), { fs: 11, fill: RED, weight: 600 });
+    txt(s, x + w / 2, H - 26, b.label, { fs: 11, fill: INK });
+    txt(s, x + w / 2, H - 12, b.days + ' 天 · ' + b.stocks + ' 只', { fs: 10 });
+  });
+  bands.forEach(function (b, i) {
+    txt(s, ml + i * step + step * 0.8, wy(b.day_win) + 4, b.day_win.toFixed(1) + '%', { fs: 10.5, fill: AMBER, weight: 600 });
+  });
+  var lp = bands.map(function (b, i) { return [ml + i * step + step * 0.8, wy(b.day_win)]; });
+  s.appendChild(mk('polyline', { points: lp.map(function (p) { return p.join(','); }).join(' '),
+    fill: 'none', stroke: AMBER, 'stroke-width': 2, 'stroke-dasharray': '4 3' }));
+  lp.forEach(function (p) { s.appendChild(mk('circle', { cx: p[0], cy: p[1], r: 3, fill: AMBER })); });
+  txt(s, ml + iw + 8, mt + 10, '胜率', { anchor: 'start', fs: 10.5, fill: AMBER });
+})();
+
+(function () {
+  const tb = document.querySelector('#tbl-bands tbody');
+  D.bands.forEach(function (b) {
+    const tr = el('tr');
+    tr.innerHTML =
+      '<td>' + b.label + '</td>' +
+      '<td class="num">' + b.days + '</td>' +
+      '<td class="num">' + b.stocks + '</td>' +
+      '<td class="num" style="color:' + col(b.day_avg) + '">' + pc(b.day_avg) + '</td>' +
+      '<td class="num">' + b.day_win.toFixed(1) + '%</td>' +
+      '<td class="num">' + b.day_promo.toFixed(1) + '%</td>' +
+      '<td class="num" style="color:' + col(b.stk_avg) + '">' + pc(b.stk_avg) + '</td>' +
+      '<td class="num">' + b.stk_win.toFixed(1) + '%</td>' +
+      '<td class="small">' + b.detail.map(function (d) { return d.date + '(' + d.T + '°)'; }).join('、') + '</td>';
+    tb.appendChild(tr);
+  });
+})();
+
+/* ---------- 5 corr ---------- */
+(function () {
+  document.getElementById('tvz').textContent = sgn(D.temp_vs_zt.pe, 3);
+  document.getElementById('tvz-n').textContent = D.temp_vs_zt.n;
+  const note = {
+    '情绪温度 T': '温度越高次日越好，但强度弱',
+    '涨停家数（原材料）': '比合成后的温度更强',
+    '最高板': '高度本身几乎无预测力'
+  };
+  const tb = document.querySelector('#tbl-corr tbody');
+  D.corr.forEach(function (c) {
+    const nc = c.pe > 0.3 ? '<span class="b b-red">较强正向</span>' : (c.pe > 0.15 ? '<span class="b b-amber">弱正向</span>' : '<span class="b b-gray">接近噪声</span>');
+    const tr = el('tr');
+    tr.innerHTML = '<td>' + c.label + '</td><td>' + c.target + '</td><td class="num">' + c.n + '</td>' +
+      '<td class="num">' + sgn(c.pe, 3) + '</td><td class="num">' + sgn(c.sp, 3) + '</td>' +
+      '<td>' + nc + ' <span class="small">' + (note[c.label] || '') + '</span></td>';
+    tb.appendChild(tr);
+  });
+})();
+
+/* ---------- 6 IC ---------- */
+(function () {
+  const rows = D.ic.filter(function (r) { return r.ic !== null; });
+  const W = 920, rowH = 34, ml = 168, mr = 70, mt = 12;
+  const H = mt + rows.length * rowH + 34;
+  const s = mk('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: H });
+  document.getElementById('chart-ic').appendChild(s);
+  const maxAbs = Math.max.apply(null, rows.map(function (r) { return Math.abs(r.ic); })) * 1.12;
+  const zero = ml + (W - ml - mr) / 2;
+  const half = (W - ml - mr) / 2;
+  function bx(v) { return zero + half * (v / maxAbs); }
+  s.appendChild(mk('line', { x1: zero, x2: zero, y1: mt, y2: mt + rows.length * rowH, stroke: '#cbd5e1' }));
+  rows.forEach(function (r, i) {
+    const y = mt + i * rowH + 6, hh = 20;
+    const w = bx(r.ic) - zero;
+    s.appendChild(mk('rect', { x: Math.min(zero, bx(r.ic)), y: y, width: Math.abs(w), height: hh,
+      fill: r.ic > 0 ? '#fca5a5' : '#6ee7b7', rx: 3 }));
+    txt(s, ml - 10, y + 14, r.name, { anchor: 'end', fs: 12, fill: INK });
+    txt(s, bx(r.ic) + (r.ic > 0 ? 7 : -7), y + 14, sgn(r.ic, 3), {
+      anchor: r.ic > 0 ? 'start' : 'end', fs: 11.5, fill: col(r.ic), weight: 600 });
+    txt(s, W - 6, y + 14, 'n=' + r.n, { anchor: 'end', fs: 10.5, fill: r.n < 60 ? AMBER : MUT });
+  });
+  txt(s, zero, H - 12, '0', { fs: 10.5 });
+  txt(s, ml, H - 12, '← 负向（越小越好）', { anchor: 'start', fs: 10.5, fill: GREEN });
+  txt(s, W - mr, H - 12, '正向（越大越好）→', { anchor: 'end', fs: 10.5, fill: RED });
+})();
+
+(function () {
+  const tb = document.querySelector('#tbl-ic tbody');
+  const maxN = Math.max.apply(null, D.ic.map(function (r) { return r.n; }));
+  D.ic.forEach(function (r) {
+    const cov = Math.round(100 * r.n / D.head.samples);
+    const lowCov = cov < 30;
+    const tr = el('tr');
+    if (r.ic === null) { tr.innerHTML = '<td>' + r.name + '</td><td colspan="9" class="small">样本不足，未计算</td>'; tb.appendChild(tr); return; }
+    tr.innerHTML =
+      '<td>' + r.name + '</td>' +
+      '<td class="ctr">' + (r.kind === 'market' ? '<span class="b b-brand">市场级</span>' : '<span class="b b-gray">个股级</span>') + '</td>' +
+      '<td class="num">' + r.n + '</td>' +
+      '<td class="num"' + (lowCov ? ' style="color:' + AMBER + ';font-weight:600"' : '') + '>' + cov + '%</td>' +
+      '<td class="num" style="color:' + col(r.ic) + ';font-weight:600">' + sgn(r.ic, 3) + '</td>' +
+      '<td class="num">' + pc(r.lo_avg) + '</td><td class="num">' + r.lo_win.toFixed(1) + '%</td>' +
+      '<td class="num">' + pc(r.hi_avg) + '</td><td class="num">' + r.hi_win.toFixed(1) + '%</td>' +
+      '<td class="num" style="color:' + col(r.spread) + '">' + sgn(r.spread) + 'pp</td>';
+    tb.appendChild(tr);
+  });
+})();
+
+/* ---------- 7 inter ---------- */
+(function () {
+  const a = D.inter[0], b = D.inter[1];
+  const map = {};
+  b.items.forEach(function (x) { map[x.name] = x; });
+  const tb = document.querySelector('#tbl-inter tbody');
+  a.items.forEach(function (x) {
+    const y = map[x.name];
+    if (!y) return;
+    const d = (y.ic - x.ic);
+    const tr = el('tr');
+    tr.innerHTML = '<td>' + x.name + '</td>' +
+      '<td class="num">' + sgn(x.ic, 3) + ' <span class="small">n=' + x.n + '</span></td>' +
+      '<td class="num">' + sgn(y.ic, 3) + ' <span class="small">n=' + y.n + '</span></td>' +
+      '<td class="num" style="color:' + (Math.abs(d) > 0.1 ? RED : MUT) + '">' + sgn(d, 3) + '</td>';
+    tb.appendChild(tr);
+  });
+})();
+
+/* ---------- 8 policies ---------- */
+(function () {
+  const pols = D.policies;
+  const W = 920, H = 240, ml = 60, mr = 24, mt = 26, mb = 54;
+  const s = mk('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: H });
+  document.getElementById('chart-nav').appendChild(s);
+  const iw = W - ml - mr, ih = H - mt - mb;
+  const maxC = Math.max.apply(null, pols.map(function (p) { return p.cum; })) * 1.2;
+  const step = iw / pols.length;
+  function by(v) { return mt + ih * (1 - v / maxC); }
+  [0, 20, 40, 60].forEach(function (v) {
+    s.appendChild(mk('line', { x1: ml, x2: ml + iw, y1: by(v), y2: by(v), stroke: LINE }));
+    txt(s, ml - 8, by(v) + 4, v + '%', { anchor: 'end', fs: 10.5 });
+  });
+  pols.forEach(function (p, i) {
+    const x = ml + i * step + step * 0.22, w = step * 0.56;
+    const isP1 = i === 0;
+    s.appendChild(mk('rect', { x: x, y: by(p.cum), width: w, height: by(0) - by(p.cum),
+      fill: isP1 ? '#818cf8' : '#c7d2fe', rx: 3 }));
+    txt(s, x + w / 2, by(p.cum) - 16, '+' + p.cum.toFixed(2) + '%', { fs: 11.5, fill: RED, weight: 700 });
+    txt(s, x + w / 2, by(p.cum) - 5, '回撤 ' + p.mdd.toFixed(2) + '%', { fs: 9.5, fill: MUT });
+    const lab = p.label.split(' ');
+    txt(s, x + w / 2, H - 34, lab[0], { fs: 11, fill: INK, weight: 600 });
+    txt(s, x + w / 2, H - 20, lab.slice(1).join(' '), { fs: 10, fill: MUT });
+    txt(s, x + w / 2, H - 6, p.traded + ' 天有仓', { fs: 9.5, fill: MUT });
+  });
+})();
+
+(function () {
+  const path = D.policies[0].path;
+  const W = 920, H = 190, ml = 48, mr = 20, mt = 16, mb = 34;
+  const s = mk('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: H });
+  document.getElementById('chart-path').appendChild(s);
+  const iw = W - ml - mr, ih = H - mt - mb;
+  const vs = path.map(function (p) { return p.nav; });
+  const lo = Math.min.apply(null, vs) - 0.02, hi = Math.max.apply(null, vs) + 0.02;
+  const step = iw / Math.max(1, path.length - 1);
+  function py(v) { return mt + ih * (1 - (v - lo) / (hi - lo)); }
+  [1.0, 1.2, 1.4, 1.6].forEach(function (v) {
+    if (v < lo || v > hi) return;
+    s.appendChild(mk('line', { x1: ml, x2: ml + iw, y1: py(v), y2: py(v), stroke: v === 1 ? '#cbd5e1' : LINE }));
+    txt(s, ml - 8, py(v) + 4, v.toFixed(1), { anchor: 'end', fs: 10.5 });
+  });
+  const pts = path.map(function (p, i) { return [ml + i * step, py(p.nav)]; });
+  s.appendChild(mk('polyline', { points: pts.map(function (p) { return p.join(','); }).join(' '),
+    fill: 'none', stroke: BRAND, 'stroke-width': 2.2, 'stroke-linejoin': 'round' }));
+  pts.forEach(function (p, i) {
+    s.appendChild(mk('circle', { cx: p[0], cy: p[1], r: 3, fill: '#fff', stroke: BRAND, 'stroke-width': 1.8 }));
+    txt(s, p[0], H - 12, path[i].date.slice(5), { fs: 9.5 });
+  });
+  txt(s, ml, mt - 4, '净值', { anchor: 'start', fs: 10.5 });
+})();
+
+(function () {
+  const tb = document.querySelector('#tbl-pol tbody');
+  const notes = ['基准：只要开仓就满仓', '把低温日全部滤掉，有仓日减少 4 天',
+    '低温日降为 6 成，几乎无差别', '最平滑的一套，但总收益最低',
+    '单日质量最好（只做 8 天），总收益反而低于 P1', '开仓条件最严 + 半仓，最保守'];
+  D.policies.forEach(function (p, i) {
+    const tr = el('tr');
+    tr.innerHTML = '<td>' + p.label + '</td><td class="num">' + p.traded + '</td>' +
+      '<td class="num">' + p.nav.toFixed(4) + '</td>' +
+      '<td class="num" style="color:' + col(p.cum) + ';font-weight:600">+' + p.cum.toFixed(2) + '%</td>' +
+      '<td class="num" style="color:' + GREEN + '">' + p.mdd.toFixed(2) + '%</td>' +
+      '<td class="small">' + notes[i] + '</td>';
+    tb.appendChild(tr);
+  });
+})();
+
+/* ---------- 9 d18 ---------- */
+(function () {
+  const box = document.getElementById('d18-stats');
+  const items = [
+    ['次日上涨', D.d18_up + ' 只', '占 12 只候选'],
+    ['次日下跌', D.d18_down + ' 只', '其中重挫 1 只'],
+    ['平均涨幅', pc(D.d18_avg), '温度 67.6° 发酵·上升'],
+    ['胜率', D.d18_win.toFixed(1) + '%', '该档历史日均胜率 68.0%']
+  ];
+  items.forEach(function (r, i) {
+    const d = el('div', 'stat');
+    d.appendChild(el('div', 'lab', r[0]));
+    const v = el('div', 'val', r[1]);
+    v.style.color = i === 1 ? GREEN : RED;
+    d.appendChild(v);
+    d.appendChild(el('div', 'sub', r[2]));
+    box.appendChild(d);
+  });
+})();
+
+(function () {
+  const tb = document.querySelector('#tbl-d18 tbody');
+  D.d18.slice().reverse().forEach(function (r) {
+    const tr = el('tr');
+    const bad = r.pct <= 5;
+    tr.style.background = bad ? '#fffbfb' : '';
+    tr.innerHTML =
+      '<td>' + r.code + '</td><td>' + r.name + '</td><td class="num">' + r.board + '</td>' +
+      '<td>' + r.industry + '</td>' +
+      '<td class="num">' + (r.amount === null ? '—' : r.amount.toFixed(2)) + '</td>' +
+      '<td class="num">' + (r.turnover === null ? '—' : r.turnover.toFixed(1)) + '</td>' +
+      '<td class="num">' + (r.seal === null ? '—' : r.seal.toFixed(2)) + '</td>' +
+      '<td class="num">' + (r.ratio === null ? '—' : r.ratio.toFixed(1) + '%') + '</td>' +
+      '<td class="num">' + r.first + '</td>' +
+      '<td class="num" style="color:' + col(r.pct) + ';font-weight:600">' + pc(r.pct) + '</td>' +
+      '<td class="ctr">' + (r.promote ? '<span class="b b-red">是</span>' : '<span class="b b-gray">否</span>') + '</td>' +
+      '<td class="ctr">' + (bad ? '<span class="b b-green">未走出来</span>' : '<span class="b b-red">走强</span>') + '</td>';
+    tb.appendChild(tr);
+  });
+  const tb2 = document.querySelector('#tbl-cmp tbody');
+  D.cmp.forEach(function (c) {
+    const tr = el('tr');
+    tr.innerHTML = '<td>' + c.name + '</td>' +
+      '<td class="num">' + (c.ok === null ? '—' : c.ok.toFixed(2)) + '</td>' +
+      '<td class="num">' + (c.bad === null ? '—' : c.bad.toFixed(2)) + '</td>' +
+      '<td class="num">' + (c.diff === null ? '—' : sgn(c.diff)) + '</td>';
+    tb2.appendChild(tr);
+  });
+})();
+
+/* ---------- nav highlight ---------- */
+(function () {
+  const links = [].slice.call(document.querySelectorAll('.side a[href^="#"]'));
+  const secs = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); });
+  function onScroll() {
+    let idx = 0;
+    const y = window.scrollY + 120;
+    secs.forEach(function (s, i) { if (s && s.offsetTop <= y) idx = i; });
+    links.forEach(function (a, i) { a.classList.toggle('on', i === idx); });
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+})();
+</script>
+</body>
+</html>

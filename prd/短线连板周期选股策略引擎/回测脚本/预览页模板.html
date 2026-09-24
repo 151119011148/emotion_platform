@@ -1,0 +1,1738 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>短线连板策略 · 回测与推荐清单</title>
+<style>
+:root{
+  /* 色板对齐 emotion-web：App.vue 的 body/表格变量 + 各视图卡片色 */
+  --bg:#0f1419; --panel:#1a2332; --sub:#16202e; --sub2:#131c28;
+  --ink:#e1e8ed; --ink2:#cbd5e0; --muted:#8899a6; --faint:#6b7c8c;
+  --line:#22303f; --line2:#1f2b3a;
+  /* 强调色统一用系统的 stage.active / 选中态色 */
+  --brand:#fbbf24; --brand-soft:rgba(251,191,36,.12); --brand-line:rgba(251,191,36,.38);
+  --blue:#67e8f9; --blue-soft:rgba(103,232,249,.1);
+  --green:#34d399; --green-soft:rgba(52,211,153,.1); --green-line:rgba(52,211,153,.38);
+  --amber:#fbbf24; --amber-soft:rgba(251,191,36,.1); --amber-line:rgba(251,191,36,.38);
+  --red:#f87171;  --red-soft:rgba(248,113,113,.1);   --red-line:rgba(248,113,113,.38);
+  --code-bg:#16202e;
+  /* 图表色（对齐 TemperatureChart.vue / DimScoreCurve.vue） */
+  --grid:#2d3748; --axis:#8899a6; --axisname:#6e7681; --series:#a16207;
+  --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink2);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft YaHei","PingFang SC",sans-serif;
+  font-size:14px;line-height:1.75;-webkit-font-smoothing:antialiased}
+a{color:var(--brand);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{display:flex;max-width:1440px;margin:0 auto}
+.side{width:250px;flex:0 0 250px;position:sticky;top:0;height:100vh;overflow-y:auto;
+  background:#131c28;border-right:1px solid var(--line);padding:22px 0 60px}
+.side h4{margin:0 0 10px;padding:0 20px;font-size:11.5px;letter-spacing:.08em;color:var(--faint);text-transform:uppercase}
+.side a{display:block;padding:5px 20px;color:#9fb2c6;font-size:13px;line-height:1.5;border-left:3px solid transparent}
+.side a:hover{background:rgba(255,255,255,.04);color:var(--ink);text-decoration:none}
+.side a.on{color:var(--brand);border-left-color:var(--brand);background:var(--brand-soft);font-weight:600}
+.side .back{margin-top:14px;padding:0 20px;font-size:12px;color:var(--faint);line-height:1.9}
+main{flex:1;min-width:0;padding:0 44px 120px}
+.masthead{background:linear-gradient(135deg,#1a2332 0%,#16202e 58%,#131c28 100%);
+  border-bottom:1px solid var(--line);border-left:3px solid var(--brand);color:var(--ink);
+  padding:30px 44px;margin:0 -44px 28px}
+.masthead .kicker{font-size:11.5px;letter-spacing:.16em;color:var(--brand);text-transform:uppercase}
+.masthead h1{margin:6px 0 10px;font-size:26px;line-height:1.3;font-weight:700;color:var(--ink)}
+.masthead .desc{color:var(--muted);font-size:13.5px;max-width:880px}
+.chips{margin-top:15px;display:flex;flex-wrap:wrap;gap:8px}
+.chip{background:var(--sub);border:1px solid var(--line);color:#9fb2c6;
+  border-radius:999px;padding:3px 11px;font-size:12px}
+section{margin:0 0 34px;scroll-margin-top:16px}
+h2{font-size:19px;margin:34px 0 12px;padding-bottom:9px;color:var(--ink);border-bottom:2px solid var(--line)}
+h3{font-size:15.5px;margin:22px 0 9px;color:var(--ink)}
+h4{font-size:13.5px;margin:16px 0 7px;color:var(--ink2)}
+p{margin:9px 0}
+ul,ol{margin:9px 0;padding-left:22px}
+li{margin:4px 0}
+.small{font-size:12.5px;color:var(--muted)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:15px 17px;margin:14px 0}
+.callout{border-radius:10px;padding:12px 15px;margin:14px 0;border:1px solid;font-size:13.5px}
+.callout .ttl{font-weight:700;margin-bottom:5px}
+.c-info{background:var(--blue-soft);border-color:rgba(103,232,249,.42);color:#a5f3fc}
+.c-warn{background:var(--amber-soft);border-color:var(--amber-line);color:#fde68a}
+.c-bad{background:var(--red-soft);border-color:var(--red-line);color:#fecaca}
+.c-ok{background:var(--green-soft);border-color:var(--green-line);color:#a7f3d0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media(max-width:1120px){.grid2,.grid3,.grid4{grid-template-columns:1fr}}
+.tw{overflow-x:auto;margin:12px 0;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{border-bottom:1px solid var(--line2);padding:8px 11px;text-align:left;vertical-align:top}
+thead th{background:var(--sub);color:var(--axis);font-weight:600;font-size:12.5px;white-space:nowrap;border-bottom:1px solid var(--grid)}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:#22303f}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;font-feature-settings:'tnum'}
+td.ctr,th.ctr{text-align:center}
+code{font-family:var(--mono);font-size:12.5px;background:var(--code-bg);border:1px solid #2d3748;
+  border-radius:4px;padding:1px 5px;color:#c084fc;white-space:nowrap}
+.b{display:inline-block;border-radius:5px;padding:1px 7px;font-size:11.5px;font-weight:600;line-height:1.7;white-space:nowrap}
+.b-red{background:var(--red-soft);color:var(--red);border:1px solid var(--red-line)}
+.b-green{background:var(--green-soft);color:var(--green);border:1px solid var(--green-line)}
+.b-amber{background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)}
+.b-blue{background:var(--blue-soft);color:var(--blue);border:1px solid rgba(103,232,249,.38)}
+.b-gray{background:#22303f;color:var(--muted);border:1px solid #2d3748}
+.b-brand{background:var(--brand-soft);color:var(--brand);border:1px solid var(--brand-line)}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.stat .lab{font-size:12px;color:var(--faint);margin-bottom:3px}
+.stat .val{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.25}
+.stat .sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+.chart{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px 8px;margin:12px 0}
+.chart .ct{font-size:13px;font-weight:600;color:var(--ink);margin-bottom:2px}
+.chart .cs{font-size:12px;color:var(--muted);margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin:6px 0 2px;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.fn{font-size:12px;color:var(--muted);margin:8px 0 0;padding-top:8px;border-top:1px dashed var(--line)}
+.fn b{color:var(--ink2);font-weight:600}
+.pos{color:var(--red);font-weight:600}
+.neg{color:var(--green);font-weight:600}
+.mut{color:var(--muted)}
+hr{border:0;border-top:1px solid var(--line);margin:22px 0}
+@media print{
+  :root{--bg:#fff;--panel:#fff;--sub:#f9fafb;--sub2:#f3f4f6;
+    --ink:#111827;--ink2:#374151;--muted:#6b7280;--faint:#9ca3af;
+    --line:#d1d5db;--line2:#e5e7eb;--code-bg:#f8fafc;
+    --brand:#b45309;--brand-soft:#fffbeb;--brand-line:#fde68a}
+  .side{display:none} main{padding:0}
+  .masthead{margin:0 0 20px;background:#fff!important;border-left-color:#b45309;color:#111827}
+  .masthead .kicker{color:#b45309} .masthead h1{color:#111827} .masthead .desc{color:#6b7280}
+  .chip{color:#374151}
+  body{background:#fff;font-size:12px;color:#374151} section{page-break-inside:avoid}
+  .tw,.card,.stat,.chart{background:#fff}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="side">
+  <h4>短线连板策略</h4>
+  <a href="#s0">0 · 结论速览</a>
+  <a href="#s1">1 · 口径与样本</a>
+  <a href="#st" style="color:#f87171;font-weight:600">★ 执行时点校验</a>
+  <a href="#s12" style="color:#fbbf24;font-weight:600">★ 推荐清单与仓位配比</a>
+  <a href="#s12-3" style="padding-left:22px;font-size:12.5px">└ 12.7 第 3 期（最新）</a>
+  <a href="#s2">2 · 日级明细</a>
+  <a href="#s3">3 · 择时 vs 选股</a>
+  <a href="#s4">4 · 温度分档</a>
+  <a href="#s5">5 · 温度 vs 原材料</a>
+  <a href="#s6">6 · 单因子 IC 榜</a>
+  <a href="#s7">7 · 温度 × 因子交互</a>
+  <a href="#s8">8 · 组合回测</a>
+  <a href="#s9">9 · 09-18 逐只复盘</a>
+  <a href="#s10">10 · 对配置的影响</a>
+  <a href="#s11">11 · 局限与待办</a>
+  <div class="back">回测脚本：<br><code>回测脚本/06_预览页数据导出.py</code><br>口径同 02 / 03 / 04</div>
+</nav>
+<main>
+
+<div class="masthead">
+  <div class="kicker">WaveRider · PRD v1.4</div>
+  <h1>短线连板策略 · 回测与推荐清单</h1>
+  <div class="desc">
+    T 日按「同题材身位板」规则选候选（当日涨停且连板数 ≥ 2），T+1 了结，
+    再把 <code>t_daily_record.temperature</code> 作为市场级变量接进来，回答一个问题：
+    <strong>情绪温度能不能替这套选股规则过滤掉个股风险？</strong>
+    全部数字来自生产库 2026-08-25 ~ 09-18 真实行情，可由 <code>回测脚本/</code> 原样复跑。<br>
+    <strong style="color:#b91c1c">v1.4 追加（★ 节）：原口径隐含「以 T 日涨停价买入」，该价实盘不可成交。
+    改按 T+1 开盘价复算后，全样本由 +3.36% / 胜率 65.0% 变为 −0.20% / 胜率 40.3%。</strong>
+  </div>
+  <div class="chips" id="chips"></div>
+</div>
+
+<!-- ============ 0 ============ -->
+<section id="s0">
+  <h2>0 · 结论速览</h2>
+  <div class="grid3" id="headline"></div>
+
+  <div class="callout c-bad">
+    <div class="ttl">读本页之前必须先知道：第 2 ~ 10 节的收益口径不可成交（★ 节给了重算结果）</div>
+    这几节用的都是 <code>close(T+1)/close(T) − 1</code>，而候选池的定义是「当日已在涨停池且连板 ≥ 2」——
+    <code>close(T)</code> <strong>就是那天的涨停价</strong>，实盘挂不到（涨停板上没有卖单）；
+    而仓位读的温度要到收盘后才算出。所以第 2 ~ 10 节的数字应读作
+    <strong>「信号有效性基准」，不等于可实现收益</strong>。把买入价换成 T+1 开盘价之后：
+    <strong>全样本 +3.36% / 胜率 65.0% → −0.20% / 胜率 40.3%</strong>，详见 ★ 节。
+  </div>
+
+  <div class="callout c-bad">
+    <div class="ttl">一句话版本</div>
+    温度解释了<strong>日间 11%</strong> 的收益方差，剩下的 <strong>89% 在日内个股之间</strong>。
+    同一天的 7~21 只候选共享同一个温度值，它在数学上就不可能回答「该买哪一只」——
+    所以多因子个股评分不是优化项，是必需品；反过来，个股评分也替代不了温度那 11%（决定仓位该压多重）。
+  </div>
+</section>
+
+<!-- ============ 1 ============ -->
+<section id="s1">
+  <h2>1 · 口径与样本</h2>
+  <div class="tw"><table>
+    <thead><tr><th style="width:150px">环节</th><th>口径</th></tr></thead>
+    <tbody>
+      <tr><td>候选池</td><td><code>t_market_stock</code> 当日 <code>pool='ZT'</code> 且 <code>consecutive &ge; 2</code>（即已有身位的高位股，剔首板杂毛）</td></tr>
+      <tr><td>交易日区间</td><td>2026-08-25 ~ 2026-09-21 取候选；因需要 T+1 收盘价，实际样本落在 <strong>08-25 ~ 09-18</strong></td></tr>
+      <tr><td>T+1 表现</td><td>腾讯 qfq 日 K：<code>close(T+1) / close(T) − 1</code>，逐只精确匹配 <code>date</code> 那一根，不用相邻交易日顶替<br>
+        <strong style="color:#b91c1c">v1.4 更正</strong>：该起算价 = <strong>T 日涨停价</strong>，实盘不可成交。
+        因此本行口径下第 2 ~ 10 节的数字均为「信号有效性基准」，实盘口径见 <a href="#st">★ 节</a></td></tr>
+      <tr><td>T+1 是否涨停</td><td>该股代码是否出现在 T+1 的 <code>t_market_stock</code> ZT 池</td></tr>
+      <tr><td>温度取值</td><td><code>t_daily_record.temperature</code>（<code>user_id=1</code>）；仓位旋钮读的是 <strong>T 日</strong>温度，信息时点上合法（不是未来函数）</td></tr>
+      <tr><td><span style="color:#b91c1c">v1.4 更正</span>「无未来函数」的边界</td>
+        <td>原表述「T 日盘后算出、T+1 才交易」不完整：温度确在 T 日收盘后算出，但收益起算价用的是 <strong>T 日收盘价</strong>，
+          两者相差 30 分钟且方向相反——等于先看到 15:30 的温度、再回头以 15:00 的涨停价成交。
+          另需注意温度含人工填报子指标，<strong>实测写入时点极不稳定</strong>（10 条记录里仅 3 条为当日盘后，见 ★ 节末表）。</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="grid4" id="sample-stats"></div>
+
+  <div class="callout c-warn">
+    <div class="ttl">样本的四处缺口（都影响结论强度，写在前面）</div>
+    <ul>
+      <li><strong>缺 09-15 三池</strong>：<code>t_market_stock</code> 没有 09-15 的涨停池，09-14 的候选拿不到「次日涨停」判定，该日 <code>涨停率=0%</code> 是数据缺失不是事实。</li>
+      <li><strong>09-21 有候选无次日</strong>：19 只候选因窗口末无 T+1 收盘价被剔除，未纳入 226 条样本。</li>
+      <li><strong>4 天没有温度记录</strong>：09-01 / 09-14 / 09-16 / 09-17。<code>temperature</code> 依赖人工填报，18 个样本日里只有 14 天有值，占比 78%。</li>
+      <li><strong>因子覆盖严重不均</strong>：<code>turnover</code> 与 <code>float_mv</code> 只在 09-16~09-18 三天有值（33 条），<code>score_premium</code> 只有 43 条。它们的 IC 与全样本因子的 IC <strong>不可横向比较</strong>。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ ★ 执行时点校验（v1.4 新增） ============ -->
+<section id="st">
+  <h2>★ 执行时点校验：原回测的收益来自「买不到的隔夜跳空」</h2>
+
+  <div class="callout c-bad">
+    <div class="ttl">结论先行：把买入价改到实盘唯一可执行的时点，全样本由 +3.36% / 胜率 65.0% 变成 −0.20% / 胜率 40.3%</div>
+    第 2 ~ 10 节的口径是 <code>pct = close(T+1)/close(T) − 1</code>。而候选池的定义是
+    「<strong>T 日已出现在涨停池、且 <code>consecutive ≥ 2</code></strong>」——也就是说 <code>close(T)</code>
+    <strong>恰好就是 T 日的涨停价</strong>，实盘在 T 日收盘时挂不到这个价。
+    更矛盾的是仓位旋钮读的 <code>temperature</code> 要到 T 日<strong>收盘后</strong>才算出，
+    于是原回测在时序上等价于「15:30 拿到温度 → 回头以 15:00 的涨停价成交」，时间倒流 30 分钟。
+  </div>
+
+  <div class="grid4" id="exec-stats"></div>
+
+  <div class="tw"><table id="tbl-exec-1">
+    <thead><tr><th style="width:110px">口径</th><th style="width:230px">定义</th>
+      <th class="num" style="width:80px">均涨</th><th class="num" style="width:70px">胜率</th><th>实盘可行性</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="fn"><b>读法：</b>三者满足近似乘性关系
+    <code>(1 + 3.68%) × (1 − 0.20%) ≈ 1.0347 ≈ (1 + 3.36%)</code>。
+    也就是说——原口径那 +3.36% 几乎全部由「<b>你还没持仓时价格已经跳上去的那一段</b>」构成；
+    等你在 T+1 开盘接进去，剩下能赚的是 <b>−0.20%</b>。</p>
+
+  <div class="tw"><table id="tbl-exec-2">
+    <thead><tr><th style="width:130px">隔夜跳空 gap</th><th class="num" style="width:55px">n</th>
+      <th class="num" style="width:95px">其中可买入</th><th class="num" style="width:80px">A 口径</th>
+      <th class="num" style="width:80px">B 口径</th><th class="num" style="width:75px">B 胜率</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="fn"><b>gap 定义：</b><code>open(T+1)/close(T) − 1</code>，即 T 日收盘到 T+1 开盘的跳空幅度。
+    「可买入」= 开盘未达一字 / 准一字。<b>注意最后一行：原口径下最好看的一档（A +6.93%）正是实盘最差的一档（B −2.61%）</b>，
+    因为其中近八成是一字板——你根本买不进去，而买得进去的那些，开盘就已在别人手里。</p>
+
+  <div class="callout c-warn">
+    <div class="ttl">两个必须分开的问题</div>
+    <p style="margin:4px 0 0"><b>① 一字板买不进 —— 执行约束，不是策略选择。</b>
+      全样本 <span id="exec-ub"></span>% 的候选在 T+1 以一字 / 准一字开盘，实盘无法按开盘价成交。
+      这类样本必须标记并从「可执行收益」的分子分母中<b>同时剔除</b>，否则回测会持续把买不到的票算成盈利。</p>
+    <p style="margin:8px 0 0"><b>② 非一字但高开，接进去也会亏 —— 策略结论，独立于一字板。</b>
+      把一字板全部剔除后，<code>gap ∈ [3%, 8%)</code> 的 46 只<b>全部可买入</b>，其 B 口径仍为 <b>−1.72%</b>。
+      所以高开组的亏损不能全归因于「买不进」：<b>高开本身就是负向信号</b>——溢价在隔夜被一次性吃掉，
+      你在 T+1 开盘建仓，等于用别人已经赚到的价格入场。</p>
+  </div>
+
+  <div class="tw"><table id="tbl-exec-3">
+    <thead><tr><th style="width:170px">分组</th><th class="num" style="width:60px">n</th>
+      <th class="num" style="width:95px">一字板占比</th><th class="num" style="width:85px">A 口径</th>
+      <th class="num" style="width:85px">B 口径</th><th class="num" style="width:80px">B 胜率</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <div class="tw"><table id="tbl-exec-4">
+    <thead><tr><th style="width:280px">执行方式</th><th class="num" style="width:100px">有仓天数</th>
+      <th class="num" style="width:120px">累计收益</th><th>性质</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="fn"><b>必须先说清门槛那个数字的性质：</b><code>gap ≤ 3%</code> 这个阈值是在<b>同一批 19 天样本上挑出来的</b>，
+    属样本内结果，<b>不能当作已实现收益</b>。它真正说明的是——这套策略的收益来源<b>不是「选哪只」，而是「在什么价位接」</b>；
+    而价位是市场在 T+1 开盘那一刻给出的，不是选股模型能预知的。
+    日级看，18 / 18 个交易日都有票可接（<span id="exec-keepdays"></span>），其中当日为正
+    <span id="exec-windays"></span> 天。</p>
+
+  <div class="callout c-bad">
+    <div class="ttl">连锁影响：第 6 节那张 IC 榜与 PRD §6.2 的权重必须重标定</div>
+    把收益换成 B 口径后，因子排序发生根本变化——下表只列变化最大的几项：
+    <div class="tw" style="margin-top:8px"><table id="tbl-exec-5">
+      <thead><tr><th style="width:180px">因子</th><th class="num" style="width:60px">n</th>
+        <th class="num" style="width:100px">IC（A 口径）</th><th class="num" style="width:100px">IC（B 实盘）</th>
+        <th>判读</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <p style="margin:8px 0 0"><b>唯一跨口径稳健的是「连板数」（+0.100 → +0.092）</b>，
+      也就是原本被判为「最弱」的那一项；而原本「最强」的封单强度转为 <b>−0.084</b>——
+      它与「一字板买不进」高度共线，本质是在挑「你买不到的票」。
+      因此 <code>filter_min_amount</code> 由 1.0 亿下调至 0.5 亿的依据（成交额 IC −0.285）在 B 口径下归零（+0.020），建议先回到中性 + <code>MARK</code>。</p>
+  </div>
+
+  <div class="callout c-info">
+    <div class="ttl">仓位配比能用「次日温度」吗？——不能；而且「当日温度」也未必拿得到</div>
+    <p style="margin:4px 0 6px"><b>第一层：</b>仓位旋钮读的是 <b>T 日</b>（而非 T+1 日）温度，所以它不是未来函数；
+      但换到 B 口径后，温度分档的信息几乎消失——A 口径下那条单调递增（+2.17% → +5.84%）在 B 口径下
+      变为四档全负且不再单调（−1.01% / −0.55% / −0.06% / −0.33%），方差解释力由日间 11.0% 降到 <b>8.2%</b>。
+      温度只能做「准备承担多大波动」的粗旋钮，不能做「做多重」的精确刻度。</p>
+    <p style="margin:0 0 6px"><b>第二层（更硬）：</b>温度记录是人工填报的，核查 <code>t_daily_record.created_at</code> 后，
+      「T 日盘后可得」这条假设在实测数据里只有少数几天成立：</p>
+    <div class="tw"><table id="tbl-exec-6">
+      <thead><tr><th style="width:130px">trade_date</th><th style="width:170px">created_at</th>
+        <th class="num" style="width:90px">滞后</th><th class="ctr" style="width:90px">可用性</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <p style="margin:8px 0 0">也就是说实盘中你常常要等到 T+1（甚至更晚）才知道 T 日温度，那时当天的仓位决策早已过去。
+      所以温度<b>绝不能</b>作为候选池产出的前置条件；仓位旋钮必须设计成「读不到就退回默认档」，
+      而不是报错或直接空仓；若确实要用温度控仓，需先解决<b>填报时效</b>。</p>
+  </div>
+
+  <p class="fn"><b>回到「是否延迟了一天」这个问题本身：</b>原回测的问题不是延迟，而是<b>提前</b>——
+    它把「T 日盘后才知道的温度」与「T 日盘中就已锁死的涨停价」拼在同一个决策里。
+    修正方式是把买入时点统一推到唯一可执行的 <b>T+1 开盘</b>，并接受由此带来的全部结论变化。
+    复算脚本：<code>回测脚本/10_执行时点口径复算.py</code>（三口径 + 方差分解 + IC 对照 + 组合回测）、
+    <code>回测脚本/11_开盘门槛与持有期.py</code>（跳空分档 + 日级稳健性 + 持有期对比）。</p>
+</section>
+
+
+<!-- ============ 12 推荐清单与仓位配比 ============ -->
+<section id="s12">
+  <h2>★ 推荐清单与仓位配比（2026-09-21 → 09-22 实测）</h2>
+
+  <div class="callout c-info">
+    <div class="ttl">这一节把前面所有口径收敛成一张可执行的表</div>
+    <p style="margin:4px 0 6px">T 日（09-21，温度 67.7「发酵·横盘」）盘后从涨停池里取出
+      <b>21 只连板≥2 的身位候选</b>，按 <b>单票上限 5%</b> 预留仓位；
+      T+1（09-22）竞价时按 <b>开盘跳空 gap ≤ 3%</b> 决定接不接。次日数据已入库，因此这是一份
+      <b>带事后结果</b>的清单，不是模拟。</p>
+    <p style="margin:0">两点必须清楚：<b>①</b> T 日能做的只有「出池 + 预留仓位」，
+      <b>真正决定买哪几只是在 T+1 开盘那一刻</b>——这是这套策略的收益来源，也意味着它不可能被完全事先固化；
+      <b>②</b> 本节所有收益都是 <b>B 口径</b>（T+1 开盘买、当日收盘卖），与前 10 节的口径不同，不可混比。</p>
+  </div>
+
+  <div class="grid4" id="pick-stats"></div>
+
+  <h3>12.1 执行漏斗：从 21 只候选到 11 只成交</h3>
+  <div class="tw"><table id="tbl-funnel">
+    <thead><tr>
+      <th style="width:250px">层级</th><th class="num" style="width:70px">只数</th>
+      <th class="num" style="width:90px">占用仓位</th><th class="num" style="width:110px">占用资金收益</th>
+      <th class="num" style="width:100px">账户收益</th><th class="num" style="width:80px">胜率</th>
+      <th>说明</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="fn"><b>读法：</b>L0 → L1 只剔掉两只「封单把成交锁死」的票，收益几乎没变（那两只 T+1 一字开盘，
+    B 口径恰好 0%）；<b>真正的跃升发生在 L1 → L2</b>：靠 gap 门槛把 8 只高开票挡在外面，
+    其中 5 只当日亏 3% ~ 15%。占用资金收益由负转正，胜率由 47% 提到 64%。
+    「账户收益」按占用仓位折算——只投 55% 的仓位，所以账户只赚到 +0.67%。</p>
+
+  <h3>12.2 推荐清单（T 日盘后生成 · T+1 竞价执行）</h3>
+  <div class="tw"><table id="tbl-pick">
+    <thead><tr>
+      <th class="num" style="width:42px">序</th><th style="width:74px">代码</th><th style="width:88px">名称</th>
+      <th class="num" style="width:46px">板</th><th style="width:104px">题材</th>
+      <th class="num" style="width:78px">成交额</th><th class="num" style="width:92px">封单÷成交额</th>
+      <th class="num" style="width:62px">首封</th><th style="width:104px">T 日预判</th>
+      <th class="num" style="width:70px">预留仓位</th><th class="num" style="width:72px">T 日收盘</th>
+      <th class="num" style="width:72px">T+1 开盘</th><th class="num" style="width:74px">gap</th>
+      <th class="num" style="width:88px">次日 B 口径</th>
+      <th style="width:88px">实际结果</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="fn"><b>排序依据是「可执行性」，不是「预期收益」。</b>按封单÷成交额升序排——因为 B 口径下
+    T 日因子对次日收益的排序力已经失效（见 12.4），唯一还有单调预测力的是「这只票明天还买不买得进」。
+    所谓「预留仓位」是 T 日盘后挂出的上限，T+1 开盘 gap &gt; 3% 就<b>不下单</b>，那部分仓位留现金。
+    「实测」两列是 09-22 的真实数据，用于验证清单形态；实盘使用时应视为未知。</p>
+
+  <h3>12.3 仓位配比规则</h3>
+  <div class="grid2">
+    <div class="card">
+      <h4 style="margin-top:0">配比公式</h4>
+      <p style="margin:6px 0">单票仓位 = <code>min(max_position_per_stock, 总仓位目标 ÷ 成交只数)</code></p>
+      <p style="margin:6px 0">总仓位 = <code>成交只数 × max_position_per_stock</code>（上限 100%）</p>
+      <p class="small" style="margin:6px 0 0">默认 <code>max_position_per_stock = 5%</code>。等权，不做因子加权——
+      因为加权需要可信的因子 IC，而 B 口径下 IC 已归零（12.4）。</p>
+    </div>
+    <div class="card">
+      <h4 style="margin-top:0">两段式执行</h4>
+      <p style="margin:6px 0"><b>① T 日盘后（15:30 后）</b>：生成候选池 → 剔除封单锁死票 → 每只预留 5% → 推送清单。</p>
+      <p style="margin:6px 0"><b>② T+1 竞价（09:25）</b>：读取每只票的集合竞价开盘价，算 gap；
+        <code>gap ≤ 3%</code> 的按 5% 买入，其余撤单。</p>
+      <p class="small" style="margin:6px 0 0">温度只作为「今天该不该更谨慎」的提示展示，不参与仓位计算（原因见 12.5）。</p>
+    </div>
+  </div>
+  <div class="tw"><table id="tbl-alloc">
+    <thead><tr>
+      <th style="width:110px">阶段</th><th class="num" style="width:80px">只数</th>
+      <th class="num" style="width:110px">单票仓位</th><th class="num" style="width:100px">合计占用</th>
+      <th class="num" style="width:100px">留现金</th><th>说明</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <h3>12.4 为什么 T 日只做「封单÷成交额」这一项预筛</h3>
+  <p>把候选池按 T 日的 <code>封单额 ÷ 成交额</code> 分档，看 T+1 实际以一字/准一字开盘（买不进）的比例：</p>
+  <div class="tw"><table id="tbl-prewarn">
+    <thead><tr>
+      <th style="width:200px">封单÷成交额</th><th class="num" style="width:70px">n</th>
+      <th class="num" style="width:120px">T+1 一字占比</th><th class="num" style="width:100px">B 口径均涨</th>
+      <th></th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="fn"><b>这是全套流程里唯一在 T 日就能事前算出、且单调有效的筛选条件。</b>
+    封单相对成交额越大，说明筹码越锁死、可成交的越少，T+1 越可能直接一字开盘——封单比 ≥300% 的
+    <span id="pw-n"></span> 只样本里，有 <span id="pw-high"></span>% 买不进。反过来说，<b>「封单强」在 A 口径曾是全样本最强正向因子（IC +0.308），
+    换成 B 口径后变成 −0.084</b>：它挑出的正是你买不到的那批票。</p>
+
+  <h3>12.5 为什么温度不进仓位公式</h3>
+  <div class="tw"><table id="tbl-tstat">
+    <thead><tr>
+      <th style="width:150px">温度档（T 日）</th><th class="num" style="width:80px">可交易天数</th>
+      <th class="num" style="width:80px">股票数</th><th class="num" style="width:110px">日级 B 均涨</th>
+      <th class="num" style="width:100px">日均胜率</th><th>判读</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="fn"><b>B 口径下温度分档既不单调、也几乎无区分度</b>（最高与最低档相差不到 1 个百分点，
+    且每档仅 1 ~ 5 天）。A 口径时那条漂亮的单调递增（+2.17% → +5.84%）随买入价一起消失了——
+    它测的其实是「隔夜跳空有多大」，而不是「买入后能不能赚」。
+    加上温度是人工填报、实测常常要 T+1 之后才录（见 ★ 节），因此本节只把它当<b>风险提示</b>：
+    09-21 的温度 67.7 属「发酵」，配合信号「<span id="t-sig"></span>」，提示不要满仓。</p>
+
+  <p class="fn"><b>复算脚本：</b><code>回测脚本/14_推荐清单与仓位配置.py</code>
+    （B 口径因子重标定 + 09-21 清单 + 09-22 实测 + 仓位配比），
+
+  <h3>12.6 最新一期（2026-09-22 → 09-23）：门槛第一次遇到样本外，失效了</h3>
+  <div class="callout c-bad">
+    <div class="ttl">这一期 gap ≤ 3% 的门槛不但没帮上忙，还更差：L2 −2.40% vs 不筛选的 L1 −1.57%</div>
+    <p style="margin:4px 0 6px">09-22 这一期是 <code>gate = 3%</code> 的<b>第一次样本外检验</b>——
+      该阈值是在 08-25 ~ 09-21 那 19 天上挑出来的。      检验结果是负的，而且
+      <b>「越高开越差」这条规律在这一天整体反转了</b>：被门槛挡下的 <span id="sk-n"></span> 只平均
+      <b>+0.60%</b>（其中 2 只一字开盘——买不进，也就谈不上亏），而留下的 <span id="tk-n"></span> 只
+      平均 <b>−2.40%</b>、胜率只有 23.1%。</p>
+    <p style="margin:0">结论必须说透：<b>12.1 那个 +1.22% 是样本内结果，不能当作策略的期望收益。</b>
+      它证明的是「收益主要来自在什么价位接」，但没有证明「gap ≤ 3% 这个具体阈值」是稳定的。
+      要把它写进默认配置，还需要更长样本（建议 ≥40 个交易日）与多阈值敏感性检验。
+      在此之前它只能是一条<b>执行纪律</b>（高开不追），不能是一条<b>择时规律</b>。</p>
+  </div>
+  <p class="small">T+1 = <span id="t2-day"></span>（该日温度尚未填报，故本节不做温度分档）。</p>
+
+  <div class="tw"><table id="tbl-funnel2">
+    <thead><tr>
+      <th style="width:280px">层级</th><th class="num" style="width:70px">只数</th>
+      <th class="num" style="width:90px">占用仓位</th><th class="num" style="width:110px">占用资金收益</th>
+      <th class="num" style="width:100px">账户收益</th><th class="num" style="width:80px">胜率</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <div class="tw"><table id="tbl-pick2">
+    <thead><tr>
+      <th class="num" style="width:42px">序</th><th style="width:74px">代码</th><th style="width:88px">名称</th>
+      <th class="num" style="width:46px">板</th><th style="width:110px">题材</th>
+      <th class="num" style="width:78px">成交额</th><th class="num" style="width:92px">封单÷成交额</th>
+      <th class="num" style="width:72px">T 日收盘</th><th class="num" style="width:72px">T+1 开盘</th>
+      <th class="num" style="width:74px">gap</th><th class="num" style="width:88px">次日 B 口径</th>
+      <th style="width:88px">实际结果</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="fn"><b>这份清单的价值在于形态，不在于收益。</b>它演示了策略每日的实际输出：
+    T 日盘后给出池子与预留仓位，T+1 竞价按 gap 决定成交。至于「门槛到底该定多少」，
+    需要把 14 脚本按日滚动、在多个阈值上做样本外检验之后才谈得上定论。</p>
+
+  <h3 id="s12-3">12.7 第 3 期（2026-09-23 → 09-24，进行中）：池子一夜萎缩到 12 只</h3>
+  <div class="callout c-bad">
+    <div class="ttl">连板梯队从 24 只掉到 12 只，温度 40.9 落进最低档（混沌 · 下降）</div>
+    <p style="margin:4px 0 6px">09-23 的涨停家数由 63 掉到 51，而<b>跌停由 3 家升到 13 家</b>；
+      连板梯队（连板≥2）只剩 <b>12 只</b>，不到前一日的六成。情绪温度由 67.7 直接掉到
+      <b>40.9</b>，落进 12.5 里表现最差的那一档（T &lt; 55：日级 B 口径 −1.01%、日均胜率 38.6%），
+      信号同时打出「中位吹哨 · 龙头与主线错位 · 阵眼失效」。</p>
+    <p style="margin:0">按 PRD 的设计温度只当仓位旋钮。但要看清一点：40.9 是 <b>09-24 10:39 才补录</b>的，
+      09-23 盘后根本读不到 —— 这正是 12.5 说的「写入时点不稳定」。
+      所以旋钮必须做成<b>读不到就退回默认档</b>，否则实盘等于没有这个旋钮。</p>
+  </div>
+
+  <div class="grid4" id="pick3-stats"></div>
+
+  <div class="tw"><table id="tbl-funnel3">
+    <thead><tr>
+      <th style="width:340px">层级</th><th class="num" style="width:80px">只数</th>
+      <th class="num" style="width:110px">占用仓位</th><th>说明</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <div class="tw"><table id="tbl-pick3">
+    <thead><tr>
+      <th class="num" style="width:42px">序</th><th style="width:74px">代码</th><th style="width:88px">名称</th>
+      <th class="num" style="width:46px">板</th><th style="width:104px">题材</th>
+      <th class="num" style="width:78px">成交额</th><th class="num" style="width:92px">封单÷成交额</th>
+      <th class="num" style="width:66px">首封</th>
+      <th class="num" style="width:72px">T 日收盘</th><th class="num" style="width:72px">T+1 开盘</th>
+      <th class="num" style="width:74px">gap</th><th style="width:104px">T+1 判定</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="fn"><b>本期的看点是「两条机制互补把钱挡在了外面」，不是收益。</b>
+    09-24 一共开出 4 只一字板：封单预筛出池 2 只（泰慕士 382.7%、新华传媒 5940%），
+    gap 门槛再拦下 2 只一字（大亚圣象 +10.03%、新华文轩 +10.00%）与 1 只高开（天威视讯 +8.36%）。
+    <b>这不构成「门槛有效」的证据</b> —— 12.6 已经证伪了它作为择时规律的有效性；
+    这里只说明「封单预筛」与「gap 纪律」在<b>可执行性</b>上互补，与收益无关。
+    数据落在 <code>回测脚本/18_第三期清单.json</code>。</p>
+    数据落在 <code>回测脚本/14_推荐清单.json</code>。</p>
+</section>
+<!-- ============ 2 ============ -->
+<section id="s2">
+  <h2>2 · 日级明细：T 日温度 → T+1 身位候选表现</h2>
+  <div class="chart">
+    <div class="ct">情绪温度（线）与次日候选均涨（柱）</div>
+    <div class="cs">柱：当日全部身位候选在 T+1 的等权平均涨幅；线：T 日情绪温度。左轴涨幅、右轴温度。</div>
+    <div class="legend">
+      <span><i style="background:rgba(251,191,36,.45)"></i>次日均涨（左轴 %）</span>
+      <span><i style="background:#a16207"></i>情绪温度 T（右轴）</span>
+      <span><i style="background:#8899a6"></i>无温度记录</span>
+    </div>
+    <div id="chart-days"></div>
+  </div>
+
+  <div class="tw"><table id="tbl-days">
+    <thead><tr>
+      <th>日期</th><th class="num">温度 T</th><th class="num">ΔT</th><th>结构 h/p/b</th><th>阶段 · 方向</th>
+      <th class="num">候选</th><th class="num">次日均涨</th><th class="num">胜率</th><th class="num">次日涨停率</th>
+      <th class="num">日内 σ</th><th class="num">最差</th><th class="num">当日涨停</th><th class="num">最高板</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="fn"><b>读法：</b>「日内 σ」是当天候选之间涨幅的标准差。它普遍大于「日间」的均涨差异——
+  这就是第 3 节要量化的那件事。09-14 涨停率 0% 系缺 09-15 三池所致。
+  <b>结构 h/p/b</b> 是情绪温度的三个分项（高度分 / 分档溢价分 / 宽度分）；
+  其中 <code>score_premium</code> 全样本只有 43 条有值，故多数日子显示 <code>—</code>，
+  这也是第 6 节 IC 表里 <code>h+p</code> 那一行覆盖率仅 19% 的原因。</p>
+</section>
+
+<!-- ============ 3 ============ -->
+<section id="s3">
+  <h2>3 · 择时 vs 选股：收益方差到底来自哪里</h2>
+  <div class="chart">
+    <div class="ct">收益方差的来源分解</div>
+    <div class="cs">把 226 条样本的总离差平方和拆成「日与日之间的差异」和「同一天内个股之间的差异」。</div>
+    <div id="chart-variance"></div>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <h4>算式</h4>
+      <p class="small" style="font-family:var(--mono)">
+        SS<sub>日间</sub> = Σ n<sub>d</sub>·(mean<sub>d</sub> − mean<sub>总</sub>)²<br>
+        SS<sub>日内</sub> = Σ n<sub>d</sub>·σ<sub>d</sub>²<br>
+        占比 = SS / (SS<sub>日间</sub> + SS<sub>日内</sub>)
+      </p>
+      <p class="small">全样本 n=226，总均值 <span id="v-grand"></span>，总 σ <span id="v-sigma"></span>。</p>
+    </div>
+    <div class="callout c-info" style="margin:0">
+      <div class="ttl">这条结论的可证伪性</div>
+      温度是<strong>市场级</strong>变量：同一天 7~21 只候选拿到的是同一个数值。
+      因此它最多只能解释「日间」那一块——11%。要解释另外 89%，
+      必须引入<strong>个股级</strong>因子（第 6 节的 IC 榜就是在找这批因子）。
+      <p class="small" style="margin-bottom:0">反过来说：任何<em>只</em>做市场级择时的策略，天花板就是 11%。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 4 ============ -->
+<section id="s4">
+  <h2>4 · 温度分档：方向单调，但每档天数太少</h2>
+  <div class="chart">
+    <div class="ct">按温度分档的次日均涨（柱）与日均胜率（线）</div>
+    <div class="cs">按「天」聚合，避免同一天多只样本被当成独立观测（伪独立）。</div>
+    <div class="legend">
+      <span><i style="background:rgba(251,191,36,.45)"></i>日均涨幅（左轴 %）</span>
+      <span><i style="background:#fbbf24"></i>日均胜率（右轴 %）</span>
+    </div>
+    <div id="chart-bands"></div>
+  </div>
+
+  <div class="tw"><table id="tbl-bands">
+    <thead><tr>
+      <th>温度档</th><th class="num">天数</th><th class="num">候选只数</th>
+      <th class="num">按天 均涨</th><th class="num">按天 胜率</th><th class="num">按天 涨停率</th>
+      <th class="num">按票 均涨</th><th class="num">按票 胜率</th><th>落在这一档的日子</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <div class="callout c-warn">
+    <div class="ttl">为什么「方向单调」依然不能当规律用</div>
+    四档的均涨从 +2.17% 单调升到 +5.84%、胜率从 61.0% 升到 83.7%，方向没问题；
+    但每档只有 <strong>2~6 个交易日</strong>。n=2 的档位，把某一天换掉结论就翻转——
+    样本量不足以支撑「温度越高越该做」的推论。
+    <p style="margin-bottom:0">另一个反直觉点：<strong>温度最低的那天反而是全样本最好的一天</strong>——
+    09-04 温度 42.5°，7 只候选次日均涨 <span class="pos">+7.19%</span>、胜率 85.7%。
+    冰点期恰恰是赔率最高的位置，所以温度不能做成「低就不做」的开关。</p>
+  </div>
+</section>
+
+<!-- ============ 5 ============ -->
+<section id="s5">
+  <h2>5 · 温度 vs 它自己的原材料</h2>
+  <p>情绪温度由九个分项合成，其中 <code>breadth</code> 维度的原料就是「涨停家数」。
+  如果温度对次日收益的预测力还不如它自己的原料，那这层合成就没有增量。</p>
+  <div class="tw"><table id="tbl-corr">
+    <thead><tr><th>自变量</th><th>被解释</th><th class="num">n（天）</th><th class="num">Pearson</th><th class="num">Spearman</th><th>结论</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <div class="callout c-info">
+    <div class="ttl">温度与它的原料高度共线</div>
+    温度 × 涨停家数 的相关性是 <strong id="tvz"></strong>（n=<span id="tvz-n"></span>）——
+    两者几乎是同一个东西的两种表述。
+    而在「预测次日身位股收益」这件事上，涨停家数单独上阵反而更有效。
+    <strong>结论：温度不进个股评分公式</strong>，它保留在仓位/择时侧。
+  </div>
+</section>
+
+<!-- ============ 6 ============ -->
+<section id="s6">
+  <h2>6 · 单因子 IC 榜：那 89% 在哪里</h2>
+  <div class="chart">
+    <div class="ct">各因子对次日收益的秩相关（Spearman IC）</div>
+    <div class="cs">红＝正向（因子越大次日越好），绿＝负向。条形右侧标注样本数 n —— 覆盖度不同的因子不可横比。</div>
+    <div id="chart-ic"></div>
+  </div>
+  <div class="tw"><table id="tbl-ic">
+    <thead><tr>
+      <th>因子</th><th class="ct">层级</th><th class="num">n</th><th class="num">覆盖率</th><th class="num">IC</th>
+      <th class="num">低位组均涨</th><th class="num">低位组胜率</th><th class="num">高位组均涨</th><th class="num">高位组胜率</th><th class="num">多空差</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <div class="callout c-bad">
+    <div class="ttl">本次回测修正：「首次封板」的 IC 原本是在偏样本上算的</div>
+    <code>t_market_stock.first_seal_time</code> 在库里有两种形态：<code>94536</code>（5 位，个位小时）
+    与 <code>104156</code>（6 位）。旧解析只认 6 位，把 <strong>192/226 条</strong>静默判为缺失——
+    于是「首次封板」的 IC 实际是在「10:00 之后才封板」这 34 条偏样本上算出来的，得到 <strong>+0.196</strong>，
+    并被误读为「越晚封板越好」。
+    <p style="margin-bottom:0">用 <code>zfill(6)</code> 归一后全样本 n=226，IC 变为 <strong>−0.150</strong>：
+    低半组（<strong>早</strong>封板）均涨 <span class="pos">+3.68%</span>／胜率 68.1%，
+    高半组（<strong>晚</strong>封板）<span class="pos">+3.04%</span>／胜率 61.9%，多空差 −0.63pp。
+    <strong>方向由「越晚越好」翻转为「越早越好」</strong>——这才与 v1.0 里 <code>first_seal_time ≤ 10:00</code> 加成、
+    以及 §10 保留的封板时序项在逻辑上一致；但强度很弱（10 个因子里排第 6），只能当次级项。
+    主 PRD §12.4.5 的该行已同步更正。</p>
+  </div>
+
+  <div class="callout c-info">
+    <div class="ttl">修正后因子方向反而自洽了，但依然不支持「单因子阈值」</div>
+    封单 / 成交额（+0.308，封得<em>死</em>）、首次封板时间（−0.150，封得<em>早</em>）、封单额（+0.222）三个因子同向，
+    讲的都是同一件事：<strong>一封就锁死的票更好走</strong>。修正前「两个因子方向相反」的矛盾消失了。
+    <p style="margin-bottom:0">但即便如此，最强的 +0.308 也只对应多空差 2.46pp、高低组胜率 56.0% vs 73.6%——
+    <strong>低半组里仍有 56% 的票上涨</strong>。任何单个因子都做不到用阈值把票筛干净，
+    所以 §10「排序依据改多因子加权」的结论不变，只是理由从「因子互相矛盾」换成了「单因子区分度不够」。</p>
+  </div>
+</section>
+
+<!-- ============ 7 ============ -->
+<section id="s7">
+  <h2>7 · 温度 × 个股因子 交互</h2>
+  <p>如果温度真的调节了「什么样的票更好做」，那么把样本按温度切两半后，同一因子的 IC 应该出现明显差异。</p>
+  <div class="tw"><table id="tbl-inter">
+    <thead><tr><th>因子</th><th>低温 T&lt;60</th><th>高温 T≥60</th><th class="num">IC 差</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <div class="callout c-info">
+    <div class="ttl">结论</div>
+    高低温两组的因子结构基本一致：<strong>封单强度始终最强、成交额始终负向</strong>（成交越小越好）。
+    连板数的 IC 从低温 +0.065 升到高温 +0.141，方向为「越热越认高度」，
+    但绝对值仍然很低——这正与主 PRD §6 用多因子评分替代「按连板数排序」的结论一致。
+  </div>
+</section>
+
+<!-- ============ 8 ============ -->
+<section id="s8">
+  <h2>8 · 组合回测：温度当仓位旋钮</h2>
+  <p>每日等权买入当日<strong>全部</strong>身位候选，次日收盘卖出；温度只用来决定仓位系数 w(T)。
+  无温度记录的日子按「不开仓」处理（这是保守假设，第 11 节会说明为何它不理想）。</p>
+
+  <div class="chart">
+    <div class="ct">六种仓位方案的累计收益</div>
+    <div class="cs">横轴为方案，数字为期末累计收益；回撤标在柱顶。</div>
+    <div id="chart-nav"></div>
+  </div>
+  <div class="chart">
+    <div class="ct">P1 恒满仓的净值路径</div>
+    <div class="cs">仅用有温度记录的 14 个交易日，起点 1.000。</div>
+    <div id="chart-path"></div>
+  </div>
+
+  <div class="tw"><table id="tbl-pol">
+    <thead><tr><th>方案</th><th class="num">有仓天数</th><th class="num">期末净值</th><th class="num">累计收益</th><th class="num">最大回撤</th><th>读法</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <div class="callout c-warn">
+    <div class="ttl">反直觉结论：温度过滤提高单日质量，却降低总收益</div>
+    恒满仓（P1）累计 <span class="pos">+56.60%</span>；改成「T≥60 才开仓」（P5）后，
+    <strong>有仓日从 14 天降到 8 天</strong>，日均涨幅确实变好了，但累计收益掉到
+    <span class="pos">+39.52%</span>。
+    <p style="margin-bottom:0">原因就是第 4 节那天：低温日（09-04，+7.19%）被过滤掉的损失大于避开低质日的收益。
+    所以温度的定位是<strong>仓位旋钮</strong>（同一套候选该压多重），
+    <strong>不是开仓开关</strong>（让不让做）。</p>
+  </div>
+</section>
+
+<!-- ============ 9 ============ -->
+<section id="s9">
+  <h2>9 · 2026-09-18 逐只复盘：温度说得出「约 1/3 会失败」，说不出是哪 1/3</h2>
+  <div class="grid4" id="d18-stats"></div>
+
+  <div class="tw"><table id="tbl-d18">
+    <thead><tr>
+      <th>代码</th><th>名称</th><th class="num">板</th><th>题材</th><th class="num">成交额亿</th><th class="num">换手%</th>
+      <th class="num">封单亿</th><th class="num">封单/成交额</th><th class="num">首次封板</th><th class="num">次日涨跌</th><th class="ct">次日涨停</th><th class="ct">判定</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <div class="grid2">
+    <div class="tw"><table id="tbl-cmp" style="margin:0">
+      <thead><tr><th>指标</th><th class="num">走强组（8 只）</th><th class="num">未走出来组（4 只）</th><th class="num">差异</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div class="callout c-warn" style="margin:0">
+      <div class="ttl">为什么这 3 只没走出来</div>
+      当天温度 67.6°（发酵 · 上升）隐含的成功率与该档历史胜率只差约 1 个百分点——
+      <strong>温度正确预告了风险存在</strong>，但两组在成交额、换手率、封单强度、封板时间上
+      <strong>都没有统计显著分野</strong>（n=8 vs n=4，任何差异都在噪声范围内）。
+      <p style="margin-bottom:0">唯一值得记的是重挫的那只：<strong>经纬股份 301390，2 板、−6.69%</strong>。
+      失败并非只发生在高位——4 板的锡华科技只小跌 1.30%，2 板的经纬却重挫。
+      这与「单靠身位高度不足以过滤风险」的判断一致，也正是 §6 走多因子评分的理由。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 10 ============ -->
+<section id="s10">
+  <h2>10 · 对配置的直接影响</h2>
+  <div class="tw"><table>
+    <thead><tr><th>配置项</th><th>原默认</th><th>建议</th><th>依据</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>filter_min_amount</code></td>
+        <td><span class="b b-gray">1.0 亿 · 直接剔除</span></td>
+        <td><span class="b b-amber">0.5 亿 · 改为 MARK</span></td>
+        <td>成交额 IC 为 <strong>−0.285（负向）</strong>，说明<strong>小成交额票平均表现更好</strong>。
+        原阈值系统性剔掉了最好的那一半。而 1 亿硬门槛还会误杀最高身位股
+        （09-21 空间板华瓷股份 5 板，成交额仅 0.49 亿的一字锁仓）。</td>
+      </tr>
+      <tr>
+        <td>排序依据</td>
+        <td><span class="b b-gray">按命中原则数量</span></td>
+        <td><span class="b b-blue">多因子加权评分</span></td>
+        <td>实测身位候选与节点票<strong>交集为空</strong>，「命中数量」恒等于 1，等于没有排序。
+        且最强因子（封单/成交额 +0.308）的低半组里仍有 56% 的票上涨——
+        单因子阈值筛不干净，只能加权。</td>
+      </tr>
+      <tr>
+        <td>连板数权重</td>
+        <td><span class="b b-gray">作为主要排序键</span></td>
+        <td><span class="b b-amber">降权，仅作身位判定</span></td>
+        <td>连板数 IC 仅 <strong>+0.100</strong>，在 10 个因子里排第 8。
+        它适合用来定义「谁是身位」，不适合用来判断「次日谁涨」。</td>
+      </tr>
+      <tr>
+        <td>情绪温度的用法</td>
+        <td><span class="b b-gray">未接入</span></td>
+        <td><span class="b b-blue">只进仓位/择时，不进选股评分</span></td>
+        <td>温度对个股收益无增量（IC +0.131，低于封单强度 0.308，也低于它自己的原料）；
+        且 18 个样本日里只有 14 天有值，不能作为候选产出的前置条件。</td>
+      </tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ 11 ============ -->
+<section id="s11">
+  <h2>11 · 局限与待办</h2>
+  <div class="grid2">
+    <div class="card">
+      <h4>样本层面的局限</h4>
+      <ul>
+        <li><strong>窗口太短</strong>：18 个交易日、226 条样本。温度分档里最小的一档只有 2 天，谈不上统计功效。</li>
+        <li><strong>单边行情</strong>：全样本次日均涨 +3.36%、胜率 65.0%，属于顺风样本；策略在退潮期的表现未被充分检验。</li>
+        <li><strong>日 K 未落库</strong>：本次 141 只票的 qfq 日 K 是脚本现拉腾讯的，<code>t_daily_bar</code> 里只有 10 只阵眼票。要复跑需联网。</li>
+        <li><strong>次日收盘了结</strong>：未区分开盘/盘中买点，实际执行价与收盘价有滑点。</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>数据层面的待办</h4>
+      <ul>
+        <li><strong>补 09-15 三池</strong>，否则 09-14 的候选永远拿不到「次日涨停」判定。</li>
+        <li><strong>回填 <code>t_zt_perf</code></strong>：目前只有 09-14 / 09-18 / 09-21 三天，主 PRD 的分歧日规则依赖它。</li>
+        <li><strong>补 <code>turnover_rate</code> / <code>float_mv</code></strong>：只有 3 天有值，导致两个因子的 IC 无法与全样本因子比较。</li>
+        <li><strong>温度填报率</strong>：78%（14/18）。若要把温度用于仓位，缺失日的处理规则必须先定死——本回测按「不开仓」处理是<strong>偏保守</strong>的假设（第 8 节 P1 因此少算了 4 天）。</li>
+        <li><strong><code>first_seal_time</code> 字段形态统一</strong>：5 位 / 6 位混用，是本次 IC 出错的直接原因，建议在写入侧归一为 <code>HHMMSS</code>。</li>
+      </ul>
+    </div>
+  </div>
+  <p class="fn"><b>复算入口：</b><code>回测脚本/00_候选池抽取.py</code> → <code>01_日K批量拉取.py</code> →
+  <code>02_温度联合回测.py</code> → <code>03_日级聚合与组合回测.py</code> → <code>04_单因子IC与交互.py</code>；
+  本页全部数字由 <code>06_预览页数据导出.py</code> 汇总输出，不引入任何新增计算口径。</p>
+</section>
+
+</main>
+</div>
+
+<script>
+const D = __DATA_JSON__;
+const D14 = __DATA_JSON_14__;
+const D18 = __DATA_JSON_18__;
+const NS = 'http://www.w3.org/2000/svg';
+const RED = '#f87171', GREEN = '#34d399', INK = '#e1e8ed', MUT = '#8899a6';
+const BRAND = '#fbbf24', BSOFT = 'rgba(251,191,36,.30)', AMBER = '#fbbf24', LINE = '#2d3748';
+const GRID = '#2d3748', AXIS = '#8899a6', SERIES = '#a16207';
+
+function mk(t, a) { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); return e; }
+function el(t, c, h) { const e = document.createElement(t); if (c) e.className = c; if (h !== undefined) e.innerHTML = h; return e; }
+function txt(p, x, y, s, o) {
+  o = o || {};
+  const e = mk('text', { x: x, y: y, fill: o.fill || MUT, 'font-size': o.fs || 11,
+    'text-anchor': o.anchor || 'middle', 'font-family': 'inherit' });
+  if (o.weight) e.setAttribute('font-weight', o.weight);
+  if (o.mono) e.setAttribute('style', 'font-variant-numeric:tabular-nums');
+  e.textContent = s; p.appendChild(e); return e;
+}
+function sgn(v, d) { d = d === undefined ? 2 : d; return (v > 0 ? '+' : '') + v.toFixed(d); }
+function col(v, inv) {
+  if (v === null || v === undefined || v === 0) return MUT;
+  return (v > 0) !== !!inv ? RED : GREEN;
+}
+function pc(v, d) { d = d === undefined ? 2 : d; return (v > 0 ? '+' : '') + v.toFixed(d) + '%'; }
+
+/* ---------- chips ---------- */
+(function () {
+  const h = D.head, P = D.pool_raw;
+  const items = [
+    h.samples + ' 条样本',
+    h.day_count + ' 个选股日',
+    h.stocks + ' 只去重候选',
+    h.start + ' ~ ' + h.end,
+    '候选池原始 ' + P.rows + ' 条 / ' + P.codes + ' 只',
+    'T 日选 · T+1 收盘了结'
+  ];
+  const box = document.getElementById('chips');
+  items.forEach(function (t) { box.appendChild(el('span', 'chip', t)); });
+})();
+
+/* ---------- 0 headline ---------- */
+(function () {
+  const box = document.getElementById('headline');
+  const v = D.variance;
+  const cards = [
+    ['日间方差占比', v.day_pct.toFixed(1) + '%', '温度能触及的上限', 'red'],
+    ['日内方差占比', v.stock_pct.toFixed(1) + '%', '只能靠个股因子', 'amber'],
+    ['温度 IC（个股级）', sgn(D.ic.find(function (r) { return r.name === '情绪温度 T'; }).ic, 3), '排在 10 个因子的第 7 位', 'plain'],
+    ['最强因子 IC', sgn(D.ic[0].ic, 3), D.ic[0].name + '，是温度的 2.3 倍', 'red'],
+    ['P1 恒满仓累计', '+' + D.policies[0].cum.toFixed(2) + '%', '14 个有温度日', 'red'],
+    ['P5 仅 T≥60 累计', '+' + D.policies[4].cum.toFixed(2) + '%', '提高单日质量，降低总收益', 'green']
+  ];
+  cards.forEach(function (c) {
+    const d = el('div', 'stat');
+    d.appendChild(el('div', 'lab', c[0]));
+    const val = el('div', 'val', c[1]);
+    val.style.color = c[3] === 'red' ? RED : (c[3] === 'green' ? GREEN : (c[3] === 'amber' ? AMBER : INK));
+    d.appendChild(val);
+    d.appendChild(el('div', 'sub', c[2]));
+    box.appendChild(d);
+  });
+})();
+
+/* ---------- 1 sample stats ---------- */
+(function () {
+  const h = D.head, box = document.getElementById('sample-stats');
+  const rows = [
+    ['样本条数', h.samples, '有效 T+1 收盘价可取得'],
+    ['覆盖交易日', h.day_count, '其中 4 天无温度记录'],
+    ['去重个股', h.stocks, '剔重后'],
+    ['全样本次日均涨', pc(h.avg), '胜率 ' + h.win.toFixed(1) + '% · 次日涨停率 ' + h.promo_all.toFixed(1) + '%']
+  ];
+  rows.forEach(function (r) {
+    const d = el('div', 'stat');
+    d.appendChild(el('div', 'lab', r[0]));
+    const v = el('div', 'val', r[1]);
+    if (r[0].indexOf('均涨') >= 0) v.style.color = RED;
+    d.appendChild(v);
+    d.appendChild(el('div', 'sub', r[2]));
+    box.appendChild(d);
+  });
+})();
+
+/* ---------- 2 combo chart ---------- */
+(function () {
+  const W = 920, H = 268, ml = 46, mr = 50, mt = 16, mb = 52;
+  const s = mk('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: H });
+  document.getElementById('chart-days').appendChild(s);
+  const days = D.days;
+  const iw = W - ml - mr, ih = H - mt - mb;
+  const gMin = Math.min(-2, Math.min.apply(null, days.map(function (d) { return d.avg; })));
+  const gMax = Math.max(8, Math.max.apply(null, days.map(function (d) { return d.avg; })));
+  const tVals = days.filter(function (d) { return d.T !== null; }).map(function (d) { return d.T; });
+  const tMin = Math.floor(Math.min.apply(null, tVals) / 5) * 5 - 5;
+  const tMax = Math.ceil(Math.max.apply(null, tVals) / 5) * 5 + 5;
+  const step = iw / days.length;
+  function gy(v) { return mt + ih * (1 - (v - gMin) / (gMax - gMin)); }
+  function ty(v) { return mt + ih * (1 - (v - tMin) / (tMax - tMin)); }
+  // grid + left axis
+  [0, 2, 4, 6, 8].forEach(function (v) {
+    if (v < gMin || v > gMax) return;
+    s.appendChild(mk('line', { x1: ml, x2: ml + iw, y1: gy(v), y2: gy(v), stroke: LINE, 'stroke-width': 1 }));
+    txt(s, ml - 8, gy(v) + 4, v + '%', { anchor: 'end', fs: 10.5 });
+  });
+  s.appendChild(mk('line', { x1: ml, x2: ml + iw, y1: gy(0), y2: gy(0), stroke: '#4a5568', 'stroke-width': 1.4 }));
+  // bars
+  days.forEach(function (d, i) {
+    const x = ml + i * step + step * 0.22, w = step * 0.56;
+    const y0 = gy(0), y1 = gy(d.avg);
+    s.appendChild(mk('rect', { x: x, y: Math.min(y0, y1), width: w, height: Math.abs(y1 - y0),
+      fill: d.avg >= 0 ? BSOFT : 'rgba(52,211,153,.30)', rx: 2 }));
+    txt(s, ml + i * step + step * 0.5, y1 - 5, sgn(d.avg, 1), { fs: 10, fill: col(d.avg) || RED });
+  });
+  // right axis for T
+  for (var i = 0; i <= 4; i++) {
+    var v = tMin + (tMax - tMin) * i / 4;
+    txt(s, ml + iw + 8, ty(v) + 4, v.toFixed(0) + '°', { anchor: 'start', fs: 10.5, fill: BRAND });
+  }
+  // T line
+  var pts = [];
+  days.forEach(function (d, i) {
+    if (d.T === null) { pts.push(null); return; }
+    pts.push([ml + i * step + step * 0.5, ty(d.T)]);
+  });
+  var seg = [];
+  pts.forEach(function (p) {
+    if (p === null) { if (seg.length > 1) drawSeg(seg); seg = []; return; }
+    seg.push(p);
+  });
+  function drawSeg(a) {
+    s.appendChild(mk('polyline', { points: a.map(function (p) { return p.join(','); }).join(' '),
+      fill: 'none', stroke: BRAND, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+  }
+  pts.forEach(function (p, i) {
+    if (p === null) {
+      s.appendChild(mk('circle', { cx: ml + i * step + step * 0.5, cy: gy(days[i].avg), r: 2.6, fill: '#8899a6' }));
+      return;
+    }
+    s.appendChild(mk('circle', { cx: p[0], cy: p[1], r: 3.2, fill: '#1a2332', stroke: BRAND, 'stroke-width': 2 }));
+  });
+  // x labels
+  days.forEach(function (d, i) {
+    txt(s, ml + i * step + step * 0.5, H - 32, d.date.slice(5), { fs: 10 });
+    txt(s, ml + i * step + step * 0.5, H - 18, d.n + '只', { fs: 9.5, fill: '#8899a6' });
+  });
+  txt(s, ml + iw / 2, H - 2, '日期（下方数字为该日候选只数）', { fs: 10.5 });
+})();
+
+/* ---------- daily table ---------- */
+(function () {
+  const tb = document.querySelector('#tbl-days tbody');
+  D.days.forEach(function (d) {
+    const tr = el('tr');
+    const st = (d.h === null) ? '—'
+      : d.h + '/' + (d.p === null ? '—' : d.p) + '/' + (d.b === null ? '—' : d.b);
+    tr.innerHTML =
+      '<td>' + d.date + '</td>' +
+      '<td class="num">' + (d.T === null ? '<span class="mut">—</span>' : d.T.toFixed(1)) + '</td>' +
+      '<td class="num">' + (d.dT === null ? '<span class="mut">—</span>' : sgn(d.dT, 1)) + '</td>' +
+      '<td><code>' + st + '</code></td>' +
+      '<td>' + (d.stage || '<span class="mut">—</span>') + (d.direc ? ' · ' + d.direc : '') + '</td>' +
+      '<td class="num">' + d.n + '</td>' +
+      '<td class="num" style="color:' + col(d.avg) + '">' + pc(d.avg) + '</td>' +
+      '<td class="num">' + d.win.toFixed(1) + '%</td>' +
+      '<td class="num">' + (d.promo === null ? '—' : d.promo.toFixed(1) + '%') + '</td>' +
+      '<td class="num">' + d.sd.toFixed(2) + '</td>' +
+      '<td class="num" style="color:' + (d.worst < 0 ? GREEN : MUT) + '">' + pc(d.worst) + '</td>' +
+      '<td class="num">' + (d.zt === null ? '—' : d.zt) + '</td>' +
+      '<td class="num">' + (d.maxlb === null ? '—' : d.maxlb) + '</td>';
+    tb.appendChild(tr);
+  });
+})();
+
+/* ---------- 3 variance ---------- */
+(function () {
+  document.getElementById('v-grand').textContent = pc(D.variance.grand);
+  document.getElementById('v-sigma').textContent = D.variance.sigma.toFixed(2);
+  const W = 920, H = 96;
+  const s = mk('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: H });
+  document.getElementById('chart-variance').appendChild(s);
+  const x0 = 12, w = W - 24, y = 20, hh = 40;
+  const a = D.variance.day_pct / 100 * w, b = D.variance.stock_pct / 100 * w;
+  s.appendChild(mk('rect', { x: x0, y: y, width: a, height: hh, fill: BRAND }));
+  s.appendChild(mk('rect', { x: x0 + a, y: y, width: b, height: hh, fill: '#0891b2' }));
+  txt(s, x0 + a / 2, y + 25, '日间（选时）' + D.variance.day_pct + '%', { fill: '#0f1419', fs: 13, weight: 700 });
+  txt(s, x0 + a + b / 2, y + 25, '日内（选股）' + D.variance.stock_pct + '%', { fill: '#e1e8ed', fs: 13, weight: 700 });
+  txt(s, x0 + a / 2, y + hh + 18, '温度只能作用在这一块', { fs: 11 });
+  txt(s, x0 + a + b / 2, y + hh + 18, '只能靠个股因子解释', { fs: 11 });
+})();
+
+/* ---------- 4 bands ---------- */
+(function () {
+  const bands = D.bands;
+  const W = 920, H = 250, ml = 46, mr = 50, mt = 14, mb = 46;
+  const s = mk('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: H });
+  document.getElementById('chart-bands').appendChild(s);
+  const iw = W - ml - mr, ih = H - mt - mb;
+  const gMax = Math.max.apply(null, bands.map(function (b) { return b.day_avg; })) * 1.35;
+  const step = iw / bands.length;
+  function gy(v) { return mt + ih * (1 - v / gMax); }
+  function wy(v) { return mt + ih * (1 - v / 100); }
+  [0, 2, 4, 6].forEach(function (v) {
+    if (v > gMax) return;
+    s.appendChild(mk('line', { x1: ml, x2: ml + iw, y1: gy(v), y2: gy(v), stroke: LINE }));
+    txt(s, ml - 8, gy(v) + 4, v + '%', { anchor: 'end', fs: 10.5 });
+  });
+  s.appendChild(mk('line', { x1: ml, x2: ml + iw, y1: gy(0), y2: gy(0), stroke: '#4a5568' }));
+  bands.forEach(function (b, i) {
+    const x = ml + i * step + step * 0.2, w = step * 0.6;
+    s.appendChild(mk('rect', { x: x, y: gy(b.day_avg), width: w, height: gy(0) - gy(b.day_avg), fill: BSOFT, rx: 3 }));
+    txt(s, x + w / 2, gy(b.day_avg) - 6, pc(b.day_avg, 2), { fs: 11, fill: RED, weight: 600 });
+    txt(s, x + w / 2, H - 26, b.label, { fs: 11, fill: INK });
+    txt(s, x + w / 2, H - 12, b.days + ' 天 · ' + b.stocks + ' 只', { fs: 10 });
+  });
+  bands.forEach(function (b, i) {
+    txt(s, ml + i * step + step * 0.8, wy(b.day_win) + 4, b.day_win.toFixed(1) + '%', { fs: 10.5, fill: AMBER, weight: 600 });
+  });
+  var lp = bands.map(function (b, i) { return [ml + i * step + step * 0.8, wy(b.day_win)]; });
+  s.appendChild(mk('polyline', { points: lp.map(function (p) { return p.join(','); }).join(' '),
+    fill: 'none', stroke: AMBER, 'stroke-width': 2, 'stroke-dasharray': '4 3' }));
+  lp.forEach(function (p) { s.appendChild(mk('circle', { cx: p[0], cy: p[1], r: 3, fill: AMBER })); });
+  txt(s, ml + iw + 8, mt + 10, '胜率', { anchor: 'start', fs: 10.5, fill: AMBER });
+})();
+
+(function () {
+  const tb = document.querySelector('#tbl-bands tbody');
+  D.bands.forEach(function (b) {
+    const tr = el('tr');
+    tr.innerHTML =
+      '<td>' + b.label + '</td>' +
+      '<td class="num">' + b.days + '</td>' +
+      '<td class="num">' + b.stocks + '</td>' +
+      '<td class="num" style="color:' + col(b.day_avg) + '">' + pc(b.day_avg) + '</td>' +
+      '<td class="num">' + b.day_win.toFixed(1) + '%</td>' +
+      '<td class="num">' + b.day_promo.toFixed(1) + '%</td>' +
+      '<td class="num" style="color:' + col(b.stk_avg) + '">' + pc(b.stk_avg) + '</td>' +
+      '<td class="num">' + b.stk_win.toFixed(1) + '%</td>' +
+      '<td class="small">' + b.detail.map(function (d) { return d.date + '(' + d.T + '°)'; }).join('、') + '</td>';
+    tb.appendChild(tr);
+  });
+})();
+
+/* ---------- 5 corr ---------- */
+(function () {
+  document.getElementById('tvz').textContent = sgn(D.temp_vs_zt.pe, 3);
+  document.getElementById('tvz-n').textContent = D.temp_vs_zt.n;
+  const note = {
+    '情绪温度 T': '温度越高次日越好，但强度弱',
+    '涨停家数（原材料）': '比合成后的温度更强',
+    '最高板': '高度本身几乎无预测力'
+  };
+  const tb = document.querySelector('#tbl-corr tbody');
+  D.corr.forEach(function (c) {
+    const nc = c.pe > 0.3 ? '<span class="b b-red">较强正向</span>' : (c.pe > 0.15 ? '<span class="b b-amber">弱正向</span>' : '<span class="b b-gray">接近噪声</span>');
+    const tr = el('tr');
+    tr.innerHTML = '<td>' + c.label + '</td><td>' + c.target + '</td><td class="num">' + c.n + '</td>' +
+      '<td class="num">' + sgn(c.pe, 3) + '</td><td class="num">' + sgn(c.sp, 3) + '</td>' +
+      '<td>' + nc + ' <span class="small">' + (note[c.label] || '') + '</span></td>';
+    tb.appendChild(tr);
+  });
+})();
+
+/* ---------- 6 IC ---------- */
+(function () {
+  const rows = D.ic.filter(function (r) { return r.ic !== null; });
+  const W = 920, rowH = 34, ml = 168, mr = 70, mt = 12;
+  const H = mt + rows.length * rowH + 34;
+  const s = mk('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: H });
+  document.getElementById('chart-ic').appendChild(s);
+  const maxAbs = Math.max.apply(null, rows.map(function (r) { return Math.abs(r.ic); })) * 1.12;
+  const zero = ml + (W - ml - mr) / 2;
+  const half = (W - ml - mr) / 2;
+  function bx(v) { return zero + half * (v / maxAbs); }
+  s.appendChild(mk('line', { x1: zero, x2: zero, y1: mt, y2: mt + rows.length * rowH, stroke: '#4a5568' }));
+  rows.forEach(function (r, i) {
+    const y = mt + i * rowH + 6, hh = 20;
+    const w = bx(r.ic) - zero;
+    s.appendChild(mk('rect', { x: Math.min(zero, bx(r.ic)), y: y, width: Math.abs(w), height: hh,
+      fill: r.ic > 0 ? '#f87171' : '#34d399', rx: 3 }));
+    txt(s, ml - 10, y + 14, r.name, { anchor: 'end', fs: 12, fill: INK });
+    txt(s, bx(r.ic) + (r.ic > 0 ? 7 : -7), y + 14, sgn(r.ic, 3), {
+      anchor: r.ic > 0 ? 'start' : 'end', fs: 11.5, fill: col(r.ic), weight: 600 });
+    txt(s, W - 6, y + 14, 'n=' + r.n, { anchor: 'end', fs: 10.5, fill: r.n < 60 ? AMBER : MUT });
+  });
+  txt(s, zero, H - 12, '0', { fs: 10.5 });
+  txt(s, ml, H - 12, '← 负向（越小越好）', { anchor: 'start', fs: 10.5, fill: GREEN });
+  txt(s, W - mr, H - 12, '正向（越大越好）→', { anchor: 'end', fs: 10.5, fill: RED });
+})();
+
+(function () {
+  const tb = document.querySelector('#tbl-ic tbody');
+  const maxN = Math.max.apply(null, D.ic.map(function (r) { return r.n; }));
+  D.ic.forEach(function (r) {
+    const cov = Math.round(100 * r.n / D.head.samples);
+    const lowCov = cov < 30;
+    const tr = el('tr');
+    if (r.ic === null) { tr.innerHTML = '<td>' + r.name + '</td><td colspan="9" class="small">样本不足，未计算</td>'; tb.appendChild(tr); return; }
+    tr.innerHTML =
+      '<td>' + r.name + '</td>' +
+      '<td class="ctr">' + (r.kind === 'market' ? '<span class="b b-brand">市场级</span>' : '<span class="b b-gray">个股级</span>') + '</td>' +
+      '<td class="num">' + r.n + '</td>' +
+      '<td class="num"' + (lowCov ? ' style="color:' + AMBER + ';font-weight:600"' : '') + '>' + cov + '%</td>' +
+      '<td class="num" style="color:' + col(r.ic) + ';font-weight:600">' + sgn(r.ic, 3) + '</td>' +
+      '<td class="num">' + pc(r.lo_avg) + '</td><td class="num">' + r.lo_win.toFixed(1) + '%</td>' +
+      '<td class="num">' + pc(r.hi_avg) + '</td><td class="num">' + r.hi_win.toFixed(1) + '%</td>' +
+      '<td class="num" style="color:' + col(r.spread) + '">' + sgn(r.spread) + 'pp</td>';
+    tb.appendChild(tr);
+  });
+})();
+
+/* ---------- 7 inter ---------- */
+(function () {
+  const a = D.inter[0], b = D.inter[1];
+  const map = {};
+  b.items.forEach(function (x) { map[x.name] = x; });
+  const tb = document.querySelector('#tbl-inter tbody');
+  a.items.forEach(function (x) {
+    const y = map[x.name];
+    if (!y) return;
+    const d = (y.ic - x.ic);
+    const tr = el('tr');
+    tr.innerHTML = '<td>' + x.name + '</td>' +
+      '<td class="num">' + sgn(x.ic, 3) + ' <span class="small">n=' + x.n + '</span></td>' +
+      '<td class="num">' + sgn(y.ic, 3) + ' <span class="small">n=' + y.n + '</span></td>' +
+      '<td class="num" style="color:' + (Math.abs(d) > 0.1 ? RED : MUT) + '">' + sgn(d, 3) + '</td>';
+    tb.appendChild(tr);
+  });
+})();
+
+/* ---------- 8 policies ---------- */
+(function () {
+  const pols = D.policies;
+  const W = 920, H = 240, ml = 60, mr = 24, mt = 26, mb = 54;
+  const s = mk('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: H });
+  document.getElementById('chart-nav').appendChild(s);
+  const iw = W - ml - mr, ih = H - mt - mb;
+  const maxC = Math.max.apply(null, pols.map(function (p) { return p.cum; })) * 1.2;
+  const step = iw / pols.length;
+  function by(v) { return mt + ih * (1 - v / maxC); }
+  [0, 20, 40, 60].forEach(function (v) {
+    s.appendChild(mk('line', { x1: ml, x2: ml + iw, y1: by(v), y2: by(v), stroke: LINE }));
+    txt(s, ml - 8, by(v) + 4, v + '%', { anchor: 'end', fs: 10.5 });
+  });
+  pols.forEach(function (p, i) {
+    const x = ml + i * step + step * 0.22, w = step * 0.56;
+    const isP1 = i === 0;
+    s.appendChild(mk('rect', { x: x, y: by(p.cum), width: w, height: by(0) - by(p.cum),
+      fill: isP1 ? '#fbbf24' : 'rgba(251,191,36,.30)', rx: 3 }));
+    txt(s, x + w / 2, by(p.cum) - 16, '+' + p.cum.toFixed(2) + '%', { fs: 11.5, fill: RED, weight: 700 });
+    txt(s, x + w / 2, by(p.cum) - 5, '回撤 ' + p.mdd.toFixed(2) + '%', { fs: 9.5, fill: MUT });
+    const lab = p.label.split(' ');
+    txt(s, x + w / 2, H - 34, lab[0], { fs: 11, fill: INK, weight: 600 });
+    txt(s, x + w / 2, H - 20, lab.slice(1).join(' '), { fs: 10, fill: MUT });
+    txt(s, x + w / 2, H - 6, p.traded + ' 天有仓', { fs: 9.5, fill: MUT });
+  });
+})();
+
+(function () {
+  const path = D.policies[0].path;
+  const W = 920, H = 190, ml = 48, mr = 20, mt = 16, mb = 34;
+  const s = mk('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: H });
+  document.getElementById('chart-path').appendChild(s);
+  const iw = W - ml - mr, ih = H - mt - mb;
+  const vs = path.map(function (p) { return p.nav; });
+  const lo = Math.min.apply(null, vs) - 0.02, hi = Math.max.apply(null, vs) + 0.02;
+  const step = iw / Math.max(1, path.length - 1);
+  function py(v) { return mt + ih * (1 - (v - lo) / (hi - lo)); }
+  [1.0, 1.2, 1.4, 1.6].forEach(function (v) {
+    if (v < lo || v > hi) return;
+    s.appendChild(mk('line', { x1: ml, x2: ml + iw, y1: py(v), y2: py(v), stroke: v === 1 ? '#4a5568' : LINE }));
+    txt(s, ml - 8, py(v) + 4, v.toFixed(1), { anchor: 'end', fs: 10.5 });
+  });
+  const pts = path.map(function (p, i) { return [ml + i * step, py(p.nav)]; });
+  s.appendChild(mk('polyline', { points: pts.map(function (p) { return p.join(','); }).join(' '),
+    fill: 'none', stroke: BRAND, 'stroke-width': 2.2, 'stroke-linejoin': 'round' }));
+  pts.forEach(function (p, i) {
+    s.appendChild(mk('circle', { cx: p[0], cy: p[1], r: 3, fill: '#1a2332', stroke: BRAND, 'stroke-width': 1.8 }));
+    txt(s, p[0], H - 12, path[i].date.slice(5), { fs: 9.5 });
+  });
+  txt(s, ml, mt - 4, '净值', { anchor: 'start', fs: 10.5 });
+})();
+
+(function () {
+  const tb = document.querySelector('#tbl-pol tbody');
+  const notes = ['基准：只要开仓就满仓', '把低温日全部滤掉，有仓日减少 4 天',
+    '低温日降为 6 成，几乎无差别', '最平滑的一套，但总收益最低',
+    '单日质量最好（只做 8 天），总收益反而低于 P1', '开仓条件最严 + 半仓，最保守'];
+  D.policies.forEach(function (p, i) {
+    const tr = el('tr');
+    tr.innerHTML = '<td>' + p.label + '</td><td class="num">' + p.traded + '</td>' +
+      '<td class="num">' + p.nav.toFixed(4) + '</td>' +
+      '<td class="num" style="color:' + col(p.cum) + ';font-weight:600">+' + p.cum.toFixed(2) + '%</td>' +
+      '<td class="num" style="color:' + GREEN + '">' + p.mdd.toFixed(2) + '%</td>' +
+      '<td class="small">' + notes[i] + '</td>';
+    tb.appendChild(tr);
+  });
+})();
+
+/* ---------- 9 d18 ---------- */
+(function () {
+  const box = document.getElementById('d18-stats');
+  const items = [
+    ['次日上涨', D.d18_up + ' 只', '占 12 只候选'],
+    ['次日下跌', D.d18_down + ' 只', '其中重挫 1 只'],
+    ['平均涨幅', pc(D.d18_avg), '温度 67.6° 发酵·上升'],
+    ['胜率', D.d18_win.toFixed(1) + '%', '该档历史日均胜率 68.0%']
+  ];
+  items.forEach(function (r, i) {
+    const d = el('div', 'stat');
+    d.appendChild(el('div', 'lab', r[0]));
+    const v = el('div', 'val', r[1]);
+    v.style.color = i === 1 ? GREEN : RED;
+    d.appendChild(v);
+    d.appendChild(el('div', 'sub', r[2]));
+    box.appendChild(d);
+  });
+})();
+
+(function () {
+  const tb = document.querySelector('#tbl-d18 tbody');
+  D.d18.slice().reverse().forEach(function (r) {
+    const tr = el('tr');
+    const bad = r.pct <= 5;
+    tr.style.background = bad ? 'rgba(248,113,113,.08)' : '';
+    tr.innerHTML =
+      '<td>' + r.code + '</td><td>' + r.name + '</td><td class="num">' + r.board + '</td>' +
+      '<td>' + r.industry + '</td>' +
+      '<td class="num">' + (r.amount === null ? '—' : r.amount.toFixed(2)) + '</td>' +
+      '<td class="num">' + (r.turnover === null ? '—' : r.turnover.toFixed(1)) + '</td>' +
+      '<td class="num">' + (r.seal === null ? '—' : r.seal.toFixed(2)) + '</td>' +
+      '<td class="num">' + (r.ratio === null ? '—' : r.ratio.toFixed(1) + '%') + '</td>' +
+      '<td class="num">' + r.first + '</td>' +
+      '<td class="num" style="color:' + col(r.pct) + ';font-weight:600">' + pc(r.pct) + '</td>' +
+      '<td class="ctr">' + (r.promote ? '<span class="b b-red">是</span>' : '<span class="b b-gray">否</span>') + '</td>' +
+      '<td class="ctr">' + (bad ? '<span class="b b-green">未走出来</span>' : '<span class="b b-red">走强</span>') + '</td>';
+    tb.appendChild(tr);
+  });
+  const tb2 = document.querySelector('#tbl-cmp tbody');
+  D.cmp.forEach(function (c) {
+    const tr = el('tr');
+    tr.innerHTML = '<td>' + c.name + '</td>' +
+      '<td class="num">' + (c.ok === null ? '—' : c.ok.toFixed(2)) + '</td>' +
+      '<td class="num">' + (c.bad === null ? '—' : c.bad.toFixed(2)) + '</td>' +
+      '<td class="num">' + (c.diff === null ? '—' : sgn(c.diff)) + '</td>';
+    tb2.appendChild(tr);
+  });
+})();
+
+/* ---------- nav highlight ---------- */
+(function () {
+  const links = [].slice.call(document.querySelectorAll('.side a[href^="#"]'));
+  const secs = links.map(function (a) { return document.getElementById(a.getAttribute('href').slice(1)); });
+  function onScroll() {
+    let idx = 0;
+    const y = window.scrollY + 120;
+    secs.forEach(function (s, i) { if (s && s.offsetTop <= y) idx = i; });
+    links.forEach(function (a, i) { a.classList.toggle('on', i === idx); });
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+})();
+
+/* ---------- ★ 执行时点校验（v1.4） ---------- */
+(function () {
+  const E = D.exec;
+  if (!E) return;
+
+  /* 结论卡 */
+  const box0 = document.getElementById('exec-stats');
+  if (box0) {
+    const cards = [
+      ['原口径 A · 不可成交', pc(E.avgA), '胜率 ' + E.winA.toFixed(1) + '%　T 日涨停价买入', RED],
+      ['实盘口径 B · 可成交', pc(E.avgB), '胜率 ' + E.winB.toFixed(1) + '%　T+1 开盘买入', GREEN],
+      ['隔夜跳空 C · 吃不到', pc(E.grandC), '这段你没有持仓', MUT],
+      ['一字开盘买不进', E.unbuyable.toFixed(1) + '%', 'T+1 开盘即封，无法成交通', AMBER]
+    ];
+    cards.forEach(function (c) {
+      const d = el('div', 'stat');
+      d.appendChild(el('div', 'lab', c[0]));
+      const v = el('div', 'val', c[1]); v.style.color = c[3];
+      d.appendChild(v);
+      d.appendChild(el('div', 'sub', c[2]));
+      box0.appendChild(d);
+    });
+  }
+
+  /* 1. 三口径 */
+  const t1 = document.querySelector('#tbl-exec-1 tbody');
+  if (t1) {
+    [['A 原口径', 'close(T+1) / close(T) − 1', pc(E.avgA), E.winA.toFixed(1) + '%',
+      '不可执行：起算价 = T 日涨停价，买不到', RED],
+     ['B 实盘口径', 'close(T+1) / open(T+1) − 1', pc(E.avgB), E.winB.toFixed(1) + '%',
+      '可执行：T+1 开盘买入、当日收盘卖出', GREEN],
+     ['C 隔夜分量', 'open(T+1) / close(T) − 1', pc(E.grandC), '—',
+      '不可执行：不持仓状态下的跳空', MUT]
+    ].forEach(function (r) {
+      const tr = el('tr');
+      tr.appendChild(el('td', null, '<b>' + r[0] + '</b>'));
+      tr.appendChild(el('td', null, '<code>' + r[1] + '</code>'));
+      const c = el('td', 'num', r[2]); c.style.color = r[5]; c.style.fontWeight = '600';
+      tr.appendChild(c);
+      tr.appendChild(el('td', 'num', r[3]));
+      tr.appendChild(el('td', null, r[4]));
+      t1.appendChild(tr);
+    });
+  }
+
+  /* 2. 跳空分档 */
+  const t2 = document.querySelector('#tbl-exec-2 tbody');
+  if (t2 && E.buckets) {
+    E.buckets.forEach(function (b) {
+      const tr = el('tr');
+      tr.appendChild(el('td', null, b.label));
+      tr.appendChild(el('td', 'num', b.n));
+      tr.appendChild(el('td', 'num', b.buyable.toFixed(1) + '%'));
+      tr.appendChild(el('td', 'num', pc(b.avgA)));
+      const cb = el('td', 'num', pc(b.avgB));
+      cb.style.color = b.avgB > 0 ? RED : GREEN; cb.style.fontWeight = '600';
+      tr.appendChild(cb);
+      tr.appendChild(el('td', 'num', b.winB.toFixed(1) + '%'));
+      t2.appendChild(tr);
+    });
+  }
+
+  /* 3. 门槛对比 */
+  const t3 = document.querySelector('#tbl-exec-3 tbody');
+  if (t3) {
+    [['gap ≤ ' + E.gate + '%（接）', E.lowN, E.lowUb, E.lowA, E.lowB, E.lowWin, true],
+     ['gap &gt; ' + E.gate + '%（弃）', E.highN, E.highUb, E.highA, E.highB, E.highWin, false]
+    ].forEach(function (r) {
+      const tr = el('tr');
+      if (r[6]) tr.style.background = 'rgba(248,113,113,.08)';
+      tr.appendChild(el('td', null, r[6] ? '<b>' + r[0] + '</b>' : r[0]));
+      tr.appendChild(el('td', 'num', r[1]));
+      tr.appendChild(el('td', 'num', r[2].toFixed(1) + '%'));
+      tr.appendChild(el('td', 'num', pc(r[3])));
+      const cb = el('td', 'num', pc(r[4]));
+      cb.style.color = r[4] > 0 ? RED : GREEN; cb.style.fontWeight = '600';
+      tr.appendChild(cb);
+      tr.appendChild(el('td', 'num', r[5].toFixed(1) + '%'));
+      t3.appendChild(tr);
+    });
+  }
+
+  /* 4. 组合对比 */
+  const t4 = document.querySelector('#tbl-exec-4 tbody');
+  if (t4) {
+    const p1 = (E.polS && E.polS[0]) || {};
+    [['A 口径（T 日涨停价买入）', p1.traded, p1.cumA, '不可执行，仅作基准', INK],
+     ['B 口径（T+1 开盘买，不加门槛）', p1.traded, p1.cumB, '可执行，但亏', GREEN],
+     ['B 口径 + gap ≤ ' + E.gate + '% 门槛', E.gateTraded, E.gateNav, '样本内结果，需样本外验证', RED]
+    ].forEach(function (r) {
+      const tr = el('tr');
+      if (r[4] === RED) tr.style.background = 'rgba(248,113,113,.08)';
+      tr.appendChild(el('td', null, r[4] === RED ? '<b>' + r[0] + '</b>' : r[0]));
+      tr.appendChild(el('td', 'num', r[1]));
+      const c = el('td', 'num', pc(r[2]));
+      c.style.color = r[4]; if (r[4] === RED) c.style.fontWeight = '600';
+      tr.appendChild(c);
+      tr.appendChild(el('td', null, '<span class="fn">' + r[3] + '</span>'));
+      t4.appendChild(tr);
+    });
+  }
+
+  /* 5. IC 对照（只列变化最大的项） */
+  const t5 = document.querySelector('#tbl-exec-5 tbody');
+  if (t5 && E.icS) {
+    const want = ['封单 / 成交额', '成交额（亿）', '封单额（亿）', '首次封板（分钟）', '情绪温度 T', '连板数'];
+    want.forEach(function (nm) {
+      const r = E.icS.find(function (x) { return x.name === nm; });
+      if (!r || r.icA === null || r.icA === undefined || r.icB === null || r.icB === undefined) return;
+      const keep = (nm === '连板数');
+      const tr = el('tr');
+      if (keep) tr.style.background = 'rgba(248,113,113,.08)';
+      tr.appendChild(el('td', null, keep ? '<b>' + nm + '</b>' : nm));
+      tr.appendChild(el('td', 'num', r.n));
+      tr.appendChild(el('td', 'num', sgn(r.icA, 3)));
+      const cb = el('td', 'num', sgn(r.icB, 3));
+      cb.style.color = r.icB < 0 ? GREEN : INK;
+      if (keep) { cb.style.color = RED; cb.style.fontWeight = '600'; }
+      tr.appendChild(cb);
+      tr.appendChild(el('td', null, '<span class="fn">' + (
+        keep ? '跨口径稳健' :
+        (nm === '封单 / 成交额' ? '由最强正向转为失效转负：封单越强越可能一字板' :
+         nm === '成交额（亿）' ? '负向关系归零，「越小越好」不成立' :
+         nm === '封单额（亿）' ? '转为负向' :
+         nm === '首次封板（分钟）' ? '符号翻转，强度落回噪声区间' : '归零')
+      ) + '</span>'));
+      t5.appendChild(tr);
+    });
+  }
+
+  /* 6. 温度写入时点 */
+  const t6 = document.querySelector('#tbl-exec-6 tbody');
+  if (t6 && E.tempWrite) {
+    const LAB = { ok: ['可用', GREEN], intraday: ['存疑', AMBER], late: ['不可用', RED], none: ['缺失', MUT] };
+    E.tempWrite.forEach(function (w) {
+      const st = LAB[w.state] || LAB.none;
+      const tr = el('tr');
+      tr.appendChild(el('td', null, w.date));
+      tr.appendChild(el('td', null, '<code>' + w.created + '</code>'));
+      tr.appendChild(el('td', 'num', w.lag === null ? '—' : (w.lag === 0 ? '当日' : w.lag + ' 天')));
+      const c = el('td', 'num', st[0]); c.style.color = st[1];
+      tr.appendChild(c);
+      t6.appendChild(tr);
+    });
+  }
+
+  /* 静态数字 */
+  const ub = document.getElementById('exec-ub');
+  if (ub) ub.textContent = E.unbuyable.toFixed(1);
+  const kd = document.getElementById('exec-keepdays');
+  if (kd) kd.textContent = E.keepDays + ' / ' + E.dayTotal + ' 天';
+  const wd = document.getElementById('exec-windays');
+  if (wd) wd.textContent = E.winDays;
+})();
+
+/* ---------- 12 推荐清单 ---------- */
+(function () {
+  const P = D14, F = P.funnel, L = P.layers, GM = P.gate, CAP = P.cap;
+  const T = P.temp, TM = P.tempMeta;
+  const ST_LAB = { HIGH: '大概率买不进', MID: '封单偏重', LOW: '流动正常' };
+
+  function stOf(c) {
+    if (c.yizi) return 'yizi';
+    if (c.gap !== null && c.gap > GM) return 'skip';
+    return 'take';
+  }
+
+  /* 12.0 结论卡 */
+  (function () {
+    const box = document.getElementById('pick-stats');
+    const takeL = L.find(function (x) { return x.n && x.n === F.take; }) || L[L.length - 1];
+    const items = [
+      ['T 日收盘温度', T === null ? '—' : T.toFixed(1) + '°', TM.stage + ' · ' + TM.direc + ' · 九维 ' + TM.dims + ' 项', 'amber'],
+      ['候选池（连板≥2）', F.total + ' 只', '其中 ' + F.highRisk + ' 只封单锁死，T 日即出池', 'plain'],
+      ['T+1 实际成交', F.take + ' 只', 'gap ≤ ' + GM + '% 才接，' + (F.pool - F.take) + ' 只被门槛挡下', 'amber'],
+      ['组合总仓位', F.totalPos + '%', CAP + '% × ' + F.take + ' 只，其余留现金', 'plain'],
+      ['占用资金收益', pc(takeL.avg), 'B 口径 · 胜率 ' + takeL.win.toFixed(1) + '%', takeL.avg > 0 ? 'red' : 'green'],
+      ['账户收益', pc(takeL.acct), '按 ' + F.totalPos + '% 仓位折算', takeL.acct > 0 ? 'red' : 'green']
+    ];
+    items.forEach(function (c) {
+      const d = el('div', 'stat');
+      d.appendChild(el('div', 'lab', c[0]));
+      const v = el('div', 'val', c[1]);
+      v.style.color = c[3] === 'red' ? RED : (c[3] === 'green' ? GREEN : (c[3] === 'amber' ? AMBER : INK));
+      d.appendChild(v);
+      d.appendChild(el('div', 'sub', c[2]));
+      box.appendChild(d);
+    });
+  })();
+
+  /* 12.1 漏斗 */
+  (function () {
+    const tb = document.querySelector('#tbl-funnel tbody');
+    const notes = [
+      '不做任何过滤，21 只全买 —— 结果是亏的，且一半仓位被买不进的票占着',
+      '剔掉封单/成交额 ≥150% 的 2 只（次日双双一字，B 恰好 0%），收益结构基本未变',
+      '再无未来地按「T+1 开盘 gap ≤3%」二次筛选 —— 这才是收益真正转正的一步'
+    ];
+    L.forEach(function (r, i) {
+      const tr = el('tr');
+      if (i === L.length - 1) tr.style.background = 'rgba(251,191,36,.07)';
+      tr.innerHTML =
+        '<td>' + (i === L.length - 1 ? '<b>' + r.label + '</b>' : r.label) + '</td>' +
+        '<td class="num">' + r.n + '</td>' +
+        '<td class="num">' + r.pos.toFixed(1) + '%</td>' +
+        '<td class="num" style="color:' + col(r.avg) + ';font-weight:600">' + pc(r.avg) + '</td>' +
+        '<td class="num" style="color:' + col(r.acct) + '">' + pc(r.acct) + '</td>' +
+        '<td class="num">' + r.win.toFixed(1) + '%</td>' +
+        '<td class="small">' + notes[i] + '</td>';
+      tb.appendChild(tr);
+    });
+  })();
+
+  /* 12.2 主清单 */
+  (function () {
+    const tb = document.querySelector('#tbl-pick tbody');
+    P.cands.forEach(function (c, i) {
+      const k = stOf(c), tr = el('tr');
+      if (k === 'yizi') tr.style.background = 'rgba(136,153,166,.07)';
+      else if (k === 'skip') tr.style.background = 'rgba(248,113,113,.05)';
+      const warnB = c.warn === 'HIGH' ? '<span class="b b-red">' + ST_LAB.HIGH + '</span>'
+        : (c.warn === 'MID' ? '<span class="b b-amber">' + ST_LAB.MID + '</span>' : '<span class="mut small">流动正常</span>');
+      const rB = k === 'take' ? '<span class="b b-brand">' + CAP + '%</span>' : '<span class="mut">0（不留）</span>';
+      const resB = k === 'yizi' ? '<span class="b b-gray">未能买入</span>'
+        : (k === 'skip' ? '<span class="b b-gray">已撤单</span>'
+          : (c.pctB > 0 ? '<span class="b b-red">已成交·盈</span>' : '<span class="b b-green">已成交·亏</span>'));
+      tr.innerHTML =
+        '<td class="num mut">' + (i + 1) + '</td>' +
+        '<td class="mut" style="font-family:var(--mono)">' + c.code + '</td>' +
+        '<td><b>' + c.name + '</b></td>' +
+        '<td class="num">' + c.board + '</td>' +
+        '<td class="small">' + (c.industry || '—') + '</td>' +
+        '<td class="num">' + c.amount.toFixed(2) + ' 亿</td>' +
+        '<td class="num" style="font-weight:600">' + (c.ratio === null ? '—' : c.ratio.toFixed(1) + '%') + '</td>' +
+        '<td class="num small">' + c.fs + '</td>' +
+        '<td class="small">' + warnB + '</td>' +
+        '<td class="num">' + rB + '</td>' +
+        '<td class="num small">' + (c.closeT === null ? '—' : c.closeT.toFixed(2)) + '</td>' +
+        '<td class="num small">' + (c.open1 === null ? '—' : c.open1.toFixed(2)) + '</td>' +
+        '<td class="num" style="color:' + col(c.gap) + '">' + (c.gap === null ? '—' : pc(c.gap)) + '</td>' +
+        '<td class="num" style="color:' + (k === 'take' ? col(c.pctB) : MUT) + ';font-weight:600">' +
+          (c.pctB === null ? '—' : pc(c.pctB)) + '</td>' +
+        '<td>' + resB + '</td>';
+      tb.appendChild(tr);
+    });
+  })();
+
+  /* 12.3 仓位配比 */
+  (function () {
+    const tb = document.querySelector('#tbl-alloc tbody');
+    const rows = [
+      ['① T 日盘后 · 预留', F.pool, CAP, F.pool * CAP, 100 - Math.min(100, F.pool * CAP),
+       '出池 ' + F.highRisk + ' 只后，剩余 ' + F.pool + ' 只各预留 ' + CAP + '%（合计 ' + (F.pool * CAP).toFixed(0) + '%，作为上限）'],
+      ['② T+1 竞价 · 成交', F.take, CAP, F.take * CAP, 100 - Math.min(100, F.take * CAP),
+       (F.pool - F.take) + ' 只开盘 gap > ' + GM + '% 未下单，对应仓位留现金'],
+      ['③ 收盘 · 结清', F.take, CAP, 0, 100,
+       '当日收盘按 B 口径全部卖出，不留隔夜，次日重新跑流程']
+    ];
+    rows.forEach(function (r, i) {
+      const tr = el('tr');
+      if (i === 1) tr.style.background = 'rgba(251,191,36,.07)';
+      tr.innerHTML =
+        '<td>' + (i === 1 ? '<b>' + r[0] + '</b>' : r[0]) + '</td>' +
+        '<td class="num">' + r[1] + ' 只</td>' +
+        '<td class="num">' + r[2] + '%</td>' +
+        '<td class="num" style="font-weight:600">' + r[3].toFixed(1) + '%</td>' +
+        '<td class="num mut">' + r[4].toFixed(1) + '%</td>' +
+        '<td class="small">' + r[5] + '</td>';
+      tb.appendChild(tr);
+    });
+    document.getElementById('t-sig').textContent = TM.sig;
+  })();
+
+  /* 12.4 封单预筛 */
+  (function () {
+    const tb = document.querySelector('#tbl-prewarn tbody');
+    P.prewarn.forEach(function (r) {
+      const tr = el('tr');
+      const hi = r.ub >= 50;
+      const bar = '<div style="height:8px;border-radius:4px;background:rgba(255,255,255,.06);overflow:hidden">' +
+        '<div style="width:' + r.ub + '%;height:100%;background:' + (hi ? RED : AMBER) + '"></div></div>';
+      if (hi) tr.style.background = 'rgba(248,113,113,.06)';
+      tr.innerHTML =
+        '<td>' + (hi ? '<b>' + r.label + '</b>' : r.label) + '</td>' +
+        '<td class="num">' + r.n + '</td>' +
+        '<td class="num" style="color:' + (hi ? RED : MUT) + ';font-weight:600">' + r.ub.toFixed(1) + '%</td>' +
+        '<td class="num" style="color:' + col(r.B) + '">' + pc(r.B) + '</td>' +
+        '<td style="width:180px">' + bar + '</td>';
+      tb.appendChild(tr);
+    });
+    const hiBand = P.prewarn[P.prewarn.length - 1];
+    document.getElementById('pw-high').textContent = hiBand.ub.toFixed(1);
+    document.getElementById('pw-n').textContent = hiBand.n;
+  })();
+
+  /* 12.5 温度分档 */
+  (function () {
+    const tb = document.querySelector('#tbl-tstat tbody');
+    const marks = ['样本最少，且是负收益——「冰点期反而最好」那条在 B 口径下不成立',
+                   '同样样本极少，方向与上一档相反，无统计意义',
+                   '样本最多的一档，收益仍为负',
+                   '唯一为正的一档，但只有 1 天',
+                   '样本 2 天，收益转负 —— 与「高温可做」的直觉相反'];
+    P.tstat.forEach(function (r, i) {
+      const tr = el('tr');
+      if (i === 3) tr.style.background = 'rgba(251,191,36,.07)';
+      tr.innerHTML =
+        '<td>' + r.label + '</td>' +
+        '<td class="num">' + r.days + '</td>' +
+        '<td class="num">' + (r.n || '—') + '</td>' +
+        '<td class="num" style="color:' + col(r.dayB) + ';font-weight:600">' +
+          (r.days ? pc(r.dayB) : '—') + '</td>' +
+        '<td class="num">' + (r.days ? r.dayW.toFixed(1) + '%' : '—') + '</td>' +
+        '<td class="small">' + marks[i] + '</td>';
+      tb.appendChild(tr);
+    });
+  })();
+})();
+
+/* ---------- 12.6 最新一期 ---------- */
+(function () {
+  const P = D14, L2 = P.layers2, F2 = P.funnel2, GM = P.gate, CAP = P.cap;
+  document.getElementById('t2-day').textContent = P.nday2 + '（09-22 的次日）';
+  document.getElementById('sk-n').textContent = F2.pool - F2.take;
+  document.getElementById('tk-n').textContent = F2.take;
+
+  function stOf(c) {
+    if (c.yizi) return 'yizi';
+    if (c.gap !== null && c.gap > GM) return 'skip';
+    return 'take';
+  }
+
+  (function () {
+    const tb = document.querySelector('#tbl-funnel2 tbody');
+    L2.forEach(function (r, i) {
+      const tr = el('tr');
+      if (i === L2.length - 1) tr.style.background = 'rgba(52,211,153,.07)';
+      tr.innerHTML =
+        '<td>' + (i === L2.length - 1 ? '<b>' + r.label + '</b>' : r.label) + '</td>' +
+        '<td class="num">' + r.n + '</td>' +
+        '<td class="num">' + r.pos.toFixed(1) + '%</td>' +
+        '<td class="num" style="color:' + col(r.avg) + ';font-weight:600">' + pc(r.avg) + '</td>' +
+        '<td class="num" style="color:' + col(r.acct) + '">' + pc(r.acct) + '</td>' +
+        '<td class="num">' + r.win.toFixed(1) + '%</td>';
+      tb.appendChild(tr);
+    });
+  })();
+
+  (function () {
+    const tb = document.querySelector('#tbl-pick2 tbody');
+    P.cands2.forEach(function (c, i) {
+      const k = stOf(c), tr = el('tr');
+      if (k === 'yizi') tr.style.background = 'rgba(136,153,166,.07)';
+      else if (k === 'skip') tr.style.background = 'rgba(136,153,166,.05)';
+      const resB = k === 'yizi' ? '<span class="b b-gray">未能买入</span>'
+        : (k === 'skip' ? '<span class="b b-gray">已撤单</span>'
+          : (c.pctB > 0 ? '<span class="b b-red">已成交·盈</span>' : '<span class="b b-green">已成交·亏</span>'));
+      tr.innerHTML =
+        '<td class="num mut">' + (i + 1) + '</td>' +
+        '<td class="mut" style="font-family:var(--mono)">' + c.code + '</td>' +
+        '<td><b>' + c.name + '</b></td>' +
+        '<td class="num">' + c.board + '</td>' +
+        '<td class="small">' + (c.industry || '—') + '</td>' +
+        '<td class="num">' + c.amount.toFixed(2) + ' 亿</td>' +
+        '<td class="num" style="font-weight:600">' + (c.ratio === null ? '—' : c.ratio.toFixed(1) + '%') + '</td>' +
+        '<td class="num small">' + (c.closeT === null ? '—' : c.closeT.toFixed(2)) + '</td>' +
+        '<td class="num small">' + (c.open1 === null ? '—' : c.open1.toFixed(2)) + '</td>' +
+        '<td class="num" style="color:' + col(c.gap) + '">' + (c.gap === null ? '—' : pc(c.gap)) + '</td>' +
+        '<td class="num" style="color:' + (k === 'take' ? col(c.pctB) : MUT) + ';font-weight:600">' +
+          (c.pctB === null ? '—' : pc(c.pctB)) + '</td>' +
+        '<td>' + resB + '</td>';
+      tb.appendChild(tr);
+    });
+  })();
+})();
+
+/* ---------- 12.7 第 3 期（进行中） ---------- */
+(function () {
+  const P = D18, F3 = P.funnel, GM = P.gate, CAP = P.cap, TM = P.tempMeta || {};
+
+  function stOf(c) {
+    if (c.warn === 'HIGH') return 'out';
+    if (c.yizi) return 'yizi';
+    if (c.gap !== null && c.gap > GM) return 'skip';
+    return 'take';
+  }
+
+  /* 12.7 结论卡 */
+  (function () {
+    const box = document.getElementById('pick3-stats');
+    const prev = (D14 && D14.funnel2) ? D14.funnel2.total : null;
+    const drop = prev ? Math.round((1 - F3.total / prev) * 100) : null;
+    const items = [
+      ['T 日收盘温度', P.temp === null ? '—' : P.temp.toFixed(1) + '°',
+        (TM.stage || '—') + ' · ' + (TM.direc || '—'), 'green'],
+      ['候选池（连板≥2）', F3.total + ' 只',
+        prev ? ('较上期 ' + prev + ' 只再缩 ' + drop + '%') : '—', 'green'],
+      ['封单锁死出池', F3.highRisk + ' 只',
+        '封单÷成交额 ≥ 150%，大概率一字买不进', 'plain'],
+      ['T+1 实际成交', F3.take + ' 只',
+        'gap ≤ ' + GM + '% 才接，' + (F3.pool - F3.take) + ' 只被门槛挡下', 'amber'],
+      ['组合总仓位', F3.totalPos + '%',
+        CAP + '% × ' + F3.take + ' 只，其余留现金', 'plain'],
+      ['本期状态', '进行中',
+        P.nday + ' 未收盘，故无事后收益可算', 'plain']
+    ];
+    items.forEach(function (c) {
+      const d = el('div', 'stat');
+      d.appendChild(el('div', 'lab', c[0]));
+      const v = el('div', 'val', c[1]);
+      v.style.color = c[3] === 'red' ? RED : (c[3] === 'green' ? GREEN : (c[3] === 'amber' ? AMBER : INK));
+      d.appendChild(v);
+      d.appendChild(el('div', 'sub', c[2]));
+      box.appendChild(d);
+    });
+  })();
+
+  /* 12.7 漏斗 */
+  (function () {
+    const tb = document.querySelector('#tbl-funnel3 tbody');
+    const rows = [
+      ['L0 全候选（' + F3.total + ' 只，不做任何过滤）', F3.total, 100,
+       '连板梯队整体萎缩，本身就是风险信号'],
+      ['L1 剔除封单÷成交额 ≥150%（出池 ' + F3.highRisk + ' 只）', F3.pool, F3.pool * CAP,
+       '两只封单把成交锁死，次日双双一字开盘'],
+      ['L2 L1 + T+1 开盘 gap ≤3% 才接（成交 ' + F3.take + ' 只）', F3.take, F3.take * CAP,
+       '又挡下 2 只一字 + 1 只高开，仓位随之降到 35%']
+    ];
+    rows.forEach(function (r, i) {
+      const tr = el('tr');
+      if (i === rows.length - 1) tr.style.background = 'rgba(251,191,36,.07)';
+      tr.innerHTML =
+        '<td>' + (i === rows.length - 1 ? '<b>' + r[0] + '</b>' : r[0]) + '</td>' +
+        '<td class="num">' + r[1] + '</td>' +
+        '<td class="num">' + r[2].toFixed(0) + '%</td>' +
+        '<td class="small">' + r[3] + '</td>';
+      tb.appendChild(tr);
+    });
+  })();
+
+  /* 12.7 主清单 */
+  (function () {
+    const tb = document.querySelector('#tbl-pick3 tbody');
+    const BADGE = {
+      out: '<span class="b b-gray">封单锁死 · 出池</span>',
+      yizi: '<span class="b b-gray">一字 · 买不进</span>',
+      skip: '<span class="b b-gray">gap &gt; 3% · 不接</span>',
+      take: '<span class="b b-amber">成交 · 预留 5%</span>'
+    };
+    P.cands.forEach(function (c, i) {
+      const k = stOf(c), tr = el('tr');
+      if (k === 'take') tr.style.background = 'rgba(251,191,36,.07)';
+      else if (k === 'out') tr.style.background = 'rgba(136,153,166,.07)';
+      else if (k === 'yizi' || k === 'skip') tr.style.background = 'rgba(136,153,166,.05)';
+      tr.innerHTML =
+        '<td class="num mut">' + (i + 1) + '</td>' +
+        '<td class="mut" style="font-family:var(--mono)">' + c.code + '</td>' +
+        '<td><b>' + c.name + '</b></td>' +
+        '<td class="num">' + c.board + '</td>' +
+        '<td class="small">' + (c.industry || '—') + '</td>' +
+        '<td class="num">' + c.amount.toFixed(2) + ' 亿</td>' +
+        '<td class="num" style="font-weight:600;color:' +
+          ((c.ratio !== null && c.ratio >= 150) ? MUT : INK) + '">' +
+          (c.ratio === null ? '—' : c.ratio.toFixed(1) + '%') + '</td>' +
+        '<td class="num small">' + c.fs + '</td>' +
+        '<td class="num small">' + (c.closeT === null ? '—' : c.closeT.toFixed(2)) + '</td>' +
+        '<td class="num small">' + (c.open1 === null ? '—' : c.open1.toFixed(2)) + '</td>' +
+        '<td class="num" style="color:' + col(c.gap) + '">' + (c.gap === null ? '—' : pc(c.gap)) + '</td>' +
+        '<td>' + BADGE[k] + '</td>';
+      tb.appendChild(tr);
+    });
+  })();
+})();
+</script>
+</body>
+</html>

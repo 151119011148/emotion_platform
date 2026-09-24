@@ -132,14 +132,13 @@ footer{margin-top:40px;padding-top:18px;border-top:1px solid var(--line);color:v
       <div class="kicker">PRODUCT REQUIREMENT DOCUMENT</div>
       <h1>WaveRider 短线连板周期选股策略引擎</h1>
       <div class="desc">将「身位板」与「节点票」两条短线审美原则产品化：可配置规则、可回溯回测、可每日自动产出候选池。
-        v1.1 已用生产库真实数据对全部默认阈值完成回归标定；v1.2 补入情绪温度联合回测；v1.3 更正「首次封板时间」因子口径错误；
-        <strong>v1.4 修正回测执行时点口径——原口径隐含「以 T 日涨停价买入」，实盘不可成交；改按 T+1 开盘价复算后，全样本由 +3.36% 转为 −0.20%（见 §12.5）</strong>。</div>
+        v1.1 已用生产库真实数据对全部默认阈值完成回归标定；v1.2 补入情绪温度联合回测；v1.3 更正「首次封板时间」因子口径错误。</div>
       <div class="chips">
-        <span class="chip">版本 v1.4</span>
-        <span class="chip">2026-09-24</span>
+        <span class="chip">版本 v1.3</span>
+        <span class="chip">2026-09-22</span>
         <span class="chip">状态：待评审</span>
         <span class="chip">宿主：emotion_platform 策略层模块</span>
-        <span class="chip">数据基准：2026-08-20 ~ 2026-09-21 / 19 个交易日（含情绪温度联合回测、执行时点口径复算）</span>
+        <span class="chip">数据基准：2026-08-20 ~ 2026-09-21 / 19 个交易日（含情绪温度联合回测）</span>
       </div>
     </div>
 
@@ -209,18 +208,6 @@ footer{margin-top:40px;padding-top:18px;border-top:1px solid var(--line);color:v
           绝大多数交易日所有候选的命中数都恒等于 1。解决方案见 <a href="#s6">§6 跨原则统一评分</a>。</p>
       </div>
 
-      <div class="callout c-bad">
-        <div class="ttl">v1.4 重大修正：本文全部回测数字的买入价假设是错的，请先读 §12.5 再读其他章节</div>
-        <p style="margin:4px 0 0">v1.1 ~ v1.3 的所有回测都用 <code>pct = close(T+1)/close(T) − 1</code>，而候选池是
-          「<strong>T 日已在涨停池</strong>」的股票——<code>close(T)</code> 就是 T 日的<strong>涨停价</strong>，
-          实盘挂不到这个价；更矛盾的是仓位用的温度要到 T 日<strong>收盘后</strong>才算出，时序上倒流 30 分钟。</p>
-        <p style="margin:6px 0 0">改用实盘唯一可执行的 <strong>T+1 开盘价</strong>复算后：
-          <strong>全样本由 +3.36% / 胜率 65.0% 变为 −0.20% / 胜率 40.3%</strong>，
-          原收益几乎全部来自「不持仓状态下的隔夜跳空」。
-          由此，§12.4.5 的因子 IC 榜与 §6.2 的因子方向<strong>均需重标定</strong>，
-          <code>filter_min_amount</code> 的下调依据亦归零。详见 <a href="#s12">§12.5</a>。</p>
-      </div>
-
       <h3>0.3 变更清单（自 v1.0 起累计）</h3>
       <div class="tw">
         <table>
@@ -236,14 +223,6 @@ footer{margin-top:40px;padding-top:18px;border-top:1px solid var(--line);color:v
             <tr><td class="ctr">C8</td><td>接入 <code>t_daily_record</code> 情绪温度作为<strong>择时/仓位</strong>输入（不做个股筛选），新增 §12.4 联合回测</td><td class="ctr"><span class="b b-green">新增</span></td><td><a href="#s12">§12.4</a> 方差分解：温度只能解释日间 11% 的收益方差</td></tr>
             <tr><td class="ctr">C9</td><td><code>filter_min_amount</code> 由「1.0 亿硬剔」改为「0.5 亿 + MARK」，并把成交额纳入负向评分</td><td class="ctr"><span class="b b-amber">修改</span></td><td><a href="#s12">§12.4</a> 因子实测：成交额 IC −0.285</td></tr>
             <tr><td class="ctr">C10</td><td><strong>更正「首次封板时间」因子</strong>：<code>first_seal_time</code> 在库里有 <code>94536</code>（5 位）与 <code>104156</code>（6 位）两种形态，旧解析丢弃了 192/226 条 → 原 <strong>+0.196（n=34，仅 10:00 后封板）</strong> 更正为 <strong>−0.150（n=226）</strong>，方向由「越晚越好」改为<strong>「越早越好」</strong></td><td class="ctr"><span class="b b-red">更正</span></td><td><a href="#s12">§12.4.5</a> 重算（<code>zfill(6)</code> 归一）</td></tr>
-            <tr><td class="ctr">C11</td><td><strong>更正回测执行时点口径</strong>：收益起算价由「T 日收盘（=涨停价）」改为「T+1 开盘」，
-              新增 §12.5。全样本 <strong>+3.36% / 胜率 65.0% → −0.20% / 胜率 40.3%</strong>；
-              26.1% 的候选在 T+1 一字开盘、实盘买不进</td><td class="ctr"><span class="b b-red">更正</span></td><td><a href="#s12">§12.5</a> 三口径复算</td></tr>
-            <tr><td class="ctr">C12</td><td><strong>冻结 §6.2 因子权重</strong>：A 口径下「封单强度最强（+0.308）、成交额负向（−0.285）、连板数最弱（+0.100）」
-              的排序在实盘口径下失效（−0.084 / +0.020 / +0.092），<strong>仅连板数稳健</strong>；重标定完成前不得上线</td><td class="ctr"><span class="b b-amber">降级</span></td><td><a href="#s12">§12.5.5</a> B 口径 IC</td></tr>
-            <tr><td class="ctr">C13</td><td><code>filter_min_amount</code> 下调依据归零，由「0.5 亿」退回<strong>中性值 + <code>MARK</code></strong></td><td class="ctr"><span class="b b-amber">修改</span></td><td><a href="#s12">§12.5.5</a></td></tr>
-            <tr><td class="ctr">C14</td><td>新增执行层配置 <code>entry_price_basis</code> / <code>entry_gap_max</code> / <code>reject_unbuyable_open</code>，
-              并新增异常分支 F16 / F17</td><td class="ctr"><span class="b b-green">新增</span></td><td><a href="#s12">§12.5.4</a></td></tr>
           </tbody>
         </table>
       </div>
@@ -655,11 +634,6 @@ suggest_position = max_position_per_stock × (score / 当日最高分) × (存�
         </ul>
         <p style="margin:0">具体权重数值待第二批标定（需 ≥40 个交易日样本 + 分温度环境分组回归），
           本版只锁定<strong>因子方向与量级排序</strong>，避免再一次把方向做反。</p>
-        <p style="margin:8px 0 0"><strong>v1.4 追加警告：上述三条方向全部来自「T 日涨停价买入」这一不可成交的口径，暂不得据此实现权重。</strong>
-          改用 T+1 开盘价复算后（<a href="#s12">§12.5.5</a>），封单强度 IC 由 +0.308 转为 <strong>−0.084</strong>、
-          成交额由 −0.285 归零至 <strong>+0.020</strong>、首次封板由 −0.150 转为 +0.087，
-          <strong>唯一保持稳定的是连板数（+0.100 → +0.092）</strong>——也就是本段原本判为「最弱」的那一项。
-          在完成 B 口径重标定前，本节权重<strong>冻结</strong>；封单强度类因子尤其要重新检验，因为它与「一字板买不进」高度共线。</p>
       </div>
 
       <h3>6.3 真实样例：2026-09-21 候选池</h3>
@@ -1198,7 +1172,7 @@ suggest_position = max_position_per_stock × (score / 当日最高分) × (存�
       <h3>12.4 情绪温度 × 身位板：联合回测（v1.2 新增 · v1.3 修正因子）</h3>
       <div class="callout c-info">
         <div class="ttl">页面预览</div>
-        本节全部指标——日级明细、方差分解、温度分档、温度与原材料对照、单因子 IC 榜、温度 × 因子交互、六套仓位方案的组合回测、2026-09-18 逐只复盘——已做成独立可视化页面：<a href="短线连板策略-回测与推荐清单.html"><strong>短线连板策略 · 回测与推荐清单</strong></a>。
+        本节全部指标——日级明细、方差分解、温度分档、温度与原材料对照、单因子 IC 榜、温度 × 因子交互、六套仓位方案的组合回测、2026-09-18 逐只复盘——已做成独立可视化页面：<a href="情绪温度×身位板联合回测_页面预览.html"><strong>情绪温度×身位板联合回测_页面预览.html</strong></a>。
         数据由 <code>回测脚本/06_预览页数据导出.py</code> 汇总输出，与 02 / 03 / 04 脚本口径一致，不引入新的计算。
       </div>
       <p>宿主系统已有一套<strong>九维情绪打分引擎</strong>（<code>TemperatureCalculator</code>）：九个维度各取 −3 ~ +3，
@@ -1212,12 +1186,8 @@ suggest_position = max_position_per_stock × (score / 当日最高分) × (存�
           <li><strong>样本</strong>：2026-08-25 ~ 2026-09-21 共 19 个交易日，<code>t_market_stock</code> 涨停池中
             <code>consecutive ≥ 2</code> 的全部个股（去重 153 只），有效样本 <strong>226 条</strong>。</li>
           <li><strong>T+1 表现</strong>：腾讯 qfq 日 K 的 <code>close(T+1)/close(T) − 1</code>；「次日涨停」= T+1 出现在涨停池。
-            与 <code>t_zt_perf</code>（QUOTE 口径）交叉复核，2026-09-21 的 12 只逐只一致。<br>
-            <span class="b b-red">v1.4 更正</span> 该口径的起算价是 <strong>T 日涨停价</strong>（候选池条件即 <code>pool='ZT'</code>），
-            实盘无法在此时点成交。<strong>本节全部数字应读作「信号有效性基准」，不等于可实现收益</strong>，实盘口径见 <a href="#s12">§12.5</a>。</li>
-          <li><span class="b b-red">v1.4 更正</span><strong>「无未来函数」这一表述不准确</strong>：温度确在 T 日收盘后算出，
-            但收益起算价用的是 <strong>T 日收盘价</strong>，两者相差 30 分钟、方向相反——等于先看到 15:30 的温度，
-            再回头以 15:00 的涨停价成交。正确做法是把买入时点推到 T+1 开盘，见 <a href="#s12">§12.5</a>。</li>
+            与 <code>t_zt_perf</code>（QUOTE 口径）交叉复核，2026-09-21 的 12 只逐只一致。</li>
+          <li><strong>无未来函数</strong>：T 日温度在 T 日收盘后算出，T+1 才交易。</li>
           <li><strong>剔除</strong>：09-21 的 21 只候选无次日数据；09-15 三池缺失，09-14 的候选只有涨幅、无涨停判定。</li>
         </ul>
       </div>
@@ -1304,26 +1274,6 @@ suggest_position = max_position_per_stock × (score / 当日最高分) × (存�
         但它确实否掉了「把温度当成选股因子喂进评分公式」这个方案。</p>
 
       <h4>12.4.5 那 89% 靠什么？单因子区分度实测（n = 226）</h4>
-      <div class="callout c-bad">
-        <div class="ttl">v1.4 重要限定：下表 IC 基于「T 日涨停价买入」口径，其中多项在实盘可执行口径下失效</div>
-        <p style="margin:4px 0 0">同样的因子、同样的样本，只把收益起算价从 <code>close(T)</code>（涨停价）换成
-          <code>open(T+1)</code>，结果如下（A = 本表口径，B = 实盘口径）：</p>
-        <div class="tw">
-          <table>
-            <thead><tr><th>因子</th><th class="ctr" style="width:80px">IC（A）</th><th class="ctr" style="width:80px">IC（B，实盘）</th><th style="width:300px">判读</th></tr></thead>
-            <tbody>
-              <tr><td>封单 / 成交额</td><td class="ctr num"><strong>+0.308</strong></td><td class="ctr num" style="color:#047857"><strong>−0.084</strong></td><td>由最强正向变为失效转负（封单越强越可能一字板 → 越买不进）</td></tr>
-              <tr><td>成交额（亿）</td><td class="ctr num">−0.285</td><td class="ctr num">+0.020</td><td>负向关系归零，「越小越好」不成立</td></tr>
-              <tr><td>封单额（亿）</td><td class="ctr num">+0.222</td><td class="ctr num" style="color:#047857">−0.144</td><td>转为负向</td></tr>
-              <tr><td>首次封板时间</td><td class="ctr num">−0.150</td><td class="ctr num">+0.087</td><td>符号再次翻转，强度落回噪声区间</td></tr>
-              <tr><td>情绪温度 T</td><td class="ctr num">+0.131</td><td class="ctr num">+0.013</td><td>归零</td></tr>
-              <tr style="background:rgba(185,28,28,0.07)"><td><strong>连板数 board</strong></td><td class="ctr num">+0.100</td><td class="ctr num"><strong>+0.092</strong></td><td><strong>唯一跨口径稳健</strong></td></tr>
-            </tbody>
-          </table>
-        </div>
-        <p style="margin:6px 0 0">因此下面这张表的用途应限定为<strong>「解释原口径下收益来自哪里」</strong>，
-          而<strong>不能直接用于确定评分权重</strong>。逐项推导见 <a href="#s12">§12.5.5</a>。</p>
-      </div>
       <div class="tw">
         <table>
           <thead><tr><th>因子</th><th class="ctr">n</th><th class="ctr">IC（秩相关）</th>
@@ -1375,22 +1325,6 @@ suggest_position = max_position_per_stock × (score / 当日最高分) × (存�
           </tbody>
         </table>
       </div>
-      <div class="callout c-bad">
-        <div class="ttl">换成实盘口径后，上表六套方案全部转负</div>
-        <div class="tw">
-          <table>
-            <thead><tr><th>仓位规则</th><th class="ctr">有仓天数</th><th class="ctr">累计（A 口径）</th><th class="ctr">累计（B 口径，T+1 开盘买）</th></tr></thead>
-            <tbody>
-              <tr><td>P1 恒满仓</td><td class="ctr">14</td><td class="ctr num">+56.60%</td><td class="ctr num" style="color:#047857"><strong>−6.18%</strong></td></tr>
-              <tr><td>P2 仅 T≥55 开仓</td><td class="ctr">10</td><td class="ctr num">+44.01%</td><td class="ctr num" style="color:#047857">−2.25%</td></tr>
-              <tr><td>P5 仅 T≥60 开仓</td><td class="ctr">8</td><td class="ctr num">+39.53%</td><td class="ctr num" style="color:#047857">−1.14%</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <p style="margin:6px 0 0">所以「温度过滤提高单日质量、降低总收益」这条结论<strong>只在 A 口径内成立</strong>，
-          在实盘口径下六套方案均为负。可执行的组合必须叠加 <code>entry_gap_max</code> 门槛（见 <a href="#s12">§12.5.4</a>），
-          叠加后 P1 为 <strong>+34.47%</strong>（样本内，需样本外验证）。</p>
-      </div>
       <p class="small">读法与结论：<strong>温度过滤提高了单日质量，但降低了总收益</strong>——
         T≥60 才做，日均从 +3.26% 升到 +4.24%，累计却从 +56.59% 掉到 +39.52%。
         原因是它剔掉的日子里包含 09-04（42.5°，次日 +7.19%）这种「冰点修复日」，
@@ -1421,12 +1355,10 @@ suggest_position = max_position_per_stock × (score / 当日最高分) × (存�
           <thead><tr><th class="ctr" style="width:60px">章节</th><th>调整</th><th style="width:200px">依据</th></tr></thead>
           <tbody>
             <tr><td class="ctr">§3.2</td><td>数据源新增 <code>t_daily_record</code>（情绪温度），标注为<strong>择时输入、非选股输入</strong></td><td>12.4.3 方差分解</td></tr>
-            <tr><td class="ctr">§6</td><td><span class="b b-red">v1.4 冻结</span> 原拟将一级因子改为「封单/成交额」、成交额改为负向项；
-              该方向在实盘口径下失效（<a href="#s12">§12.5.5</a>），<strong>权重待 B 口径重标定</strong>。仅「温度不进个股评分」保持不变</td><td>12.4.5 因子 IC（A 口径）</td></tr>
+            <tr><td class="ctr">§6</td><td>评分公式的一级因子改为「封单/成交额」，成交额改为负向项；<strong>温度不进个股评分</strong></td><td>12.4.5 因子 IC</td></tr>
             <tr><td class="ctr">§6 / §17</td><td>新增 <code>position_scale_by_temperature</code>：按温度档给出建议仓位系数（默认 55~60 → 0.6、60~70 → 0.8、≥70 → 1.0、&lt;55 → 0.5），<strong>只降不做 0</strong></td><td>12.4.6 组合回测</td></tr>
             <tr><td class="ctr">§13</td><td>新增异常分支：「T 日无情绪温度记录」时，候选池照常产出，但<code>suggest_position</code> 置空并标 <code>NO_TEMPERATURE</code>，不按 0 仓位处理</td><td>温度依赖人工复盘</td></tr>
-            <tr><td class="ctr">§17</td><td><span class="b b-amber">v1.4 撤销</span> 原拟 <code>filter_min_amount</code> 由 1.0 下调至 0.5；
-              依据「成交额 IC −0.285」在实盘口径下归零至 +0.020，改为<strong>中性值 + <code>MARK</code></strong></td><td>12.4.5 IC −0.285（A 口径）</td></tr>
+            <tr><td class="ctr">§17</td><td><code>filter_min_amount</code>：1.0 → <strong>0.5</strong>，默认策略 <code>MARK</code></td><td>12.4.5 IC −0.285</td></tr>
           </tbody>
         </table>
       </div>
@@ -1439,179 +1371,6 @@ suggest_position = max_position_per_stock × (score / 当日最高分) × (存�
           因此：<strong>温度只能当「锦上添花」的仓位调节项，不能作为候选池产出的前置条件</strong>，
           否则用户某天没复盘，当天就整片不可用。</p>
       </div>
-
-      <h3>12.5 执行时点校验：原回测的收益来自「买不到的隔夜跳空」（v1.4 新增）</h3>
-      <div class="callout c-bad">
-        <div class="ttl">结论先行：把买入价改到实盘唯一可执行的时点后，全样本由 +3.36% / 胜率 65.0% 变成 −0.20% / 胜率 40.3%</div>
-        <p style="margin:4px 0 0">§12.4 全节使用的口径是 <code>pct = close(T+1)/close(T) − 1</code>。而候选池的定义是
-          「<strong>T 日已出现在涨停池、且 <code>consecutive ≥ 2</code></strong>」——也就是说 <code>close(T)</code>
-          <strong>恰好就是 T 日的涨停价</strong>，实盘在 T 日收盘时挂不到这个价（涨停板上没有卖单）。
-          更矛盾的是仓位旋钮读的 <code>temperature</code> 要到 T 日<strong>收盘后</strong>才算出，
-          于是原回测在时序上等价于「15:30 拿到温度 → 回头以 15:00 的涨停价成交」。</p>
-      </div>
-
-      <h4>12.5.1 三种口径的定义与结果</h4>
-      <div class="tw">
-        <table>
-          <thead><tr><th style="width:110px">口径</th><th style="width:260px">定义</th><th class="ctr" style="width:80px">均涨</th><th class="ctr" style="width:70px">胜率</th><th class="ctr" style="width:70px">中位</th><th>实盘可行性</th></tr></thead>
-          <tbody>
-            <tr style="background:rgba(185,28,28,0.07)"><td><strong>A 原口径</strong></td><td><code>close(T+1) / close(T) − 1</code></td><td class="ctr num">+3.36%</td><td class="ctr">65.0%</td><td class="ctr num">—</td><td><span class="b b-red">不可执行</span>　起算价 = T 日涨停价，买不到</td></tr>
-            <tr style="background:rgba(4,120,87,0.07)"><td><strong>B 实盘口径</strong></td><td><code>close(T+1) / open(T+1) − 1</code></td><td class="ctr num" style="color:#047857"><strong>−0.20%</strong></td><td class="ctr"><strong>40.3%</strong></td><td class="ctr num">+0.00%</td><td><span class="b b-green">可执行</span>　T+1 开盘买入、当日收盘卖出</td></tr>
-            <tr><td>C 隔夜分量</td><td><code>open(T+1) / close(T) − 1</code></td><td class="ctr num">+3.68%</td><td class="ctr">—</td><td class="ctr num">—</td><td><span class="b b-red">不可执行</span>　属于「不持仓状态下的跳空」</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p class="small">三者满足近似乘性关系：<code>(1 + 3.68%) × (1 − 0.20%) ≈ 1.0347 ≈ (1 + 3.36%)</code>。
-        换言之——<strong>原口径那 +3.36% 几乎全部由「你还没持仓时价格已经跳上去的那一段」构成</strong>；
-        等你在 T+1 开盘接进去，剩下能赚的是 <strong>−0.20%</strong>。</p>
-
-      <h4>12.5.2 决定成败的是「隔夜跳空」，而它要等到 T+1 开盘才形成</h4>
-      <p>定义 <code>gap = open(T+1)/close(T) − 1</code>，即 T 日收盘到 T+1 开盘的跳空幅度。逐档统计 226 条样本：</p>
-      <div class="tw">
-        <table>
-          <thead><tr><th style="width:120px">gap 区间</th><th class="ctr" style="width:55px">n</th><th class="ctr" style="width:90px">其中可买入</th><th class="ctr" style="width:80px">A 口径</th><th class="ctr" style="width:80px">B 口径</th><th class="ctr" style="width:75px">B 胜率</th></tr></thead>
-          <tbody>
-            <tr><td>≤ −3% 大幅低开</td><td class="ctr">24</td><td class="ctr">100%</td><td class="ctr num">−1.54%</td><td class="ctr num" style="color:#b91c1c"><strong>+4.23%</strong></td><td class="ctr">62.5%</td></tr>
-            <tr><td>−3% ~ −1% 低开</td><td class="ctr">21</td><td class="ctr">100%</td><td class="ctr num">+0.55%</td><td class="ctr num" style="color:#b91c1c">+2.57%</td><td class="ctr">52.4%</td></tr>
-            <tr><td>−1% ~ +1% 平开</td><td class="ctr">40</td><td class="ctr">100%</td><td class="ctr num">−0.61%</td><td class="ctr num" style="color:#047857">−0.43%</td><td class="ctr">42.5%</td></tr>
-            <tr><td>+1% ~ +2%</td><td class="ctr">14</td><td class="ctr">100%</td><td class="ctr num">+6.42%</td><td class="ctr num" style="color:#b91c1c"><strong>+4.82%</strong></td><td class="ctr">85.7%</td></tr>
-            <tr><td>+2% ~ +3%</td><td class="ctr">6</td><td class="ctr">100%</td><td class="ctr num">+6.64%</td><td class="ctr num" style="color:#b91c1c">+3.95%</td><td class="ctr">66.7%</td></tr>
-            <tr><td>+3% ~ +4%</td><td class="ctr">14</td><td class="ctr">100%</td><td class="ctr num">−0.60%</td><td class="ctr num" style="color:#047857"><strong>−4.02%</strong></td><td class="ctr">14.3%</td></tr>
-            <tr><td>+4% ~ +6%</td><td class="ctr">15</td><td class="ctr">100%</td><td class="ctr num">+5.64%</td><td class="ctr num" style="color:#b91c1c">+0.58%</td><td class="ctr">60.0%</td></tr>
-            <tr><td>+6% ~ +8%</td><td class="ctr">17</td><td class="ctr">100%</td><td class="ctr num">+4.91%</td><td class="ctr num" style="color:#047857">−1.84%</td><td class="ctr">58.8%</td></tr>
-            <tr style="background:rgba(185,28,28,0.07)"><td>≥ +8% 大幅高开</td><td class="ctr">75</td><td class="ctr"><strong>21.3%</strong></td><td class="ctr num">+6.93%</td><td class="ctr num" style="color:#047857"><strong>−2.61%</strong></td><td class="ctr">14.7%</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p class="small">「可买入」= 开盘未达一字/准一字（判定式见 <a href="#s13">§13</a> F16）。
-        注意最后一行：<strong>原口径下最好看的一档（A +6.93%）正是实盘最差的一档（B −2.61%）</strong>，
-        因为其中 78.7% 是一字板——你根本买不进去，而买得进去的那些开盘就已在别人手里。</p>
-
-      <h4>12.5.3 「买不进」和「接错了」是两个问题，必须分开处理</h4>
-      <div class="callout c-warn">
-        <div class="ttl">① 一字板买不进 —— 这是执行约束，不是策略选择</div>
-        <p style="margin:4px 0 0">全样本 <strong>26.1%</strong> 的候选在 T+1 以一字/准一字开盘，实盘无法按开盘价成交。
-          这类样本必须标记 <code>UNBUYABLE_OPEN</code>，并在统计时<strong>从可执行收益的分子分母中同时剔除</strong>——
-          否则回测会持续把「买不到的票」算成盈利。</p>
-      </div>
-      <div class="callout c-bad">
-        <div class="ttl">② 非一字但高开，接进去也会亏 —— 这是策略结论，独立于一字板</div>
-        <p style="margin:4px 0 0">把一字板全部剔除后，<code>gap ∈ [3%, 8%)</code> 的 46 只<strong>全部可买入</strong>，
-          其 B 口径仍为 <strong>−1.72%</strong>。所以高开组的亏损<strong>不能全部归因于「买不进」</strong>：
-          高开本身是负向信号——溢价在隔夜被一次性吃掉，你在 T+1 开盘建仓，等于用别人已经赚到的价格入场。</p>
-      </div>
-      <p>两条合起来的处置是：<strong>一字开盘直接剔除（执行层，<code>reject_unbuyable_open</code>），
-        非一字但跳空超阈值则主动放弃（策略层，<code>entry_gap_max</code>）</strong>。</p>
-
-      <h4>12.5.4 可执行的入场门槛：<code>gap ≤ 3%</code> 才接</h4>
-      <div class="tw">
-        <table>
-          <thead><tr><th style="width:140px">分组</th><th class="ctr" style="width:60px">n</th><th class="ctr" style="width:110px">一字板占比</th><th class="ctr" style="width:90px">A 口径</th><th class="ctr" style="width:90px">B 口径</th><th class="ctr" style="width:80px">B 胜率</th></tr></thead>
-          <tbody>
-            <tr style="background:rgba(185,28,28,0.07)"><td><strong>gap ≤ 3%（接）</strong></td><td class="ctr">105</td><td class="ctr">0%</td><td class="ctr num">+0.76%</td><td class="ctr num" style="color:#b91c1c"><strong>+2.19%</strong></td><td class="ctr">56.2%</td></tr>
-            <tr><td>gap &gt; 3%（弃）</td><td class="ctr">121</td><td class="ctr">48.8%</td><td class="ctr num">+5.61%</td><td class="ctr num" style="color:#047857"><strong>−2.27%</strong></td><td class="ctr">26.4%</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p>两组实盘口径相差 <strong>4.46 个百分点</strong>。这里有个反直觉之处必须点明：
-        <strong>原口径下最赚的那批（gap &gt; 3%，A +5.61%）恰是实盘最亏的那批（B −2.27%）</strong>。
-        这说明<strong>任何在 A 口径上标定出来的选股因子，都可能系统性地指向「买不到的票」</strong>——
-        这正是 §6.2 权重被冻结的原因。</p>
-
-      <p>该门槛的日级稳健性：<strong>18 / 18 个交易日都有票可接</strong>（最少 1 只、最多 11 只），
-        其中当日为正 <strong>15 天（83%）</strong>。组合层面（T 日盘后选股 → T+1 集合竞价读开盘价 →
-        只接 <code>gap ≤ 3%</code> 的票 → 等权 → 次日收盘卖出）：</p>
-      <div class="tw">
-        <table>
-          <thead><tr><th style="width:300px">执行方式</th><th class="ctr" style="width:110px">有仓天数</th><th class="ctr" style="width:130px">累计收益</th><th>性质</th></tr></thead>
-          <tbody>
-            <tr><td>A 口径（T 日涨停价买入）</td><td class="ctr">14</td><td class="ctr num">+56.60%</td><td class="small">不可执行，仅作基准</td></tr>
-            <tr><td>B 口径（T+1 开盘买，不加门槛）</td><td class="ctr">14</td><td class="ctr num" style="color:#047857">−6.18%</td><td class="small">可执行，但亏</td></tr>
-            <tr style="background:rgba(185,28,28,0.07)"><td><strong>B 口径 + <code>gap ≤ 3%</code> 门槛</strong></td><td class="ctr">13</td><td class="ctr num" style="color:#b91c1c"><strong>+34.47%</strong></td><td class="small"><strong>样本内结果，需样本外验证</strong></td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="callout c-warn">
-        <div class="ttl">必须先说清这个 +34.47% 的性质</div>
-        <p style="margin:4px 0 0"><code>gap ≤ 3%</code> 这个阈值是在<strong>同一批 19 天样本上挑出来的</strong>，
-          属样本内结果，<strong>不能当作已实现收益，更不能写进任何宣传口径</strong>。
-          它真正说明的是——这套策略的收益来源<strong>不是「选哪只」，而是「在什么价位接」</strong>；
-          而价位是市场在 T+1 开盘那一刻给出的，不是选股模型能预知的。
-          样本外验证（建议 ≥ 40 个交易日）完成前，此门槛只作为<strong>执行纪律</strong>存在。</p>
-      </div>
-
-      <h4>12.5.5 连锁影响：§12.4 的因子 IC 与评分权重必须重标定</h4>
-      <p>换成 B 口径后，§12.4.5 那张 IC 榜发生了根本变化（明细表见该节顶部的限定框）：</p>
-      <div class="callout c-bad">
-        <div class="ttl">三件事必须在 v1 实现前处理</div>
-        <ol style="margin:6px 0 0">
-          <li><strong>§6.2 的因子方向与权重不得直接上线。</strong>「封单强度一级、成交额负向、连板数最弱」这套排序是 A 口径的产物；
-            在 B 口径下唯一稳健的恰恰是被判为「最弱」的 <strong>连板数（+0.092）</strong>，
-            而「最强」的封单强度转为 <strong>−0.084</strong>——它与「一字板买不进」高度共线，
-            本质是在挑「你买不到的票」。需在 ≥ 40 个交易日样本上按 B 口径重做分层回归后再定权重。</li>
-          <li><strong><code>filter_min_amount</code> 应回到中性。</strong>v1.2 依据「成交额 IC −0.285」把 1.0 亿下调为 0.5 亿，
-            而该相关性在 B 口径下归零（+0.020），下调失去支持。建议先取中性值 + <code>MARK</code>，待重标定后再定（§17）。</li>
-          <li><strong>回测引擎必须原生支持 B 口径</strong>：新增 <code>entry_price_basis</code>（默认 <code>open_next</code>）、
-            <code>entry_gap_max</code>（默认 0.03）、<code>reject_unbuyable_open</code>（默认 true）。
-            否则后续每一轮参数标定都会重复同一个错误。</li>
-        </ol>
-      </div>
-
-      <h4>12.5.6 仓位配比能用「次日温度」吗？——不能；而且「当日温度」也未必拿得到</h4>
-      <p>这是必须分成两层说清的问题。</p>
-      <div class="callout c-ok">
-        <div class="ttl">第一层：用 T 日温度决定 T+1 仓位，信息时点上合法，但预测力只剩 8.2%</div>
-        <p style="margin:4px 0 6px"><code>position_scale_by_temperature</code> 读的是 <strong>T 日</strong>（而非 T+1 日）的温度，
-          所以它<strong>不是未来函数</strong>：T 日收盘后即可决策 T+1 的仓位。但换到 B 口径后，温度分档的信息几乎消失：</p>
-        <div class="tw">
-          <table>
-            <thead><tr><th>温度档</th><th class="ctr" style="width:70px">天数</th><th class="ctr" style="width:130px">A 口径日级均涨</th><th class="ctr" style="width:130px">B 口径日级均涨</th></tr></thead>
-            <tbody>
-              <tr><td>T &lt; 55 混沌及以下</td><td class="ctr">4</td><td class="ctr num">+2.17%</td><td class="ctr num" style="color:#047857">−1.01%</td></tr>
-              <tr><td>55 ≤ T &lt; 60 发酵下沿</td><td class="ctr">2</td><td class="ctr num">+1.60%</td><td class="ctr num" style="color:#047857">−0.55%</td></tr>
-              <tr><td>60 ≤ T &lt; 70 发酵中</td><td class="ctr">6</td><td class="ctr num">+3.75%</td><td class="ctr num" style="color:#047857">−0.06%</td></tr>
-              <tr><td>T ≥ 70 发酵上 / 高潮</td><td class="ctr">2</td><td class="ctr num">+5.84%</td><td class="ctr num" style="color:#047857">−0.33%</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <p style="margin:6px 0 0">A 口径下那条漂亮的单调递增（+2.17% → +5.84%）<strong>在 B 口径下完全消失</strong>，
-          四档全部为负且不再单调；方差解释力也从日间 11.0% 降到 <strong>8.2%</strong>。
-          所以温度只能做「准备承担多大波动」的<strong>粗旋钮</strong>，不能做「做多重」的<strong>精确刻度</strong>。</p>
-      </div>
-      <div class="callout c-bad">
-        <div class="ttl">第二层（更硬）：温度记录是人工填报的，T+1 开盘前未必拿得到</div>
-        <p style="margin:4px 0 6px">原文档默认「T 日温度在 T 日收盘后算出」。核查 <code>t_daily_record.created_at</code> 后发现，
-          这条假设在实测数据里<strong>只有少数几天成立</strong>：</p>
-        <div class="tw">
-          <table>
-            <thead><tr><th style="width:130px">trade_date</th><th style="width:190px">created_at（实际写入）</th><th class="ctr" style="width:100px">可用性</th><th>说明</th></tr></thead>
-            <tbody>
-              <tr><td>2026-09-09</td><td>09-09 17:00</td><td class="ctr"><span class="b b-green">可用</span></td><td>当日盘后</td></tr>
-              <tr><td>2026-09-10</td><td>09-10 17:02</td><td class="ctr"><span class="b b-green">可用</span></td><td>当日盘后</td></tr>
-              <tr><td>2026-09-11</td><td>09-11 18:00</td><td class="ctr"><span class="b b-green">可用</span></td><td>当日盘后</td></tr>
-              <tr><td>2026-09-21</td><td>09-21 <strong>14:08</strong></td><td class="ctr"><span class="b b-amber">存疑</span></td><td>盘中写入，用未收盘数据</td></tr>
-              <tr><td>2026-09-18</td><td><strong>09-20 16:39</strong></td><td class="ctr"><span class="b b-red">不可用</span></td><td>隔了一个周末（09-19 / 20 休市）</td></tr>
-              <tr><td>2026-09-02 / 03 / 04 / 07</td><td><strong>09-11 17:05</strong>（同一时刻批量）</td><td class="ctr"><span class="b b-red">不可用</span></td><td>事后补录，滞后 4 ~ 9 天</td></tr>
-              <tr><td>2026-09-08</td><td>09-10 11:02 建 / 09-11 17:05 改</td><td class="ctr"><span class="b b-red">不可用</span></td><td>补录且被后续覆盖</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <p style="margin:6px 0 0">10 条记录里<strong>只有 3 条</strong>满足「当日盘后可得」。
-          也就是说实盘中你常常要等到 T+1（甚至更晚）才知道 T 日的温度——那时当天的仓位决策早已过去。因此：</p>
-        <ul style="margin:6px 0 0">
-          <li>温度<strong>绝对不能</strong>作为候选池产出的前置条件（§13 F15 已写明）；</li>
-          <li>仓位旋钮必须设计成<strong>「读不到就退回默认档」</strong>，而不是报错或直接空仓；</li>
-          <li>若确实要用温度控仓，需先解决<strong>填报时效</strong>：把自动维度先算出来落库，人工维度后补并标 <code>partial</code>，
-            同时按 §13 F17 记录 <code>temperature_lag_days</code>。</li>
-        </ul>
-      </div>
-      <p class="small"><strong>回到「是否延迟了一天」这个问题本身</strong>：原回测的问题不是延迟，而是<strong>提前</strong>——
-        它把「T 日盘后才知道的温度」与「T 日盘中就已锁死的涨停价」拼在同一个决策里。
-        修正方式是把买入时点统一推到唯一可执行的 <strong>T+1 开盘</strong>，并接受由此带来的全部结论变化。
-        复算脚本：<code>回测脚本/10_执行时点口径复算.py</code>（三口径 + 方差分解 + IC 对照 + 组合回测）、
-        <code>回测脚本/11_开盘门槛与持有期.py</code>（跳空分档 + 日级稳健性 + 持有期对比），
-        输出 <code>10_执行时点复算.json</code>、<code>11_开盘门槛.json</code>，可原样复跑核对。</p>
-
     </section>
 
     <section id="s13">
@@ -1637,15 +1396,6 @@ suggest_position = max_position_per_stock × (score / 当日最高分) × (存�
             <tr><td>F14</td><td>跨月 / 跨年回 Lookback 越过数据起点</td><td>动态基准统计量样本不足时（不足 20 日）自动缩短窗口并在结果注明，<strong>不得静默用更少样本假装 20 日</strong></td><td>首次上线必然遇到</td></tr>
             <tr><td>F15</td><td>当日无情绪温度记录</td><td>候选池<strong>照常产出</strong>；<code>suggest_position</code> 置空并标 <code>NO_TEMPERATURE</code>，
               <strong>不得按 0 仓位或退潮处理</strong></td><td>温度含人工填报子指标，实测 19 个交易日中仅 14 天有值（<a href="#s12">§12.4.8</a>）</td></tr>
-            <tr><td>F16</td><td><strong>T+1 一字 / 准一字开盘</strong>（实盘买不进）</td>
-              <td>候选行标 <code>UNBUYABLE_OPEN</code>；复盘统计时<strong>从「可执行收益」的分子分母中同时剔除</strong>，
-              并单独给出「含/不含不可买入样本」两组指标。判定式 <code>open(T+1) ≥ close(T) × (1 + 涨停幅度 × 0.985)</code>，
-              涨停幅度按标的取 5% / 10% / 20%</td>
-              <td>全样本 26.1% 命中；<code>gap ≥ +8%</code> 档内一字占 78.7%（<a href="#s12">§12.5.2</a>）</td></tr>
-            <tr><td>F17</td><td><strong>温度记录写入时点滞后</strong>（复盘补录）</td>
-              <td>以 <code>t_daily_record.created_at</code> 判定：晚于 <code>trade_date + 1</code> 开盘（或缺失）时，
-              该温度<strong>仅用于事后复盘展示，不参与当日仓位建议</strong>；接口返回 <code>temperature_lag_days</code></td>
-              <td>实测 10 条中仅 3 条为「当日盘后」，其余为盘中写入或滞后 4~9 天补录（<a href="#s12">§12.5.6</a>）</td></tr>
           </tbody>
         </table>
       </div>
@@ -1665,11 +1415,7 @@ suggest_position = max_position_per_stock × (score / 当日最高分) × (存�
             <tr><td>AC-5</td><td>切换日识别（收紧 B）回跑同期</td><td>命中 <strong>6 / 18</strong> 个交易日（08-27、08-28、08-31、09-01、09-08、09-21），误报率 33%</td></tr>
             <tr><td>AC-6</td><td>节点票选拔率控制</td><td>启动日 09-07 ≤ 10%（实测 9.7%，9 / 93）；分歧日 09-14 ≤ 20%（实测 16.4%，9 / 55）；切换日 09-21 ≥ 1%（实测 2.1%，2 / 96）</td></tr>
             <tr><td>AC-7</td><td>版本管理与回滚</td><td>改任一参数保存 → 产生新版本号；<code>config_json</code> 差异可在 diff 接口看到具体 key；回滚后 <code>current_version_id</code> 指向新版本、历史版本仍可查；重跑结果与原版本<strong>逐行一致</strong></td></tr>
-            <tr><td>AC-8</td><td>复盘链路完整性</td><td>以 2026-09-18 候选回看 09-21：12 只 ≥2 板候选中 <strong>8 只晋级（66.7%）</strong>；
-              <span class="b b-red">v1.4 更正</span> 平均涨幅须<strong>分口径给出</strong>——
-              A 口径（T 日涨停价起算）<strong>+6.01%</strong>、B 口径（T+1 开盘起算）<strong>+0.72%</strong>，
-              其中 4 只（锡华科技、新宏泽、经纬股份、科森科技）在 T+1 一字开盘、实盘不可买入。
-              review 接口需同时返回两组数字并标明口径，<strong>不得只暴露 A 口径</strong></td></tr>
+            <tr><td>AC-8</td><td>复盘链路完整性</td><td>以 2026-09-18 候选回看 09-21：12 只 ≥2 板候选中 <strong>8 只晋级（66.7%）</strong>、平均涨幅 <strong>+6.01%</strong>、盈亏比 <strong>3.23</strong>；晋级率/平均涨幅/盈亏比三项在 review 接口可直接取到</td></tr>
             <tr><td>AC-9</td><td>幂等 &amp; 重跑</td><td>对同一 <code>(strategy_id, trade_date)</code> 连续运行 3 次：<code>t_candidate_stock</code> 行数不变（≤100 行），<code>t_strategy_run</code> 增到 3 行，每次 <code>version_id</code> 一致</td></tr>
             <tr><td>AC-10</td><td>调度幂等与 skip</td><td>把任务在非交易日触发 → <code>t_scheduler_run</code> 记 skip 且不写候选；缺数据时同样 skip 而非 FAILED</td></tr>
             <tr><td>AC-11</td><td>参数死分支检测</td><td>配置界面与 review 接口均能读到「近 20 日各规则触发次数」；把 <code>min_board_count</code> 临时改成 8 时，界面提示近 20 日命中 0 次</td></tr>
@@ -1761,14 +1507,11 @@ suggest_position = max_position_per_stock × (score / 当日最高分) × (存�
             <tr><td><code>max_select_rate</code></td><td>float</td><td><span class="b b-gray">无</span></td><td><code>0.15</code> <span class="b b-blue">新增</span></td></tr>
             <tr><td rowspan="4">过滤</td><td><code>filter_st</code></td><td>bool</td><td><code>true</code></td><td>不变</td></tr>
             <tr><td><code>filter_new_stock_days</code></td><td>int</td><td><code>30</code></td><td>暂用替代口径，待 <code>listed_at</code> 上线</td></tr>
-            <tr><td><code>filter_min_amount</code></td><td>float(亿)</td><td><code>1.0</code></td><td><strong>v1.4 改为中性 + <code>MARK</code></strong>：v1.2 依据的「成交额 IC −0.285」在实盘口径下归零至 +0.020，该下调失去支持；待 B 口径重标定后再定，见 <a href="#s12">§12.5.5</a></td></tr>
+            <tr><td><code>filter_min_amount</code></td><td>float(亿)</td><td><code>1.0</code></td><td><strong>下调至 0.5</strong> 且默认走 <code>MARK</code>：成交额对次日收益秩相关 <strong>−0.285</strong>（越小越好），见 <a href="#s12">§12.4</a></td></tr>
             <tr><td><code>filter_conflict_policy</code></td><td>enum</td><td><span class="b b-gray">无</span></td><td><code>MARK</code>（KEEP/DROP/MARK）<span class="b b-blue">新增</span></td></tr>
             <tr><td rowspan="2">排序</td><td><code>sort_by</code></td><td>enum</td><td><code>principle_count</code></td><td><code>weighted_score</code> <span class="b b-blue">C3</span></td></tr>
             <tr><td><code>score_weights</code></td><td>dict</td><td><span class="b b-gray">无</span></td><td><code>{board:0.50,position:0.30,node:0.20,timing:0.10,risk:0.20}</code> <span class="b b-blue">新增</span></td></tr>
             <tr><td>风控</td><td><code>max_position_per_stock</code></td><td>float</td><td><code>0.05</code></td><td>不变</td></tr>
-            <tr><td rowspan="3">执行<br><span class="small">v1.4 新增</span></td><td><code>entry_price_basis</code></td><td>enum</td><td><span class="b b-gray">无</span></td><td><code>open_next</code>（T+1 开盘价）——回测与实盘必须同基准 <span class="b b-blue">C14</span></td></tr>
-            <tr><td><code>entry_gap_max</code></td><td>float</td><td><span class="b b-gray">无</span></td><td><code>0.03</code>：开盘跳空超过此值则放弃该票（样本内 <code>gap≤3%</code> 组 B 口径 +2.19%，<code>&gt;3%</code> 组 −2.27%） <span class="b b-blue">C14</span></td></tr>
-            <tr><td><code>reject_unbuyable_open</code></td><td>bool</td><td><span class="b b-gray">无</span></td><td><code>true</code>：一字/准一字开盘标 <code>UNBUYABLE_OPEN</code> 并计入不可执行（<a href="#s12">§13</a> F16） <span class="b b-blue">C14</span></td></tr>
           </tbody>
         </table>
       </div>
@@ -1782,7 +1525,7 @@ suggest_position = max_position_per_stock × (score / 当日最高分) × (存�
     </section>
 
     <footer>
-      WaveRider PRD v1.4 · 2026-09-24 · 数据基准 emotion_dashboard 2026-08-20 ~ 2026-09-21（19 个交易日）· v1.4 已按「T+1 开盘买入」口径复算全部收益指标
+      WaveRider PRD v1.1 · 2026-09-21 · 数据基准 emotion_dashboard 2026-08-20 ~ 2026-09-21（19 个交易日）
     </footer>
 
   </main>

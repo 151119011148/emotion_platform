@@ -67,6 +67,11 @@ const routes = [
         path: 'scoring',
         name: 'Scoring',
         component: () => import('../views/ScoringAdminView.vue')
+      },
+      {
+        path: 'waverider',
+        name: 'WaveRider',
+        component: () => import('../views/WaveRiderView.vue')
       }
     ]
   }

@@ -46,6 +46,10 @@
           <el-icon><SetUp /></el-icon>
           <span>打分配置</span>
         </el-menu-item>
+        <el-menu-item index="/waverider">
+          <el-icon><TrendCharts /></el-icon>
+          <span>策略选股</span>
+        </el-menu-item>
       </el-menu>
       <div class="sidebar-footer">
         <span class="user-name">{{ userStore.nickname || userStore.username }}</span>

@@ -218,3 +218,36 @@ export const scoringApi = {
   updateRule: (id, data) => api.put(`/scoring/rules/${id}`, data),
   deleteRule: (id) => api.delete(`/scoring/rules/${id}`)
 }
+
+/**
+ * WaveRider 策略选股：策略配置 / 版本 / 模板 / 运行 / 候选 / 节点 / 复盘 / 导出。
+ *
+ * 候选池是「T 日已涨停」的票，天然带「T 日收盘买不到」的属性；
+ * 所以收益口径有两个：以 close(T) 起算的只作信号强度参考，
+ * 页面默认展示可执行的那个（T+1 开盘买、当日收盘卖）。
+ * 复盘样本不足时后端回空统计而不是报错——「还没有样本」和「策略没跑」是两件事。
+ */
+export const waveriderApi = {
+  strategies: () => api.get('/waverider/strategies'),
+  createStrategy: (data) => api.post('/waverider/strategies', data),
+  strategyDetail: (id) => api.get(`/waverider/strategies/${id}`),
+  setEnabled: (id, enabled) => api.put(`/waverider/strategies/${id}/enabled`, null, { params: { enabled } }),
+  saveVersion: (id, data) => api.post(`/waverider/strategies/${id}/versions`, data),
+  versions: (id) => api.get(`/waverider/strategies/${id}/versions`),
+  rollback: (id, versionId) => api.post(`/waverider/strategies/${id}/rollback/${versionId}`),
+  // 只校验不落库，返回 fatal（存不进去）与 warnings（能用但不建议）两类
+  validate: (id, data) => api.post(`/waverider/strategies/${id}/validate`, data),
+  templates: () => api.get('/waverider/templates'),
+  applyTemplate: (code, strategyId) => api.post(`/waverider/templates/${code}/apply`, null, { params: { strategyId } }),
+  diff: (v1, v2) => api.get(`/waverider/versions/${v1}/diff/${v2}`),
+  // 手工运行会真的读行情表并落候选，给足超时；dryRun=true 只算不落库
+  run: (data) => api.post('/waverider/run', data, { timeout: 60000 }),
+  runs: (strategyId, date) => api.get('/waverider/runs', { params: { strategyId, date } }),
+  // date 不传时返回「最近一个已产出的交易日」；一只都没有时带 emptyReason 说明卡在哪一步
+  candidates: (strategyId, date) => api.get('/waverider/candidates', { params: { strategyId, date }, skipErrorToast: true }),
+  nodes: (params) => api.get('/waverider/nodes', { params }),
+  markNode: (data) => api.post('/waverider/nodes', data),
+  cancelNode: (id) => api.delete(`/waverider/nodes/${id}`),
+  review: (strategyId, from, to) => api.get('/waverider/review', { params: { strategyId, from, to }, timeout: 30000, skipErrorToast: true }),
+  exportCandidates: (strategyId, date, format) => api.get('/waverider/export', { params: { strategyId, date, format } })
+}

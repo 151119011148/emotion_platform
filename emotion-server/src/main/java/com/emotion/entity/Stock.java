@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -25,5 +26,12 @@ public class Stock {
     private Integer market;
     /** 按代码前缀归类：沪主板/深主板/创业板/科创板/北交所。 */
     private String board;
+    /**
+     * 上市日期（V35 补列）。次新股过滤（filter_new_stock_days）用它。
+     *
+     * <p>允许为 NULL：存量行没有这个值，此时该股不因「上市不足 N 天」被剔除——
+     * 拿不到数据就当作不满足剔除条件，比把一批老股误判成次新要好。
+     */
+    private LocalDate listedAt;
     private LocalDateTime updatedAt;
 }
