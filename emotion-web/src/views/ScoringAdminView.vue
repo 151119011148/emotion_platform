@@ -2,7 +2,6 @@
   <div class="scoring-admin">
     <div class="page-header">
       <h2>打分配置</h2>
-      <el-button type="primary" @click="openCreateModel">新增模型</el-button>
     </div>
 
     <p class="hint">

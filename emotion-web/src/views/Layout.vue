@@ -34,10 +34,19 @@
           <el-icon><Odometer /></el-icon>
           <span>高位生态</span>
         </el-menu-item>
-        <el-menu-item index="/nodes">
-          <el-icon><Connection /></el-icon>
-          <span>节点追踪</span>
-        </el-menu-item>
+        <el-sub-menu index="nodes-group">
+          <template #title>
+            <el-icon><Connection /></el-icon>
+            <span>节点追踪</span>
+          </template>
+          <el-menu-item index="/nodes">
+            <span>节点追踪</span>
+          </el-menu-item>
+          <el-menu-item index="/waverider">
+            <el-icon><TrendCharts /></el-icon>
+            <span>策略选股</span>
+          </el-menu-item>
+        </el-sub-menu>
         <el-menu-item index="/positions">
           <el-icon><Tickets /></el-icon>
           <span>持仓与台账</span>
@@ -45,10 +54,6 @@
         <el-menu-item index="/scoring">
           <el-icon><SetUp /></el-icon>
           <span>打分配置</span>
-        </el-menu-item>
-        <el-menu-item index="/waverider">
-          <el-icon><TrendCharts /></el-icon>
-          <span>策略选股</span>
         </el-menu-item>
       </el-menu>
       <div class="sidebar-footer">
