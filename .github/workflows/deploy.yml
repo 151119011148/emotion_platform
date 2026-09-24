@@ -1,10 +1,22 @@
 name: deploy
 
-# 方案三：push 到 main 就自动构建 + 发到阿里云 ECS。
-# 需要在仓库 Settings → Secrets 里配三个：
-#   ECS_HOST      ECS 公网 IP 或域名
-#   ECS_USER      登录用户名（server-init.sh 里那个部署用户）
-#   ECS_SSH_KEY   私钥全文（-----BEGIN OPENSSH PRIVATE KEY----- ... 一起贴进去）
+# ============================================================================
+# 一键发版到阿里云（Alibaba Cloud Linux 方案，走 deploy/alinux/deploy.sh）
+#
+# 触发：push 到 main，或手动在 Actions 页面点 "Run workflow"。
+#
+# 需要在 GitHub 仓库 Settings → Secrets → Actions 里配置：
+#   ALINUX_HOST        服务器公网 IP      （如 47.117.110.143）
+#   ALINUX_SSH_USER    登录用户名         （root）
+#   ALINUX_SSH_PASS    登录密码           【必填，alinux 走密码 SSH（expect 能读 password 登录）】
+#   ALINUX_MYSQL_PASS  服务器 MySQL root 密码（可选；留空则自动读服务器 /root/mysql_pass.txt）
+#
+# 说明：
+#   · 与 Ubuntu 方案不同，alinux 不用 SSH 私钥（webfactory/ssh-agent），改为传 SSH 密码环境变量。
+#   · alinux 脚本依赖 expect（密码 SSH 驱动），runner 上现装。
+#   · deploy.sh 内部会 ①本机构建 ②上传 ③建库导入 ④起后端 ⑤配前端 ⑥健康检查（幂等可重跑）。
+#   · 每次部署会自动生成全新 JWT 签名密钥并上传，线上用户发版后需重新登录（属预期行为）。
+# ============================================================================
 on:
   push:
     branches: [main]
@@ -13,9 +25,17 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # 把 secrets 透传给 deploy.sh（脚本认这些环境变量）
+    env:
+      ALINUX_HOST:       ${{ secrets.ALINUX_HOST }}
+      ALINUX_SSH_USER:   ${{ secrets.ALINUX_SSH_USER }}
+      ALINUX_SSH_PASS:   ${{ secrets.ALINUX_SSH_PASS }}
+      ALINUX_MYSQL_PASS: ${{ secrets.ALINUX_MYSQL_PASS }}
+
     steps:
       - uses: actions/checkout@v4
 
+      # JDK8 + Maven：后端构建与依赖缓存
       - uses: actions/setup-java@v4
         with:
           java-version: '8'
@@ -23,20 +43,22 @@ jobs:
           cache: maven
           cache-dependency-path: emotion-server/pom.xml
 
+      # Node + npm：前端构建与依赖缓存
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
           cache-dependency-path: emotion-web/package-lock.json
 
-      - name: 构建 jar 与前端产物
-        run: bash scripts/deploy/build.sh
+      # alinux 走密码 SSH，expect 是 deploy.sh 远程执行/上传的引擎，必须现装
+      - name: 安装 expect
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq expect
 
-      - uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.ECS_SSH_KEY }}
+      # 前端 build 依赖 node_modules，先按 lock 装齐（deploy.sh 内 build 只跑 vite）
+      - name: 安装前端依赖
+        run: npm ci
+        working-directory: emotion-web
 
-      - name: 传到服务器并切版本
-        run: |
-          ssh-keyscan -H "${{ secrets.ECS_HOST }}" >> ~/.ssh/known_hosts
-          DEPLOY_HOST="${{ secrets.ECS_USER }}@${{ secrets.ECS_HOST }}" bash scripts/deploy/deploy.sh
+      # 核心：构建 + 部署到阿里云（幂等）
+      - name: 部署到阿里云（deploy/alinux）
+        run: bash deploy/alinux/deploy.sh

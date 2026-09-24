@@ -1,0 +1,51 @@
+#!/usr/bin/expect -f
+# ============================================================================
+# ssh_run.exp —— 用「密码认证」在远程服务器执行一条命令
+#
+# 特性：
+#   · 认证阶段静默（不回显密码），认证成功后把远端命令 stdout 原样打到自身 stdout，
+#     因此上层可以 `out=$(expect ssh_run.exp ...)` 拿到命令返回值。
+#   · 可选把输出同时追加写到一个本地日志文件（供部署留痕）。
+#
+# 用法（5 个位置参数）：
+#   expect ssh_run.exp <HOST> <USER> <PASS> <REMOTE_CMD> <LOG_FILE>
+#     HOST       远程服务器 IP
+#     USER       登录用户名（一般 root）
+#     PASS       登录密码
+#     REMOTE_CMD 远端要执行的命令字符串
+#     LOG_FILE   远端输出追加写到此文件；传空串 "" 表示不落盘（此时只有 stdout）
+#
+# 退出码：成功返回远端命令退出码；连接/认证失败返回 1。
+# ============================================================================
+set timeout 300
+
+set host [lindex $argv 0]
+set user [lindex $argv 1]
+set pass [lindex $argv 2]
+set cmd  [lindex $argv 3]
+set logf [lindex $argv 4]
+
+# 先静默，避免密码被期待/打印
+log_user 0
+if {$logf ne ""} {
+    log_file -a "$logf"
+}
+
+spawn ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=25 $user@$host "$cmd"
+
+expect {
+    -re {([Pp]assword):}      { send -- "$pass\r" }
+    -re {[Yy]es/[Nn]o}        { send -- "yes\r"; exp_continue }
+    -re {Permission denied}   { puts stderr "AUTH_FAILED"; exit 1 }
+    timeout                   { puts stderr "SSH_TIMEOUT"; exit 1 }
+}
+
+# 密码交互完成后才放行输出，远端命令的 stdout 就能被上层捕获/落入日志
+log_user 1
+
+expect eof
+
+set result [wait]
+set rc [lindex $result 3]
+if {$rc == -1} { set rc 255 }
+exit $rc

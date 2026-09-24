@@ -1,0 +1,30 @@
+# ============================================================================
+# application-local.yml.template —— emotion-server 的生产覆盖配置模板
+#
+# 为什么要有它：
+#   emotion-server/application.yml 里 profiles.active=local，
+#   且 spring.config.additional-location=file:./,file:./emotion-server/
+#   也就是「启动命令所在目录」下的 application-local.yml 会被自动加载，
+#   且优先级高于 jar 内的 application.yml。
+#
+#   于是：DB 口令、JWT 签名密钥这些「不进 git」的真值，都放在部署目录的
+#   application-local.yml 里，jar 一份都不用改，直接覆盖生效。
+#
+# 部署时 deploy.sh 会用真实值替换下面两个占位符后，上传到：
+#   /opt/emotion/app/application-local.yml   （和 emotion-server.jar 同目录）
+#
+# 占位符（由 deploy.sh 用 sed 替换）：
+#   __MYSQL_PASSWORD__  -> 服务器 MySQL root 密码
+#   __JWT_SECRET__      -> 一个新的随机 256-bit JWT 签名密钥（openssl rand -hex 32）
+# ============================================================================
+
+spring:
+  datasource:
+    # 覆盖 application.yml 里的 ${MYSQL_PASSWORD:} 空值。
+    # 服务器上数据库名固定 emotion_dashboard，用户 root，主机 localhost（本机），不用重复配。
+    password: __MYSQL_PASSWORD__
+
+jwt:
+  # 覆盖 application.yml 里的 ${JWT_SECRET:} 空值。
+  # 签名密钥一旦公开任何人都能伪造 token，所以只在服务器上放真值、不进 git。
+  secret: __JWT_SECRET__

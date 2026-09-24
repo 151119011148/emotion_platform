@@ -1,0 +1,40 @@
+# ============================================================================
+# emotion-server.service —— systemd 服务单元（Alibaba Cloud Linux 版本）
+#
+# 放到服务器后由 deploy.sh 安装到 /etc/systemd/system/emotion-server.service，
+# 然后 systemctl daemon-reload && enable --now emotion-server 即开机自启 + 崩溃自愈。
+#
+# 与 scripts/deploy/（Ubuntu 方案）的差异：
+#   · 这里 jar 固定单一份 /opt/emotion/app/emotion-server.jar（不做 releases 多版本回滚）
+#   · WorkingDirectory 指向 app 目录，保证同目录的 application-local.yml 被 Spring 读到
+#   · 不依赖 Systemd EnvironmentFile，DB/JWT 真值都写在 application-local.yml 里
+#
+# 维护命令：
+#   systemctl status emotion-server       查看运行状态
+#   systemctl restart emotion-server      重启（发版后）
+#   journalctl -u emotion-server -f       跟踪实时日志
+# ============================================================================
+[Unit]
+Description=emotion-server (Spring Boot, Alibaba Cloud Linux)
+# 后端要连 MySQL 和 Redis，等它们就绪后再启动更稳
+After=network.target mysqld.service redis.service
+Wants=mysqld.service redis.service
+
+[Service]
+# 有专门部署账号时可用 User=xxx；root 部署最省事，这里就用默认即可
+WorkingDirectory=/opt/emotion/app
+# 内存只有 1.8G，JVM 堆压到 512m，留足内存给 MySQL 和 OS
+ExecStart=/usr/bin/java -Xms256m -Xmx512m -jar /opt/emotion/app/emotion-server.jar
+# 定时行情拉取是常驻任务，挂了自动拉起；RestartSec 间隔避免疯狂重启刷日志
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+# Spring Boot 优雅停止退出码是 143（15 信号），别把它当失败
+SuccessExitStatus=143
+# 日志统一进系统 journal，随时 journalctl -u emotion-server 取
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=emotion-server
+
+[Install]
+WantedBy=multi-user.target

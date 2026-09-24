@@ -1,0 +1,41 @@
+#!/usr/bin/expect -f
+# ============================================================================
+# scp_push.exp —— 用「密码认证」把本地文件/目录上传到远程服务器
+#
+# 与 ssh_run.exp 配套：因为走密码登录，scp 也需要预填密码。
+#
+# 用法（5 个位置参数）：
+#   expect scp_push.exp <HOST> <USER> <PASS> <LOCAL_PATH> <REMOTE_PATH>
+#     HOST        远程服务器 IP / 域名
+#     USER        登录用户名（一般 root）
+#     PASS        登录密码
+#     LOCAL_PATH  要上传的本地路径
+#     REMOTE_PATH 上传到的远端路径（建议用绝对路径）
+#
+# 注意：远端目录必须已存在——scp 不会帮我们创建目录，
+#       deploy.sh 里会先 ssh_run.exp "mkdir -p xxx" 再上传。
+# ============================================================================
+set timeout 300
+
+set host [lindex $argv 0]
+set user [lindex $argv 1]
+set pass [lindex $argv 2]
+set lf   [lindex $argv 3]
+set rf   [lindex $argv 4]
+
+log_user 0
+spawn scp -r -o StrictHostKeyChecking=accept-new -o ConnectTimeout=25 "$lf" $user@$host:"$rf"
+
+expect {
+    -re {([Pp]assword):}    { send -- "$pass\r"; exp_continue }
+    -re {[Yy]es/[Nn]o}      { send -- "yes\r"; exp_continue }
+    -re {Permission denied} { puts stderr "AUTH_FAILED"; exit 1 }
+    timeout                 { puts stderr "SCP_TIMEOUT"; exit 1 }
+    eof                     { }
+}
+
+# 拿到 scp 的退出码传给上层判断成败
+set result [wait]
+set rc [lindex $result 3]
+if {$rc == -1} { set rc 255 }
+exit $rc

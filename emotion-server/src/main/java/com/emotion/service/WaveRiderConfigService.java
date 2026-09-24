@@ -64,6 +64,14 @@ public class WaveRiderConfigService {
         List<Strategy> rows = strategyMapper.selectList(new LambdaQueryWrapper<Strategy>()
                 .eq(Strategy::getUserId, userId)
                 .orderByDesc(Strategy::getUpdatedAt));
+        // 新账号（或尚无任何策略）时自动建一个「震荡市」默认策略，否则策略选股页的策略下拉永远为空，
+        // 而前端又没有任何创建策略的入口。create 内部已按 用户+名称 去重。
+        if (rows.isEmpty()) {
+            create(userId, "默认策略", "自动创建的默认策略（震荡市模板），可换模板或调整参数", null);
+            rows = strategyMapper.selectList(new LambdaQueryWrapper<Strategy>()
+                    .eq(Strategy::getUserId, userId)
+                    .orderByDesc(Strategy::getUpdatedAt));
+        }
         List<Map<String, Object>> out = new ArrayList<>();
         for (Strategy s : rows) {
             Map<String, Object> m = new LinkedHashMap<>();
