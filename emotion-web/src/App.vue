@@ -39,6 +39,15 @@ body {
      这里压成比卡片（#1a2332）更深一档的 #16202e，与表头同色，展开区看着像凹进去的一层 */
   --el-table-expanded-cell-bg-color: #16202e;
   --el-table-fixed-box-shadow: -10px 0 12px -8px rgba(0, 0, 0, .45);
+  /* 斑马纹（el-table 加 stripe）走的是 --el-fill-color-lighter，默认 #fafafa —— 纯白。
+     只压 --el-table-* 系列挡不住它：那条规则写的是 background:var(--el-fill-color-lighter)，
+     压根不经过表格自己的变量（和「展开行」是同一个坑，都在借浅色主题的兜底变量）。
+     全库里这个变量只有两处引用：.el-table--striped 的斑马纹行、以及 .el-upload--picture-card，
+     所以限定在 .el-table 作用域内改不会外溢。
+     取值约束：要在卡片底色 #1a2332 与 hover #22303f 之间找一档，色板只剩 ~7 级空间，
+     所以只能取偏浅的一档——斑马纹看得见，鼠标划过的行（hover 会覆盖斑马纹，实测有效）
+     仍比它更亮一档。 */
+  --el-fill-color-lighter: #1f2b3b;
   color: var(--el-table-text-color);
   background-color: transparent;
 }

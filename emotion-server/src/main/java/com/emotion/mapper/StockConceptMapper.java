@@ -2,6 +2,7 @@ package com.emotion.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.emotion.entity.StockConcept;
+import com.emotion.vo.ThemeTagVO;
 import com.emotion.vo.TopicHeat;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
@@ -42,4 +43,34 @@ public interface StockConceptMapper extends BaseMapper<StockConcept> {
             + "(#{r.code},#{r.conceptCode},#{r.concept},#{r.name})"
             + "</foreach></script>")
     int insertBatch(@Param("rows") List<StockConcept> rows);
+
+    /**
+     * 批量取这些票所属的通达信题材，并带上「当日该题材的涨停家数」。
+     *
+     * <p>热度用 {@code LEFT JOIN} 而不是内连接：当日该题材只有这一只票涨停时，
+     * 家数就是 1；整个题材当日的票都不在涨停池里时是 0——两种都可能是真答案，
+     * 内连接会把第二类直接丢掉（表现成「这只票没题材」），所以这里不能内连接。
+     *
+     * <p>排序在 SQL 里做：同一只票内按涨停家数降序，service 直接顺序下发即可。
+     * 返回的是「股票-题材」扁平行（一只票多行），{@link ThemeTagVO#getCode()} 是分组键。
+     */
+    @Select("<script>"
+            + "SELECT c.code AS code,"
+            + "       c.concept_code AS name,"
+            + "       c.concept AS fullName,"
+            + "       COALESCE(b.index_code, '') AS indexCode,"
+            + "       COALESCE(h.ztCount, 0) AS ztCount "
+            + "FROM t_stock_concept c "
+            + "LEFT JOIN t_concept_board b ON b.board_code = c.concept_code "
+            + "LEFT JOIN (SELECT c2.concept_code AS cc, COUNT(DISTINCT s.code) AS ztCount "
+            + "             FROM t_stock_concept c2 "
+            + "             JOIN t_market_stock s ON s.code = c2.code "
+            + "            WHERE s.trade_date = #{date} AND s.pool = 'ZT' "
+            + "            GROUP BY c2.concept_code) h ON h.cc = c.concept_code "
+            + "WHERE c.code IN "
+            + "<foreach collection='codes' item='x' open='(' separator=',' close=')'>#{x}</foreach> "
+            + "ORDER BY c.code, ztCount DESC, c.concept_code"
+            + "</script>")
+    List<ThemeTagVO> listThemesByCodes(@Param("codes") List<String> codes,
+                                       @Param("date") LocalDate date);
 }

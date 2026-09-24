@@ -255,22 +255,23 @@ public class WaveRiderEngine {
             funnel.put("剔除次新", step.size());
         }
 
-        // ---- 封单锁死（可执行性的硬边界）
-        List<MarketStock> tradable = new ArrayList<>();
+        // ---- 封单锁死：只标记，不剔除。
+        // 226 个样本按 封单额÷成交额 分五档，以 T 日涨停价为买点（本策略的真实买点）时，
+        // 收益与胜率沿封单强度严格单调递增：A 口径 +1.71/+3.55/+4.37/+5.40/+7.56%，
+        // 胜率 53%→87%；换成 D+1 开盘价为买点则单调递减（+0.38 → -1.71%）。
+        // 所以封单锁死是正向信号：它意味着这票大概率已经是/即将是最强的板，
+        // 只不过通常 T 日就一字（≥150% 档实测 97.5% 开盘即封），要买得靠集合竞价排队。
+        // 「排不到队」是执行成本，不该用剔除来消化——那剔掉的恰是清单里最好的一组。
         int locked = 0;
         for (MarketStock m : step) {
             Double r = sealRatio(m);
             if (r != null && r >= cfg.getSealLockRatio()) {
                 locked++;
-                continue;
             }
-            tradable.add(m);
         }
-        funnel.put("剔除封单锁死", tradable.size());
         if (locked > 0) {
             warnings.add("SEAL_LOCKED_" + locked);
         }
-        step = tradable;
 
         // ---- 取身位：同题材内按板数取前 max_same_position 只
         List<MarketStock> picked = pickPositions(step, cfg);
@@ -395,14 +396,42 @@ public class WaveRiderEngine {
                     .setScale(4, RoundingMode.HALF_UP));
         }
 
-        // 展示顺序：可执行性优先（封单比越低越可能买得到），同档比连板数
-        rows.sort(Comparator
-                .comparingDouble((CandidateStock c) -> executabilityKey(c, picked))
-                .thenComparing(c -> nz(c.getBoard()), Comparator.reverseOrder()));
+        // 展示顺序由 sort_by 决定，并列时一律比连板数降序
+        rows.sort(rowComparator(cfg, picked));
         for (int i = 0; i < rows.size(); i++) {
             rows.get(i).setRankNo(i + 1);
         }
         return rows;
+    }
+
+    /**
+     * 清单排序。默认按封单强度降序——在「T 日涨停价买入」这个真实买点口径下，
+     * 它是唯一一个跨档严格单调的正向因子（+1.71/+3.55/+4.37/+5.40/+7.56%）。
+     *
+     * <p>未实现的取值（weighted_score / principle_count）退化为默认排序。
+     */
+    private Comparator<CandidateStock> rowComparator(WaveRiderConfig cfg, List<MarketStock> picked) {
+        if (WaveRiderConfig.SORT_EXECUTABILITY.equals(cfg.getSortBy())) {
+            // 可执行性：封单比升序（越低越可能买得到）。对应「D+1 开盘再接」的备选打法。
+            return Comparator
+                    .comparingDouble((CandidateStock c) -> executabilityKey(c, picked))
+                    .thenComparing(c -> nz(c.getBoard()), Comparator.reverseOrder());
+        }
+        // 默认 SORT_SEAL_STRENGTH：封单比降序（越强越靠前）
+        return Comparator
+                .comparingDouble((CandidateStock c) -> -sealStrengthKey(c, picked))
+                .thenComparing(c -> nz(c.getBoard()), Comparator.reverseOrder());
+    }
+
+    /** 排序键：封单比。缺值给 -1（封单比非负），降序时自然落到最后。 */
+    private double sealStrengthKey(CandidateStock c, List<MarketStock> picked) {
+        for (MarketStock m : picked) {
+            if (m.getCode().equals(c.getCode())) {
+                Double r = sealRatio(m);
+                return r == null ? -1.0 : r;
+            }
+        }
+        return -1.0;
     }
 
     /** 排序键：封单比。缺值排最后（拿不到封单数据时不敢说它好买）。 */
@@ -675,19 +704,17 @@ public class WaveRiderEngine {
         return v == null ? 0 : v;
     }
 
-    /** 腾讯行情用的带市场前缀代码。北交所（4/8 开头）走 bj。 */
+    /**
+     * 腾讯行情用的带市场前缀代码。
+     *
+     * <p>委托 {@link TencentClient#symbolOf(String)}——前缀口径只该有一处。这里原本自带一套
+     * "6/9 沪、4/8 北、其余深" 的判断，把 <b>920xxx</b>（北交所新号段，首字符同样是 9）
+     * 错判成 sh：腾讯查无此票、<b>静默返回空</b>，表现成"这只票取不到价"，而不是报错——
+     * 回填 t_zt_perf 时就是这么丢掉了一批北交所票的。
+     */
     public static String symbol(String code) {
-        if (code == null || code.isEmpty()) {
-            return code;
-        }
-        char c = code.charAt(0);
-        if (c == '6' || c == '9') {
-            return "sh" + code;
-        }
-        if (c == '4' || c == '8') {
-            return "bj" + code;
-        }
-        return "sz" + code;
+        String sym = TencentClient.symbolOf(code);
+        return sym == null ? code : sym;
     }
 
     private double w(String key, Map<String, Double> map) {

@@ -5,6 +5,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -297,6 +298,48 @@ public class TiantiService {
             }
         }
         return false;
+    }
+
+    /**
+     * 给定交易日与一批代码，挑出其中命中「一字断魂刀」的代码。
+     *
+     * <p>天梯页是「按板数分层、逐只判」，候选池是「给一批票、问哪些判中」——入口不同，
+     * 判据同一个（{@link #isDuanDao}）。判据要看「今日 + 昨日连续锁死」，所以两天都得取。
+     *
+     * <p>两处有意取舍：
+     * <ul>
+     *   <li>只走 {@code selectList}，不用 {@link #listPool}——后者会顺带跑行业归类，
+     *       而断魂刀判据一个字都不看行业，没必要为此多干一份活。</li>
+     *   <li>前一日取不到（库里最早那天）直接返回空集，<b>不把「昨日锁死」当默认成立</b>：
+     *       判不出来就说判不出来。这里宁可漏标，也不要凭空标出一个「买得进」的假信号。</li>
+     * </ul>
+     */
+    public Set<String> duanDaoCodes(LocalDate date, Collection<String> codes) {
+        Set<String> hit = new HashSet<>();
+        if (date == null || codes == null || codes.isEmpty()) {
+            return hit;
+        }
+        Set<String> want = new HashSet<>(codes);
+        List<MarketStock> zt = poolOn(date, MarketStock.POOL_LIMIT_UP);
+        LocalDate prev = marketStockMapper.prevDetailDate(date);
+        List<MarketStock> prevZT = prev == null ? new ArrayList<MarketStock>()
+                : poolOn(prev, MarketStock.POOL_LIMIT_UP);
+        if (prevZT.isEmpty()) {
+            return hit;
+        }
+        for (MarketStock row : zt) {
+            if (want.contains(row.getCode()) && isDuanDao(row, prevZT)) {
+                hit.add(row.getCode());
+            }
+        }
+        return hit;
+    }
+
+    /** 只取池子、不做行业归类。给不看行业的判据用（见 {@link #duanDaoCodes}）。 */
+    private List<MarketStock> poolOn(LocalDate date, String pool) {
+        return marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
+                .eq(MarketStock::getTradeDate, date)
+                .eq(MarketStock::getPool, pool));
     }
 
     /** 封板形态分档：一字/早盘秒板/早盘直线/早盘板/上午板/午后板/尾盘板；炸板 n 次回显"(回头n)"。首封时间缺失返回 null。 */

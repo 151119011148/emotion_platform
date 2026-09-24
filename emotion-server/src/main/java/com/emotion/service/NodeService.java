@@ -4,13 +4,17 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.emotion.entity.Anchor;
+import com.emotion.entity.CandidateStock;
 import com.emotion.entity.DailyRecord;
 import com.emotion.entity.MarketStock;
 import com.emotion.entity.NodeEvent;
@@ -23,6 +27,8 @@ import com.emotion.mapper.NodeEventMapper;
 import com.emotion.mapper.SurveillanceMapper;
 import com.emotion.vo.NodePrefillVO;
 import com.emotion.vo.NodeSuggestVO;
+import com.emotion.vo.NodeTagVO;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 /** 节点事件：增删改查 + 读侧富化（阵眼血缘、节点票存活、监管标记、T+1 自动判定）。 */
 @Service
@@ -38,6 +44,7 @@ public class NodeService {
     private final MarketDailyMapper marketDailyMapper;
     private final SurveillanceMapper surveillanceMapper;
     private final NodeSuggestService nodeSuggestService;
+    private final ObjectMapper objectMapper;
 
     public NodeService(NodeEventMapper nodeEventMapper,
                        AnchorMapper anchorMapper,
@@ -45,7 +52,8 @@ public class NodeService {
                        MarketStockMapper marketStockMapper,
                        MarketDailyMapper marketDailyMapper,
                        SurveillanceMapper surveillanceMapper,
-                       NodeSuggestService nodeSuggestService) {
+                       NodeSuggestService nodeSuggestService,
+                       ObjectMapper objectMapper) {
         this.nodeEventMapper = nodeEventMapper;
         this.anchorMapper = anchorMapper;
         this.dailyRecordMapper = dailyRecordMapper;
@@ -53,6 +61,7 @@ public class NodeService {
         this.marketDailyMapper = marketDailyMapper;
         this.surveillanceMapper = surveillanceMapper;
         this.nodeSuggestService = nodeSuggestService;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -339,6 +348,109 @@ public class NodeService {
             event.setD0Score(rec.getTemperature());
         }
         event.setD0Cycle(rec.getStage());
+    }
+
+    // ---------- 候选池打标 ----------
+
+    /**
+     * 给候选行打「来自节点追踪」的标，写进 {@link CandidateStock#setNodeTags}（瞬态，不落库）。
+     *
+     * <p>三种角色都算：节点票（{@code node_stock}，带代码、可精确匹配）、锚定龙头
+     * （{@code anchor_stock}，只有名称）、D0 候选（{@code d0_candidates}，名称数组）。
+     *
+     * <p>不限日期。一只票可能既是甲事件的节点票、又是乙事件的 D0 候选，也可能事隔一个月才又涨停；
+     * 全都列出来、每条带上 D0 与状态，比只留最近一条有用——这段周期还作不作数由看的人判断。
+     *
+     * <p>匹配口径与 {@link #stockCodeOf}、名称去空白保持一致：明细里的名字是「罗 牛 山」，
+     * 而 d0_candidates 里写的是「罗牛山」，直接 equals 会漏掉。
+     */
+    public void tagCandidates(List<CandidateStock> rows, Long userId) {
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        List<NodeEvent> events = nodeEventMapper.selectList(
+                new LambdaQueryWrapper<NodeEvent>().eq(NodeEvent::getUserId, userId));
+        if (events.isEmpty()) {
+            return;
+        }
+        // 先按「代码 / 去空白名称」把事件建成索引，再拿候选去撞，免得每行都重解析一遍事件
+        Map<String, List<NodeEvent>> byNodeCode = new HashMap<String, List<NodeEvent>>();
+        Map<String, List<NodeEvent>> byAnchor = new HashMap<String, List<NodeEvent>>();
+        Map<String, List<NodeEvent>> byD0 = new HashMap<String, List<NodeEvent>>();
+        for (NodeEvent e : events) {
+            String code = stockCodeOf(e.getNodeStock());
+            if (code != null) {
+                index(byNodeCode, code, e);
+            }
+            String anchor = norm(e.getAnchorStock());
+            if (anchor != null) {
+                index(byAnchor, anchor, e);
+            }
+            for (String name : parseD0(e.getD0Candidates())) {
+                String key = norm(name);
+                if (key != null) {
+                    index(byD0, key, e);
+                }
+            }
+        }
+        for (CandidateStock c : rows) {
+            List<NodeTagVO> tags = new ArrayList<NodeTagVO>();
+            collect(tags, byNodeCode.get(c.getCode()), NodeTagVO.KIND_NODE_STOCK, c);
+            collect(tags, byAnchor.get(norm(c.getName())), NodeTagVO.KIND_ANCHOR, c);
+            collect(tags, byD0.get(norm(c.getName())), NodeTagVO.KIND_D0_CAND, c);
+            c.setNodeTags(tags);
+        }
+    }
+
+    private static void index(Map<String, List<NodeEvent>> m, String key, NodeEvent e) {
+        List<NodeEvent> list = m.get(key);
+        if (list == null) {
+            list = new ArrayList<NodeEvent>();
+            m.put(key, list);
+        }
+        list.add(e);
+    }
+
+    /** 同一种角色命中多条事件时全部保留——界面按角色分组，来源列在悬浮里。 */
+    private static void collect(List<NodeTagVO> out, List<NodeEvent> events, String kind,
+                                CandidateStock c) {
+        if (events == null || events.isEmpty()) {
+            return;
+        }
+        for (NodeEvent e : events) {
+            NodeTagVO t = new NodeTagVO();
+            t.setKind(kind);
+            t.setEventId(e.getId());
+            t.setD0Date(e.getD0Date());
+            t.setStatus(e.getStatus());
+            t.setAnchorStock(e.getAnchorStock());
+            t.setTheme(e.getTheme());
+            t.setNodeStock(e.getNodeStock());
+            t.setNodeStockMaxBoard(e.getNodeStockMaxBoard());
+            out.add(t);
+        }
+    }
+
+    /** d0_candidates 是名称的 JSON 数组；解析不出来就当空集，不让一条脏数据把整页的标打没了。 */
+    @SuppressWarnings("unchecked")
+    private List<String> parseD0(String json) {
+        if (json == null || json.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
+        try {
+            return objectMapper.readValue(json, List.class);
+        } catch (Exception e) {
+            return Collections.emptyList();
+        }
+    }
+
+    /** 名称比对用：去掉全部空白，防「罗 牛 山」与「罗牛山」对不上。 */
+    private static String norm(String s) {
+        if (s == null) {
+            return null;
+        }
+        String v = s.replaceAll("\\s+", "");
+        return v.isEmpty() ? null : v;
     }
 
     // ---------- 杂项 ----------

@@ -17,11 +17,17 @@ import java.util.Map;
  *
  * <p>JSON 的键沿用 PRD §17 的 snake_case（配置是给人改的，与文档逐字对应比符合 Java 命名更要紧）。
  *
- * <p><strong>关于默认值的一处偏离</strong>：{@code sort_by} 默认取 {@link #SORT_EXECUTABILITY}
- * 而不是 PRD 附录写的 {@code weighted_score}。理由是 §6.2 的权重标定在
- * 「以 T 日涨停价为起算价」的旧口径上，而那条口径实盘无法成交；在可执行的子样本内
- * （隔夜跳空 ≤ {@code entry_gap_max}），连板数 / 成交额 / 首封时间的排序力都不成立。
- * {@code score} 仍按 §6.2 公式算并落库，等 B 口径重标定完再把默认值切回去。
+ * <p><strong>关于默认值的一处偏离</strong>：{@code sort_by} 默认取 {@link #SORT_SEAL_STRENGTH}
+ * （封单额÷成交额降序），而不是 PRD 附录写的 {@code weighted_score}。
+ *
+ * <p>依据是把 226 个样本按封单强度分五档、两种买入口径并排算出来的：以「T 日涨停价」
+ * 为买点（本策略的真实买点）时，平均收益与胜率沿封单强度<strong>严格单调递增</strong>
+ * （+1.71 / +3.55 / +4.37 / +5.40 / +7.56 %；胜率 53% → 87%）；
+ * 换成「D+1 开盘价」为买点则严格单调递减（+0.38 → −1.71 %）。
+ * 也就是说封单强度本身是正向因子，先前把它读成「买不进的折价」，
+ * 只在「D+1 才买」的前提下成立——而那不是本策略的执行方式。
+ *
+ * <p>{@code score} 仍按 §6.2 公式算并落库，仅作展示与追溯，不参与排序。
  */
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -30,6 +36,15 @@ public class WaveRiderConfig {
     public static final String POSITION_MODE_HIGHEST_BOARD = "highest_board";
 
     public static final String SORT_EXECUTABILITY = "executability";
+
+    /**
+     * 按封单额÷成交额<strong>降序</strong>排清单：封单越强越靠前。
+     *
+     * <p>这是默认值。依据见 {@link #sealLockRatio} 与类注释：在本策略真实的买点
+     * （T 日涨停价打板）上，封单强度是唯一跨档严格单调的正向因子。
+     */
+    public static final String SORT_SEAL_STRENGTH = "seal_strength";
+
     public static final String SORT_WEIGHTED_SCORE = "weighted_score";
     public static final String SORT_PRINCIPLE_COUNT = "principle_count";
 
@@ -116,22 +131,29 @@ public class WaveRiderConfig {
     private String filterConflictPolicy = CONFLICT_MARK;
 
     /**
-     * 封单额÷成交额的出池阈值（1.5 = 150%）。
+     * 封单额÷成交额的<strong>标记</strong>线（1.5 = 150%）。<b>不再用于剔除</b>。
      *
-     * <p>这是全库里唯一能在 T 日就事前预警「T+1 买不进」的指标，且关系强单调
-     * （&lt;15% → 8.4% 一字开盘 ｜ 50~150% → 28.6% ｜ 150~300% → 52.9% ｜ ≥300% → 87.0%）。
-     * 越过此线还留在清单里，只会让组合收益被一串「看着赚了其实买不到」的票抬高。
+     * <p>它标出的是「这票今天大概率一字，只能在集合竞价挂涨停价排队」——
+     * 实测 150~300% 档 94.1%、≥300% 档 100% 在 T 日开盘即封。
+     * 「排不排得到队」是<strong>执行</strong>问题，而封单强度本身在<strong>选股</strong>层面是正向的：
+     * 这两档的 A 口径收益 +5.40% / +7.56%、胜率 82.4% / 87.0%，是全样本里最好的两组。
+     * 因为「买不进」就把最好的一组剔掉，是把执行成本当成了选股依据。
      *
-     * <p>它衡量的是<strong>可执行性</strong>，不是收益预测——实测这两件事必须分开谈：
-     * 09-21 两只封单锁死票（华瓷股份 544%、南华生物 312%）次日双双一字开盘，
-     * 而在 T 日仅凭这两行数字就能把它们剔掉。
+     * <p>保留这个阈值只是为了标出「需排队」的样本（引擎写 {@code SEAL_LOCKED_n} 告警）。
      */
     @JsonProperty("seal_lock_ratio")
     private double sealLockRatio = 1.5;
 
     // ---------------------------------------------------------------- 排序与评分
+    /**
+     * 清单排序方式。{@link #SORT_SEAL_STRENGTH 封单强度降序}（默认）｜
+     * {@link #SORT_EXECUTABILITY 可执行性升序}。
+     *
+     * <p>{@code weighted_score} / {@code principle_count} 目前只有枚举、没有实现，
+     * 落到默认分支（引擎 {@code rowComparator}）。
+     */
     @JsonProperty("sort_by")
-    private String sortBy = SORT_EXECUTABILITY;
+    private String sortBy = SORT_SEAL_STRENGTH;
 
     /**
      * §6.2 评分权重。**当前处于冻结状态**：这套值是在旧口径（T 日涨停价买入）上标定的，
@@ -199,7 +221,8 @@ public class WaveRiderConfig {
             errs.add("entry_price_basis 只支持 " + ENTRY_BASIS_OPEN_NEXT
                     + "（T+1 开盘价）；以 T 日收盘价起算的收益实盘无法成交，仅可用于回测基准对比");
         }
-        if (!isOneOf(sortBy, SORT_EXECUTABILITY, SORT_WEIGHTED_SCORE, SORT_PRINCIPLE_COUNT)) {
+        if (!isOneOf(sortBy, SORT_EXECUTABILITY, SORT_SEAL_STRENGTH,
+                SORT_WEIGHTED_SCORE, SORT_PRINCIPLE_COUNT)) {
             errs.add("sort_by 取值非法：" + sortBy);
         }
         if (!isOneOf(filterConflictPolicy, CONFLICT_KEEP, CONFLICT_DROP, CONFLICT_MARK)) {

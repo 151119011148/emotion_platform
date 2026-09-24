@@ -1,6 +1,8 @@
 package com.emotion.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.emotion.entity.CandidateStock;
 import com.emotion.entity.CandidateT1;
 import com.emotion.mapper.CandidateStockMapper;
@@ -19,22 +21,28 @@ import java.util.Map;
 /**
  * 复盘指标：候选池在 D+1 的表现，以及权重回归要用的分组统计。
  *
- * <p><strong>这个类里所有收益都同时给两个口径，且默认口径是 B（可执行）</strong>：
+ * <p><strong>所有收益同时给两个口径</strong>，主口径是 A：
  * <ul>
- *   <li><b>A 口径</b> {@code close(D+1)/close(D) − 1}：候选池的定义是「D 日已涨停」，
- *       所以 D 日收盘价在实盘买不到。它描述的是信号强度，不是能拿到的钱。</li>
- *   <li><b>B 口径</b> {@code close(D+1)/open(D+1) − 1}：以 D+1 开盘价起算，
- *       这是唯一可成交的基准。</li>
+ *   <li><b>A 口径（主）</b> {@code close(D+1)/close(D) − 1}：起算价是 D 日收盘价，
+ *       也就是 D 日的涨停价。本策略是<strong>打板</strong>策略，买点本来就在 D 日的
+ *       涨停板上，所以这才是它真实的收益口径——前提是当天排到了队。</li>
+ *   <li><b>B 口径（对照）</b> {@code close(D+1)/open(D+1) − 1}：以 D+1 开盘价起算。
+ *       对应「D 日没打上板、改成 D+1 开盘再接」的备选打法。</li>
  * </ul>
- * 两者实测差得极远（同一批 226 个样本：A +3.36% / B −0.20%），差在隔夜跳空里。
- * 界面上如果只摆 A 口径，会得到一个系统性乐观的结论——这正是 PRD v1.4 要修的那个坑。
+ * 两者实测差得极远（同一批 226 个样本：A +3.36% / B −0.20%），差全在隔夜跳空里。
  *
- * <p>另外单列 {@code gapBuckets}：隔夜跳空的分布。它是「买不买得到」的画像，
- * 而且用 B 口径算出的收益对跳空高度高度敏感（跳空越小越划算），
- * 所以这个分档比任何单因子 IC 都更能解释组合表现。
+ * <p><strong>两个口径必须并排看，单看任何一个都会得到系统性偏差</strong>：只摆 A 会乐观
+ * （它假设每个板都排到了队），只摆 B 会悲观（它假设你每次都放弃打板、改在次日开盘追高）。
+ * 两个数之间的距离，就是「排到队」这件事值多少钱。
+ *
+ * <p>{@code gapBuckets} 单列隔夜跳空分布：它是「D+1 还追不追」的画像，
+ * 也是 B 口径亏损的主要来源。{@code bySealBucket} 按封单强度分档，
+ * 是「封单越强、A 口径越赚」在页面上的直接证据。
  */
 @Service
 public class WaveRiderReviewService {
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private final CandidateStockMapper candidateMapper;
     private final CandidateT1Mapper t1Mapper;
@@ -85,6 +93,7 @@ public class WaveRiderReviewService {
         out.put("buyable", stats(filterByGap(usable, cfg.getEntryGapMax(), true)));
         out.put("tooHighOpen", stats(filterByGap(usable, cfg.getEntryGapMax(), false)));
         out.put("gapBuckets", gapBuckets(usable));
+        out.put("bySealBucket", sealBuckets(usable, candIndex));
         out.put("byPrinciple", groupBy(usable, candIndex, true));
         out.put("byNodeType", groupBy(usable, candIndex, false));
         return out;
@@ -102,6 +111,7 @@ public class WaveRiderReviewService {
         double sumB = 0;
         double sumGap = 0;
         int gapN = 0;
+        int winA = 0;
         int winB = 0;
         int lossB = 0;
         double sumWinB = 0;
@@ -112,6 +122,9 @@ public class WaveRiderReviewService {
             }
             double a = r.getT1ChangePct().doubleValue();
             sumA += a;
+            if (a > 0) {
+                winA++;
+            }
             if (r.getGapPct() != null) {
                 sumGap += r.getGapPct().doubleValue();
                 gapN++;
@@ -130,6 +143,7 @@ public class WaveRiderReviewService {
         }
         m.put("promoteRate", pct2(promoted * 100.0 / rows.size()));
         m.put("avgChangeA", pct2(sumA / rows.size()));
+        m.put("winRateA", pct2(winA * 100.0 / rows.size()));
         m.put("avgChangeB", pct2(sumB / rows.size()));
         m.put("winRateB", pct2(winB * 100.0 / rows.size()));
         m.put("avgGap", gapN == 0 ? null : pct2(sumGap / gapN));
@@ -150,6 +164,44 @@ public class WaveRiderReviewService {
             return null;
         }
         return (t1 / gap - 1) * 100;
+    }
+
+    /**
+     * 按封单额÷成交额分五档复盘。这是「封单越强、A 口径越赚」在页面上的直接证据，
+     * 也正是把封单锁死从「剔除」改成「置顶」的依据本身。
+     */
+    private List<Map<String, Object>> sealBuckets(List<CandidateT1> rows,
+                                                  Map<String, CandidateStock> index) {
+        double[][] edges = {{0, 0.15}, {0.15, 0.5}, {0.5, 1.5}, {1.5, 3.0}, {3.0, Double.MAX_VALUE}};
+        String[] labels = {"< 15%", "15 ~ 50%", "50 ~ 150%", "150 ~ 300%", "≥ 300%（多为一字）"};
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (int i = 0; i < edges.length; i++) {
+            List<CandidateT1> sub = new ArrayList<>();
+            for (CandidateT1 r : rows) {
+                Double sr = sealRatioOf(r, index);
+                if (sr != null && sr >= edges[i][0] && sr < edges[i][1]) {
+                    sub.add(r);
+                }
+            }
+            Map<String, Object> m = new LinkedHashMap<>(stats(sub));
+            m.put("label", labels[i]);
+            out.add(m);
+        }
+        return out;
+    }
+
+    /** 封单比存在候选行的 filterDetailJson 里；取不到就是 null，不猜。 */
+    private Double sealRatioOf(CandidateT1 r, Map<String, CandidateStock> index) {
+        CandidateStock c = index.get(r.getTradeDate() + "|" + r.getCode());
+        if (c == null || c.getFilterDetailJson() == null) {
+            return null;
+        }
+        try {
+            JsonNode n = JSON.readTree(c.getFilterDetailJson()).get("seal_ratio");
+            return n == null || n.isNull() ? null : n.asDouble();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private List<CandidateT1> filterByGap(List<CandidateT1> rows, double max, boolean within) {

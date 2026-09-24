@@ -4,14 +4,23 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.Collections;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
 import com.emotion.entity.MarketStock;
+import com.emotion.mapper.MarketStockMapper;
 
 /**
  * 一字断魂刀打标口径（{@link TiantiService#isDuanDao}）与封板形态分档（{@link TiantiService#sealForm}）。
@@ -174,5 +183,83 @@ class TiantiServiceTest {
         assertEquals("尾盘板", TiantiService.sealForm(143001, 0));
         assertEquals("一字(回头2)", TiantiService.sealForm(92000, 2));
         assertNull(TiantiService.sealForm(null, 0));
+    }
+
+    // ---------------- duanDaoCodes：候选池那侧的问法 ----------------
+
+    private static final LocalDate TODAY = LocalDate.of(2026, 9, 24);
+    private static final LocalDate PREV = LocalDate.of(2026, 9, 23);
+
+    /** 今日池里的一只票：判据要看的就是首封时间与炸板次数。 */
+    private static MarketStock todayRow(String code, int firstSeal, int breakCount) {
+        MarketStock s = hit();
+        s.setCode(code);
+        s.setFirstSealTime(firstSeal);
+        s.setBreakCount(breakCount);
+        return s;
+    }
+
+    /** 昨日池里的一只「锁死」票——isPrevLocked 只看代码与锁死，其余字段用不到。 */
+    private static MarketStock prevRowLocked(String code) {
+        MarketStock s = new MarketStock();
+        s.setCode(code);
+        s.setPool(MarketStock.POOL_LIMIT_UP);
+        s.setFirstSealTime(92500);
+        s.setBreakCount(0);
+        return s;
+    }
+
+    /**
+     * 造一个只连 mapper 的 service。
+     *
+     * <p>selectList 连调两次：第一次是当日池、第二次是昨日池——这正是 duanDaoCodes 的顺序，
+     * 所以下面的 fixture 刻意做成不对称的（今日池 3 只、昨日池同码但锁死情况不同），
+     * 万一以后有人把两次查询调换，用例会红而不是悄悄放过。
+     */
+    private static TiantiService serviceOn(List<MarketStock> todayPool, List<MarketStock> prevPool,
+                                          boolean prevExists) {
+        MarketStockMapper mapper = mock(MarketStockMapper.class);
+        if (prevExists) {
+            when(mapper.prevDetailDate(TODAY)).thenReturn(PREV);
+            when(mapper.selectList(any())).thenReturn(todayPool, prevPool);
+        } else {
+            when(mapper.prevDetailDate(TODAY)).thenReturn(null);
+            when(mapper.selectList(any())).thenReturn(todayPool);
+        }
+        return new TiantiService(null, mapper, null, null, null, null);
+    }
+
+    @Test
+    void duanDaoCodes_onlyReturnsAskedAndLockedCodes() {
+        // A 今日锁死 → 命中；B 今日 10:00 才封（不算锁死）→ 不命中；C 锁死但没问它 → 不该出现
+        List<MarketStock> today = java.util.Arrays.asList(todayRow("A", 92500, 0),
+                todayRow("B", 100000, 0), todayRow("C", 92500, 0));
+        List<MarketStock> prev = java.util.Arrays.asList(prevRowLocked("A"),
+                prevRowLocked("B"), prevRowLocked("C"));
+
+        Set<String> hit = serviceOn(today, prev, true)
+                .duanDaoCodes(TODAY, java.util.Arrays.asList("A", "B"));
+
+        assertEquals(new HashSet<>(java.util.Arrays.asList("A")), hit);
+    }
+
+    @Test
+    void duanDaoCodes_prevPoolMissing_returnsEmpty() {
+        // 取不到昨日池（库里最早那天）时判不了「连续锁死」——宁可漏标，也不要凭空标一个假信号
+        List<MarketStock> today = java.util.Arrays.asList(todayRow("A", 92500, 0));
+        assertTrue(serviceOn(today, Collections.<MarketStock>emptyList(), true)
+                .duanDaoCodes(TODAY, java.util.Arrays.asList("A")).isEmpty());
+    }
+
+    @Test
+    void duanDaoCodes_emptyInput_doesNotTouchDb() {
+        MarketStockMapper mapper = mock(MarketStockMapper.class);
+        TiantiService svc = new TiantiService(null, mapper, null, null, null, null);
+
+        assertTrue(svc.duanDaoCodes(TODAY, Collections.<String>emptyList()).isEmpty());
+        assertTrue(svc.duanDaoCodes(null, java.util.Arrays.asList("A")).isEmpty());
+
+        verify(mapper, never()).selectList(any());
+        verify(mapper, never()).prevDetailDate(any());
     }
 }

@@ -15,9 +15,14 @@ import com.emotion.mapper.CandidateStockMapper;
 import com.emotion.mapper.CandidateT1Mapper;
 import com.emotion.mapper.NodeDetectMapper;
 import com.emotion.mapper.StrategyRunMapper;
+import com.emotion.service.NodeService;
+import com.emotion.service.TiantiService;
+import com.emotion.service.TopicHeatService;
 import com.emotion.service.WaveRiderConfigService;
 import com.emotion.service.WaveRiderReviewService;
 import com.emotion.vo.ApiResponse;
+import com.emotion.vo.NodeTagVO;
+import com.emotion.vo.ThemeTagVO;
 import com.emotion.waverider.WaveRiderConfig;
 import com.emotion.waverider.WaveRiderEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -37,6 +42,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * WaveRider 的对外接口（PRD §11.1）。
@@ -59,6 +65,9 @@ public class WaveRiderController {
     private final StrategyRunMapper runMapper;
     private final CandidateStockMapper candidateMapper;
     private final CandidateT1Mapper t1Mapper;
+    private final NodeService nodeService;
+    private final TopicHeatService topicHeatService;
+    private final TiantiService tiantiService;
     private final ObjectMapper objectMapper;
 
     public WaveRiderController(WaveRiderConfigService configService,
@@ -68,6 +77,9 @@ public class WaveRiderController {
                                StrategyRunMapper runMapper,
                                CandidateStockMapper candidateMapper,
                                CandidateT1Mapper t1Mapper,
+                               NodeService nodeService,
+                               TopicHeatService topicHeatService,
+                               TiantiService tiantiService,
                                ObjectMapper objectMapper) {
         this.configService = configService;
         this.engine = engine;
@@ -76,6 +88,9 @@ public class WaveRiderController {
         this.runMapper = runMapper;
         this.candidateMapper = candidateMapper;
         this.t1Mapper = t1Mapper;
+        this.nodeService = nodeService;
+        this.topicHeatService = topicHeatService;
+        this.tiantiService = tiantiService;
         this.objectMapper = objectMapper;
     }
 
@@ -202,6 +217,9 @@ public class WaveRiderController {
         out.put("candidateCount", o.getCandidates().size());
         out.put("funnel", o.getFunnel());
         out.put("warnings", o.getWarnings());
+        nodeService.tagCandidates(o.getCandidates(), userId(auth));
+        topicHeatService.tagTdxThemes(o.getCandidates(), date);
+        tagAlerts(o.getCandidates(), date);
         out.put("candidates", o.getCandidates());
         return ApiResponse.ok(out);
     }
@@ -262,6 +280,11 @@ public class WaveRiderController {
         }
 
         List<CandidateStock> rows = candidateMapper.listOfDay(strategyId, target);
+        // 读侧打「来自节点追踪」的标（瞬态）：节点事件会被复算改写，落库等于把当时的判断冻在候选行上
+        nodeService.tagCandidates(rows, userId(auth));
+        // 题材同上：读侧现算。题材成分与当日热度都会变，落库等于把「今天谁最热」冻住
+        topicHeatService.tagTdxThemes(rows, target);
+        tagAlerts(rows, target);
         out.put("candidates", rows);
         out.put("count", rows.size());
 
@@ -383,6 +406,9 @@ public class WaveRiderController {
                 ? latestCandidateDate(strategyId) : parse(date, LocalDate.now());
         List<CandidateStock> rows = target == null ? new ArrayList<CandidateStock>()
                 : candidateMapper.listOfDay(strategyId, target);
+        nodeService.tagCandidates(rows, userId(auth));
+        topicHeatService.tagTdxThemes(rows, target);
+        tagAlerts(rows, target);
         boolean csv = "csv".equalsIgnoreCase(format);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("tradeDate", target);
@@ -394,6 +420,33 @@ public class WaveRiderController {
 
     // ------------------------------------------------------------------ 内部
 
+    /**
+     * 打「执行预警」（瞬态，不落库）：候选里哪些是一字断魂刀。
+     *
+     * <p>判据不在这里写第二份——天梯页与候选池各留一套的话，改了一处、另一处会静默不一致，
+     * 而「静默不一致」正是这类规则最难查的坏法。这里只负责把结果贴到行上。
+     */
+    private void tagAlerts(List<CandidateStock> rows, LocalDate date) {
+        if (rows == null || rows.isEmpty() || date == null) {
+            return;
+        }
+        List<String> codes = new ArrayList<>(rows.size());
+        for (CandidateStock c : rows) {
+            codes.add(c.getCode());
+        }
+        Set<String> duanDao = tiantiService.duanDaoCodes(date, codes);
+        for (CandidateStock c : rows) {
+            if (duanDao.contains(c.getCode())) {
+                c.setAlertFlag(CandidateStock.ALERT_DUANDAO);
+            }
+        }
+    }
+
+    /** 预警代码 → 中文。前端另有一份同文案（它只拿到代码），改这里记得一起改。 */
+    private String alertText(CandidateStock c) {
+        return CandidateStock.ALERT_DUANDAO.equals(c.getAlertFlag()) ? "一字断魂刀" : "";
+    }
+
     private String toMd(LocalDate date, List<CandidateStock> rows) {
         StringBuilder sb = new StringBuilder();
         sb.append("# WaveRider 候选池 · ").append(date).append("\n\n");
@@ -403,17 +456,19 @@ public class WaveRiderController {
             sb.append("当日无命中候选。\n");
             return sb.toString();
         }
-        sb.append("| # | 代码 | 名称 | 连板 | 题材 | 身位 | 得分 | 建议仓位 | 风险 |\n");
-        sb.append("|---|---|---|---|---|---|---|---|---|\n");
+        sb.append("| # | 代码 | 名称 | 连板 | 节点 | 题材（通达信） | 身位 | 得分 | 建议仓位 | 警示 | 风险 |\n");
+        sb.append("|---|---|---|---|---|---|---|---|---|---|---|\n");
         for (CandidateStock c : rows) {
             sb.append("| ").append(c.getRankNo())
                     .append(" | ").append(c.getCode())
                     .append(" | ").append(c.getName())
                     .append(" | ").append(c.getBoard() == null ? "-" : c.getBoard())
-                    .append(" | ").append(nz(c.getTopic()))
+                    .append(" | ").append(nodeTagText(c))
+                    .append(" | ").append(themeText(c, 3))
                     .append(" | ").append(nz(c.getPositionType()))
                     .append(" | ").append(c.getScore() == null ? "-" : c.getScore())
                     .append(" | ").append(positionText(c))
+                    .append(" | ").append(nz(alertText(c)))
                     .append(" | ").append(nz(c.getRiskFlag()))
                     .append(" |\n");
         }
@@ -422,18 +477,87 @@ public class WaveRiderController {
 
     private String toCsv(LocalDate date, List<CandidateStock> rows) {
         StringBuilder sb = new StringBuilder();
-        sb.append("trade_date,rank,code,name,board,topic,position_type,score,suggest_position,risk_flag\n");
+        sb.append("trade_date,rank,code,name,board,node_tag,tdx_themes,position_type,"
+                + "score,suggest_position,alert_flag,risk_flag\n");
         for (CandidateStock c : rows) {
             sb.append(date).append(',').append(c.getRankNo())
                     .append(',').append(c.getCode())
                     .append(',').append(quote(c.getName()))
                     .append(',').append(c.getBoard() == null ? "" : c.getBoard())
-                    .append(',').append(quote(c.getTopic()))
+                    .append(',').append(quote(nodeTagText(c)))
+                    .append(',').append(quote(themeText(c, 0)))
                     .append(',').append(quote(c.getPositionType()))
                     .append(',').append(c.getScore() == null ? "" : c.getScore())
                     .append(',').append(c.getSuggestPosition() == null ? "" : c.getSuggestPosition())
+                    // csv 给机器码、md 给中文：与同一行的 risk_flag 保持一致（那一列也是码）
+                    .append(',').append(nz(c.getAlertFlag()))
                     .append(',').append(nz(c.getRiskFlag()))
                     .append('\n');
+        }
+        return sb.toString();
+    }
+
+    /** 三种角色在导出里的显示名。 */
+    private static final Map<String, String> NODE_KIND_LABEL = new LinkedHashMap<String, String>();
+    static {
+        NODE_KIND_LABEL.put(NodeTagVO.KIND_NODE_STOCK, "节点票");
+        NODE_KIND_LABEL.put(NodeTagVO.KIND_ANCHOR, "锚定龙头");
+        NODE_KIND_LABEL.put(NodeTagVO.KIND_D0_CAND, "D0候选");
+    }
+
+    /**
+     * 导出列用的紧凑文本：同类角色合并计数，如 {@code 节点票×2/D0候选}。空则空串。
+     *
+     * <p>导出是拿去对着行情软件下单的，一列里塞不下每条事件的 D0 与状态，
+     * 所以这里只留「是什么角色」，来源细节在页面上看。
+     */
+    private String nodeTagText(CandidateStock c) {
+        if (c.getNodeTags() == null || c.getNodeTags().isEmpty()) {
+            return "";
+        }
+        Map<String, Integer> byKind = new LinkedHashMap<String, Integer>();
+        for (NodeTagVO t : c.getNodeTags()) {
+            String label = NODE_KIND_LABEL.containsKey(t.getKind())
+                    ? NODE_KIND_LABEL.get(t.getKind()) : t.getKind();
+            byKind.merge(label, 1, Integer::sum);
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, Integer> e : byKind.entrySet()) {
+            if (sb.length() > 0) {
+                sb.append("/");
+            }
+            sb.append(e.getKey());
+            if (e.getValue() > 1) {
+                sb.append("×").append(e.getValue());
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 导出列用的题材文本：通达信概念板块，按当日该题材涨停家数降序。
+     *
+     * <p>{@code max <= 0} 表示不截断：md 是给人看的表格，截 3 个（列宽有限）；
+     * csv 是拿去透视的，截断等于丢数据。
+     *
+     * <p>没有题材记录时退回行业。宁可显示一个口径不同的标签，
+     * 也不要空着让人以为「这只票没题材」。
+     */
+    private String themeText(CandidateStock c, int max) {
+        List<ThemeTagVO> ts = c.getTdxThemes();
+        if (ts == null || ts.isEmpty()) {
+            return nz(c.getTopic());
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < ts.size(); i++) {
+            if (max > 0 && i >= max) {
+                sb.append(" 等").append(ts.size()).append("个");
+                break;
+            }
+            if (i > 0) {
+                sb.append("、");
+            }
+            sb.append(ts.get(i).getName());
         }
         return sb.toString();
     }

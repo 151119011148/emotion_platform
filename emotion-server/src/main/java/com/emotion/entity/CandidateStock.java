@@ -1,13 +1,17 @@
 package com.emotion.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.emotion.vo.NodeTagVO;
+import com.emotion.vo.ThemeTagVO;
 import lombok.Data;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 候选池明细：某个策略某个交易日选出来的票，逐只一行。
@@ -33,6 +37,9 @@ public class CandidateStock {
     public static final String RISK_HIGH_TURNOVER = "HIGH_TURNOVER";
     /** 龙头断板。 */
     public static final String RISK_DRAGON_DEAD = "DRAGON_DEAD";
+
+    /** 一字断魂刀：执行预警，不是风险扣分——见 {@link #alertFlag}。 */
+    public static final String ALERT_DUANDAO = "DUANDAO";
 
     @TableId(type = IdType.AUTO)
     private Long id;
@@ -62,4 +69,39 @@ public class CandidateStock {
     /** 过滤器逐条判定明细，界面「点开追溯」看到的就是它。 */
     private String filterDetailJson;
     private LocalDateTime createdAt;
+
+    /**
+     * 来自「节点追踪」的标记（<strong>瞬态，不落库</strong>）：这只票在 {@code t_node_event} 里是什么角色。
+     *
+     * <p>与上面的身位无关——这里不看连板数，只看它有没有出现在某条节点事件里。
+     * 一只票可能命中多条事件，也可能同时是甲事件的节点票、乙事件的 D0 候选，所以是列表。
+     * 由 {@code NodeService.tagCandidates} 在读侧填充。
+     */
+    @TableField(exist = false)
+    private List<NodeTagVO> nodeTags;
+
+    /**
+     * 所属的「通达信题材」（<strong>瞬态，不落库</strong>），按当日该题材的涨停家数降序。
+     *
+     * <p>与 {@code topic} 不是一个东西：{@code topic} 是引擎分组的行业（东财口径、截断 4 字），
+     * 这里是给人看的题材标签（{@code t_stock_concept}，通达信概念板块）。
+     * 一只票常在 5~11 个题材里，由 {@code TopicHeatService.tagTdxThemes} 按热度排好序。
+     */
+    @TableField(exist = false)
+    private List<ThemeTagVO> tdxThemes;
+
+    /**
+     * 执行预警（<strong>瞬态，不落库</strong>）：这只票大概率<b>买不进</b>，而不是「不该选」。
+     *
+     * <p>与 {@link #riskFlag} 分开是刻意的：{@code riskFlag} 说「这只票质地有风险」，
+     * 并参与仓位折算（引擎 {@code build()} 里带 riskFlag 的仓位折半）；这里只说执行难度，
+     * <b>不扣分、不折仓、不参与排序</b>。封单锁死恰恰是本策略最强的正向因子——封成比五档
+     * 打板收益 +1.71 → +7.56%——把它当风险去降权就南辕北辙了。
+     *
+     * <p>当前唯一取值 {@link #ALERT_DUANDAO}，由 {@code TiantiService.duanDaoCodes} 在读侧算。
+     * 不落库的理由同 {@code nodeTags}：它依赖「今日 + 昨日」两天池子，明天再看今天的候选仍算得出，
+     * 落库反而多一份可能与判据漂移的旧快照。
+     */
+    @TableField(exist = false)
+    private String alertFlag;
 }
