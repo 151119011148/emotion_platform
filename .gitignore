@@ -1,5 +1,6 @@
 # 构建产物与依赖
 target/
+out/
 node_modules/
 dist/
 # 部署产物（scripts/deploy/build.sh 归集出来的一坨，只在本地/CI 上临时存在）
