@@ -63,6 +63,8 @@
         <el-radio-group v-model="days" size="small" @change="loadCurve">
           <el-radio-button :value="20">近20日</el-radio-button>
           <el-radio-button :value="60">近60日</el-radio-button>
+          <el-radio-button :value="120">近120日</el-radio-button>
+          <el-radio-button :value="500">全部</el-radio-button>
         </el-radio-group>
         <el-button v-if="selectedDate" size="small" link type="primary" @click="backToToday">
           回到当日
@@ -94,7 +96,8 @@ import StageAdvice from '../components/StageAdvice.vue'
 
 // 本地日期，不能用 toISOString()：那是 UTC，00:00–07:59 会算成前一天
 const todayStr = new Date().toLocaleDateString('en-CA')
-const days = ref(20)
+// 取 60 天但默认只展示最近 20 天：拉多少＝可移范围，只拉 20 的话窗口＝整个数据集，−/≪ 又变成死键
+const days = ref(60)
 const headRecord = ref(null)
 /** 点击曲线点选中的日期；null=默认跟随当日（回落最近记录）。 */
 const selectedDate = ref(null)

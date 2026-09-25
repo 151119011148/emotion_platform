@@ -21,23 +21,34 @@ const ZOOM_RATIO = 0.75
 const PAN_RATIO = 0.25
 /** 最少可见点数：再少就只剩三五个点，曲线形状读不出来了 */
 export const MIN_SPAN = 6
+/** 没动过按钮时默认可见的交易日数。留头寸，−/≪ 才不是永远点不动的死键 */
+export const DEFAULT_SPAN = 20
 
 /**
  * @param {() => number} countOf 当前数据点总数（要写成函数，好跟着 props 变）
+ * @param {number} initialSpan 未操作时的默认窗口宽度
  */
-export function useCurveZoom(countOf) {
-  // full=true 表示「看全部」：换数据长度时（近20日→全部）窗口应跟着铺满，
-  // 而不是把旧的 [0,19] 钳成新数据的前 20 天，那会让人以为缩放没生效
-  const win = reactive({ full: true, i0: 0, i1: -1, n: -1 })
+export function useCurveZoom(countOf, initialSpan = DEFAULT_SPAN) {
+  // touched=false 表示还没人动过按钮：窗口恒锚在最新一天、只取最近 initialSpan 个。
+  // 不叫 full 是因为「默认」已不等于「全部」；换数据长度时（近20日→全部）跟着重算，
+  // 而不是把旧下标钳成新数据的前若干天，那会让人以为缩放没生效。
+  const win = reactive({ touched: false, i0: 0, i1: -1, n: -1 })
 
   function total() {
     return Math.max(0, countOf() | 0)
   }
 
-  /** 可见闭区间 [a,b]；未缩放或无数据时为 [0, n-1] */
+  /** 默认窗口：最近 initialSpan 个点，数据本身不够长就全给 */
+  function defaultRange() {
+    const n = total()
+    if (!n) return [0, -1]
+    return [n - Math.min(initialSpan, n), n - 1]
+  }
+
+  /** 可见闭区间 [a,b]；无数据时为 [0,-1] */
   function range() {
     const n = total()
-    if (win.full) return [0, n - 1]
+    if (!win.touched) return defaultRange()
     let [a, b] = [win.i0, win.i1]
     // 数据条数变了（仪表盘切近20日/近60日/全部）：保住窗口宽度、改锚在最新一天。
     // 直接沿用旧下标会落到另一段日期上——缩放在 9 月，换完范围却变成看 7 月。
@@ -57,7 +68,8 @@ export function useCurveZoom(countOf) {
     win.i0 = a
     win.i1 = b
     win.n = n
-    win.full = a === 0 && b === n - 1
+    const [d0, d1] = defaultRange()
+    win.touched = !(a === d0 && b === d1)
   }
 
   /** 以窗口中点为锚放到 ns 宽，越界时整体往回收，保证宽度不变 */
