@@ -16,6 +16,8 @@ application-local.yml
 # 系统垃圾
 .DS_Store
 *.log
+# 滚动出来的 .log.gz 躲得过 *.log，直接把 logback 的输出目录整个排掉
+logs/
 
 # 整份内容是把 root 口令写死再 sed 进 application.yml；它自己的存在就是泄露。
 mysql-reinstall.sh
