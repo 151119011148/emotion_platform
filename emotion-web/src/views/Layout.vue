@@ -8,47 +8,47 @@
         text-color="#8899a6" active-text-color="#3b82f6">
         <el-menu-item index="/dashboard">
           <el-icon><DataAnalysis /></el-icon>
-          <span>仪表盘</span>
+          <span>D1 仪表盘</span>
         </el-menu-item>
         <el-menu-item index="/review">
           <el-icon><EditPen /></el-icon>
-          <span>每日复盘</span>
+          <span>D2 每日复盘</span>
         </el-menu-item>
         <el-menu-item index="/market">
           <el-icon><DataLine /></el-icon>
-          <span>大盘生态</span>
+          <span>D3 大盘生态</span>
         </el-menu-item>
         <el-menu-item index="/mainline">
           <el-icon><Aim /></el-icon>
-          <span>日内核心</span>
+          <span>D4 日内核心</span>
         </el-menu-item>
         <el-menu-item index="/tianti">
           <el-icon><Histogram /></el-icon>
-          <span>连板生态</span>
+          <span>D5 连板生态</span>
         </el-menu-item>
         <el-menu-item index="/shouban">
           <el-icon><Wallet /></el-icon>
-          <span>首板生态</span>
+          <span>D6 首板生态</span>
         </el-menu-item>
         <el-menu-item index="/higheco">
           <el-icon><Odometer /></el-icon>
-          <span>高位生态</span>
+          <span>D7 高位生态</span>
         </el-menu-item>
         <el-menu-item index="/nodes">
           <el-icon><Connection /></el-icon>
-          <span>节点追踪</span>
+          <span>D8 节点追踪</span>
         </el-menu-item>
         <el-menu-item index="/waverider">
           <el-icon><TrendCharts /></el-icon>
-          <span>策略选股</span>
+          <span>D9 策略选股</span>
         </el-menu-item>
         <el-menu-item index="/positions">
           <el-icon><Tickets /></el-icon>
-          <span>持仓与台账</span>
+          <span>D10 持仓与台账</span>
         </el-menu-item>
         <el-menu-item index="/scoring">
           <el-icon><SetUp /></el-icon>
-          <span>打分配置</span>
+          <span>D11 打分配置</span>
         </el-menu-item>
       </el-menu>
       <div class="sidebar-footer">
