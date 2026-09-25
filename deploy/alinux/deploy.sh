@@ -21,6 +21,9 @@
 #   ALINUX_SSH_USER    登录用户名              默认 root
 #   ALINUX_SSH_PASS    登录密码                【必填】
 #   ALINUX_MYSQL_PASS  服务器 MySQL root 密码   可选；为空则尝试从服务器 /root/mysql_pass.txt 读
+#   SKIP_DB_INIT       可选；=1 跳过③整库导入，只发代码。init_full.sql 对每张表都
+#                      DROP TABLE IF EXISTS，跑了就把线上数据退回那份 dump 的快照时刻，
+#                      纯代码/无表结构变更的发版应该设这个（④仍会解析 MySQL 密码）
 #
 # 用法
 #   ALINUX_SSH_PASS='你的密码' bash deploy/alinux/deploy.sh
@@ -112,17 +115,22 @@ build() {
 }
 
 # ---------------- ③ 服务器 MySQL 建库 + 导入 ----------------
-server_mysql_init() {
-  log "③ [3/6] 初始化 MySQL 并导入 deploy/init_full.sql"
-
+# 单独拆出来：④ 生成 application-local.yml 也要用这个密码，跳过导入时同样得先拿到
+resolve_mysql_pass() {
   # 初次环境已经按约定把 MySQL root 密码存到 /root/mysql_pass.txt（MYSQL_ROOT_PASS=xxx）
   if [ -z "$MYSQL_PASS" ]; then
     local got
     got="$(remote_capture "grep -o 'PASS=[a-f0-9]*' /root/mysql_pass.txt 2>/dev/null | head -n1")"
-    MYSQL_PASS="${got#PASS=}"
+    # expect 的 stdout 带前导换行等噪声，不能用 ${got#PASS=} 剥前缀（会连噪声一起当密码）
+    MYSQL_PASS="$(printf '%s\n' "$got" | grep -o 'PASS=[a-f0-9]*' | head -n1 | cut -d= -f2)"
   fi
   [ -n "$MYSQL_PASS" ] || die "无法取得服务器 MySQL root 密码，请用 ALINUX_MYSQL_PASS 传入"
+}
 
+server_mysql_init() {
+  log "③ [3/6] 初始化 MySQL 并导入 deploy/init_full.sql"
+
+  resolve_mysql_pass
   upload "$INIT_SQL" "/tmp/init_full.sql"
   remote_exec "mysql -uroot -p\"$MYSQL_PASS\" < /tmp/init_full.sql && echo IMPORT_OK"
   remote_exec "mysql -uroot -p\"$MYSQL_PASS\" -N -e 'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=\"emotion_dashboard\";'"
@@ -132,7 +140,9 @@ server_mysql_init() {
 server_deploy_backend() {
   log "④ [4/6] 部署后端 jar + 生产配置 + systemd 服务"
 
-  upload "$TMP_DIR/emotion-server.jar" "$REMOTE_APP/emotion-server.jar"
+  # 先传 .new 再换名：就地覆盖会把运行中进程仍在加载的那个 jar 截断重写，
+  # mv 是换指针，旧进程继续用原 inode，重启后才切到新包
+  upload "$TMP_DIR/emotion-server.jar" "$REMOTE_APP/emotion-server.jar.new"
 
   # 用模板 + 真实值生成生产 application-local.yml（覆盖 DB 密码 + 新 JWT 密钥）
   local jwt
@@ -143,7 +153,8 @@ server_deploy_backend() {
   upload "$TMP_DIR/application-local.yml" "$REMOTE_APP/application-local.yml"
 
   upload "$CONFIG_DIR/emotion-server.service" "/tmp/emotion-server.service"
-  remote_exec "cp /tmp/emotion-server.service /etc/systemd/system/emotion-server.service &&
+  remote_exec "mv -f $REMOTE_APP/emotion-server.jar.new $REMOTE_APP/emotion-server.jar &&
+               cp /tmp/emotion-server.service /etc/systemd/system/emotion-server.service &&
                systemctl daemon-reload &&
                systemctl enable emotion-server &&
                systemctl restart emotion-server &&
@@ -197,16 +208,21 @@ health_check() {
 main() {
   log "开始部署 emotion → http://$SERVER_IP/ ($SSH_USER)"
   command -v expect >/dev/null || die "本机缺 expect，请安装（macOS: brew install expect）"
-  [ -f "$INIT_SQL" ] || die "缺少数据库初始化脚本：$INIT_SQL"
 
   build                 # ① 构建（jar + dist 都进 $TMP_DIR）
 
   log "② [2/6] 准备远端目录"
   remote_exec "mkdir -p $REMOTE_APP $REMOTE_WEB"
 
-  server_mysql_init     # ③ 建库导入
+  if [ "${SKIP_DB_INIT:-0}" = "1" ]; then
+    log "③ [3/6] 跳过整库导入（SKIP_DB_INIT=1），服务器沿用现有数据"
+    resolve_mysql_pass      # ④ 写 application-local.yml 仍需要
+  else
+    [ -f "$INIT_SQL" ] || die "缺少数据库初始化脚本：$INIT_SQL"
+    server_mysql_init
+  fi
   server_deploy_backend # ④ 后端 + systemd
-  server_deploy_frontend# ⑤ 前端 + nginx
+  server_deploy_frontend # ⑤ 前端 + nginx
   health_check          # ⑥ 健康检查
 
   log "部署完成 ✔  浏览器打开 http://$SERVER_IP/"

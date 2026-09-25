@@ -24,7 +24,9 @@ set lf   [lindex $argv 3]
 set rf   [lindex $argv 4]
 
 log_user 0
-spawn scp -r -o StrictHostKeyChecking=accept-new -o ConnectTimeout=25 "$lf" $user@$host:"$rf"
+# 引号必须包住整个 user@host:path：Tcl 只在词的开头识别引号，写在中间会原样传给 scp，
+# 而新版 scp 默认走 SFTP（不经远端 shell），多出来的引号会让远端路径变成一个不存在的文件。
+spawn scp -r -o StrictHostKeyChecking=accept-new -o ConnectTimeout=25 "$lf" "$user@$host:$rf"
 
 expect {
     -re {([Pp]assword):}    { send -- "$pass\r"; exp_continue }
