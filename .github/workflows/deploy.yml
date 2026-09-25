@@ -16,6 +16,13 @@ name: deploy
 #   · alinux 脚本依赖 expect（密码 SSH 驱动），runner 上现装。
 #   · deploy.sh 内部会 ①本机构建 ②上传 ③建库导入 ④起后端 ⑤配前端 ⑥健康检查（幂等可重跑）。
 #   · 每次部署会自动生成全新 JWT 签名密钥并上传，线上用户发版后需重新登录（属预期行为）。
+#
+# 关于 SKIP_DB_INIT：仓库里的 deploy/init_full.sql 是**本地库**某天中午的快照，
+# 对每张表都 DROP TABLE IF EXISTS。不设这个开关，push 到 main 就等于把线上数据
+# 退回那份快照——服务器自己 nightly daily_market_pull / waverider_daily_scan 攒的
+# 数据会一起没掉。所以发版一律只发代码。
+# 确实要重建整库时（换新机、或主动回滚到快照）到服务器上手动跑：
+#   mysql -uroot -p"$(grep -o 'PASS=[^ ]*' /root/mysql_pass.txt | cut -d= -f2)" < /tmp/init_full.sql
 # ============================================================================
 on:
   push:
@@ -31,6 +38,7 @@ jobs:
       ALINUX_SSH_USER:   ${{ secrets.ALINUX_SSH_USER }}
       ALINUX_SSH_PASS:   ${{ secrets.ALINUX_SSH_PASS }}
       ALINUX_MYSQL_PASS: ${{ secrets.ALINUX_MYSQL_PASS }}
+      SKIP_DB_INIT:      '1'
 
     steps:
       - uses: actions/checkout@v4
