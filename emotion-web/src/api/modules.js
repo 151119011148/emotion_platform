@@ -62,6 +62,8 @@ export const nodeApi = {
  */
 export const prdApi = {
   tianti: (date) => api.get('/tianti', { params: { date }, timeout: 25000, skipErrorToast: true }),
+  // 连板高度曲线：日期区间内每天最高连板高度及对应个股
+  heightRange: (start, end) => api.get('/tianti/height-range', { params: { start, end }, skipErrorToast: true }),
   shouban: (date) => api.get('/shouban', { params: { date }, timeout: 25000, skipErrorToast: true }),
   mainline: (date) => api.get('/mainline', { params: { date }, timeout: 25000, skipErrorToast: true }),
   // 双轨 v0.2：雷达区「升级到主线区」写接口（落 t_mainline_mark）

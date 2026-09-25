@@ -1,6 +1,6 @@
 <template>
   <section class="dim-curve">
-    <div class="curve-head">
+    <div v-if="!hideHeader" class="curve-head">
       <h3>{{ name }}分走势 <span class="sub">近 {{ rows.length }} 个交易日 · 空档=未评</span></h3>
       <span class="legend">
         <i class="lg" style="background: #dc2626"></i>高潮
@@ -11,7 +11,7 @@
     </div>
     <el-empty v-if="!rows.length" description="近 90 天还没有打分记录（五维打分上线前的日子没有分）" :image-size="60" />
     <div v-else ref="chartRef" class="canvas"></div>
-    <p class="hint">点图上任意一天＝把上面那个日期切到那天，下方各块随日期刷新（一天一次请求）。</p>
+    <p v-if="!hideHeader" class="hint">点图上任意一天＝把上面那个日期切到那天，下方各块随日期刷新（一天一次请求）。</p>
   </section>
 </template>
 
@@ -35,7 +35,9 @@ const props = defineProps({
   /** 当前查看的那天，高亮给出来，否则点和页面对不上 */
   selected: { type: String, default: '' },
   /** 维度名，用于标题与 tooltip，如「大盘生态」 */
-  name: { type: String, default: '维度' }
+  name: { type: String, default: '维度' },
+  /** 隐藏头部（标题+图例），用于嵌入折叠块时避免重复 */
+  hideHeader: { type: Boolean, default: false }
 })
 const emit = defineEmits(['select'])
 

@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -146,6 +147,191 @@ public class TiantiService {
         }
         vo.setLevels(levels);
         return vo;
+    }
+
+    /**
+     * 连板高度曲线：区间内<b>每天一个点</b>，y=当日最高板，并给出当天的动态破壁线。
+     *
+     * <p>SQL 是按 {@code consecutive = 当日最大值} 关联的，同一天最高板常有多只并列，会一天返回多行；
+     * 直接喂图会让 X 轴日期重复、折线在同一天来回跳，所以在这里按日收敛成一点。
+     *
+     * <p>名单给全、按代码升序，不截断：并列最高板的家数就是曲线的信息本身（前端 tooltip 可滚动，
+     * 最高板只剩 2 板的退潮日并列数十只也不裁）。排序是为了两次刷新名单顺序稳定。
+     */
+    public List<TiantiVO.HeightPoint> heightRange(LocalDate from, LocalDate to) {
+        Map<LocalDate, TiantiVO.HeightPoint> byDate = new LinkedHashMap<>();
+        for (MarketStockMapper.MaxBoardRow r : marketStockMapper.listMaxBoardRange(from, to)) {
+            TiantiVO.HeightPoint p = byDate.get(r.getTradeDate());
+            if (p == null) {
+                p = new TiantiVO.HeightPoint();
+                p.setTradeDate(r.getTradeDate());
+                p.setMaxHeight(r.getMaxHeight());
+                p.setStocks(new ArrayList<>());
+                byDate.put(r.getTradeDate(), p);
+            }
+            p.getStocks().add(new TiantiVO.HeightStock(r.getCode(), r.getName()));
+        }
+        List<TiantiVO.HeightPoint> out = new ArrayList<>(byDate.values());
+        for (TiantiVO.HeightPoint p : out) {
+            p.getStocks().sort(Comparator.comparing(TiantiVO.HeightStock::getCode,
+                    Comparator.nullsLast(String::compareTo)));
+            p.setStockCount(p.getStocks().size());
+        }
+        detectBreaks(out, buildRunStarts(marketStockMapper.listBoardSeries(from, to)));
+        return out;
+    }
+
+    /** 冰点/常态/强市三档兜底：混沌高 ≤2 要 4 板、3~4 要 5 板、≥5 要 6 板才算真破壁。 */
+    static int minAbsBreak(int chaosHigh) {
+        if (chaosHigh <= 2) {
+            return 4;
+        }
+        return chaosHigh <= 4 ? 5 : 6;
+    }
+
+    /**
+     * 高度曲线的两个独立事件轴：动态混沌<b>破壁</b> + 周期<b>换龙</b>。
+     *
+     * <p><b>破壁</b>：破壁线 = 混沌高 + 1，不焊死 5 板，也不用全窗口历史峰值。混沌期从旧龙断板
+     * 那天起算，混沌高初始取断板日当天的市场最高板（"混沌里出过 5 板活口，新龙就得 6 才破"）。
+     * 只有<b>启动日 ≥ 混沌起点的新龙</b>能抬高这条线或捅破它：伴生票反包踩出来的板高不算新天花板，
+     * 否则下一轮破壁会被顶到天上去。破壁之后进入周期态，在位龙继续加板（5→6→7）算同一次破壁。
+     *
+     * <p><b>换龙</b>：当天最高板股压过在册周期最高、且不是当前总龙头本人 → 周期归它。
+     * 这条<b>不看启动日</b>——深中华A(08-20 起板) 08-27 越过汉森的 5 板虽是伴生，周期确是它开的；
+     * 而海鸥 09-01 只到 7 板平深中华A 的高度，算反包不算换龙。换龙与破壁可以同一天同时成立。
+     *
+     * <p>并列最高板时标签取代码最小那只（tooltip 已经给了完整名单，标签只负责指个代表）。
+     *
+     * @param runStarts (日期, 代码) → 该轮连板启动日
+     */
+    static void detectBreaks(List<TiantiVO.HeightPoint> pts,
+                             Map<LocalDate, Map<String, LocalDate>> runStarts) {
+        if (pts.isEmpty()) {
+            return;
+        }
+        TiantiVO.HeightPoint first = pts.get(0);
+        boolean inChaos = true;
+        LocalDate chaosStart = first.getTradeDate();
+        int line = nz(first.getMaxHeight());
+        String dragon = null;
+        TiantiVO.HeightStock firstTop = topStock(first);
+        int cycleTop = nz(first.getMaxHeight());
+        String cycleLeader = firstTop == null ? null : firstTop.getCode();
+        String cycleLeaderName = firstTop == null ? null : firstTop.getName();
+        first.setCeiling(line);
+        first.setCycleTop(cycleTop);
+        first.setCycleLeader(cycleLeaderName);
+
+        for (int i = 1; i < pts.size(); i++) {
+            TiantiVO.HeightPoint p = pts.get(i);
+            int h = nz(p.getMaxHeight());
+            TiantiVO.HeightStock top = topStock(p);
+            String topCode = top == null ? null : top.getCode();
+
+            if (top != null && h > cycleTop && !topCode.equals(cycleLeader)) {
+                p.setIsLeader(Boolean.TRUE);
+                p.setLeaderStock(top);
+                cycleTop = h;
+                cycleLeader = topCode;
+                cycleLeaderName = top.getName();
+            } else {
+                cycleTop = Math.max(cycleTop, h);
+            }
+
+            if (inChaos) {
+                boolean fresh = top != null
+                        && isFreshRun(runStarts, p.getTradeDate(), topCode, chaosStart);
+                if (fresh && h > line) {
+                    if (h >= minAbsBreak(line)) {
+                        p.setIsBreak(Boolean.TRUE);
+                        p.setPrevHigh(line);
+                        p.setBreakStock(top);
+                        inChaos = false;
+                        dragon = topCode;
+                    } else {
+                        line = h;
+                    }
+                }
+            } else if (containsCode(p, dragon)) {
+                // 在位龙还在最高板名单上：守顶或继续加板，都算同一次破壁
+                line = Math.max(line, h);
+            } else {
+                inChaos = true;
+                chaosStart = p.getTradeDate();
+                line = h;
+            }
+            p.setCeiling(line);
+            p.setCycleTop(cycleTop);
+            p.setCycleLeader(cycleLeaderName);
+        }
+    }
+
+    private static TiantiVO.HeightStock topStock(TiantiVO.HeightPoint p) {
+        return p.getStocks() == null || p.getStocks().isEmpty() ? null : p.getStocks().get(0);
+    }
+
+    private static int nz(Integer v) {
+        return v == null ? 0 : v;
+    }
+
+    private static boolean containsCode(TiantiVO.HeightPoint p, String code) {
+        for (TiantiVO.HeightStock s : p.getStocks()) {
+            if (s.getCode().equals(code)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isFreshRun(Map<LocalDate, Map<String, LocalDate>> runStarts,
+                                      LocalDate date, String code, LocalDate chaosStart) {
+        Map<String, LocalDate> byCode = runStarts.get(date);
+        LocalDate start = byCode == null ? null : byCode.get(code);
+        // 窗口起点之前就在板的票，启动日查不到 → 一律当老面孔，宁可少报一次破壁
+        return start != null && !start.isBefore(chaosStart);
+    }
+
+    /**
+     * 逐票回走「连板数每天 +1 且交易日紧邻」的链条，反推每轮连板的启动日。
+     *
+     * <p>只用 {@code consecutive == 1} 那天当启动日不行：窗口 earliest 的那几天里，
+     * 已经在 3 板上的票永远等不到自己的 1 板记录，会被错认成新龙。
+     */
+    private static Map<LocalDate, Map<String, LocalDate>> buildRunStarts(
+            List<MarketStockMapper.BoardRow> rows) {
+        List<LocalDate> dates = new ArrayList<>();
+        Map<LocalDate, Integer> dateIdx = new HashMap<>();
+        Map<String, TreeMap<LocalDate, Integer>> byCode = new HashMap<>();
+        for (MarketStockMapper.BoardRow r : rows) {
+            if (!dateIdx.containsKey(r.getTradeDate())) {
+                dateIdx.put(r.getTradeDate(), dates.size());
+                dates.add(r.getTradeDate());
+            }
+            if (r.getConsecutive() == null) {
+                continue;
+            }
+            byCode.computeIfAbsent(r.getCode(), k -> new TreeMap<>())
+                    .put(r.getTradeDate(), r.getConsecutive());
+        }
+        Map<LocalDate, Map<String, LocalDate>> out = new HashMap<>();
+        for (Map.Entry<String, TreeMap<LocalDate, Integer>> e : byCode.entrySet()) {
+            LocalDate prevDate = null;
+            int prevBoard = 0;
+            LocalDate runStart = null;
+            for (Map.Entry<LocalDate, Integer> day : e.getValue().entrySet()) {
+                int board = day.getValue();
+                boolean chained = prevDate != null && board == prevBoard + 1
+                        && dateIdx.get(day.getKey()) == dateIdx.get(prevDate) + 1;
+                if (!chained) {
+                    runStart = day.getKey();
+                }
+                out.computeIfAbsent(day.getKey(), k -> new HashMap<>()).put(e.getKey(), runStart);
+                prevDate = day.getKey();
+                prevBoard = board;
+            }
+        }
+        return out;
     }
 
     private TiantiVO.Level level(int n, int h,

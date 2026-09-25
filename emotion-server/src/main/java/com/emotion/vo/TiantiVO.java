@@ -99,4 +99,37 @@ public class TiantiVO {
         private BigDecimal pullbackPct;
         private String pattern;
     }
+
+    /** 连板高度曲线上的一个点：某天一个，y=当日最高板，stocks=并列打到这个板高的个股。 */
+    @Data
+    public static class HeightPoint {
+        private LocalDate tradeDate;
+        private Integer maxHeight;
+        /** 并列最高板的完整家数，等于 stocks.size()。 */
+        private Integer stockCount;
+        private List<HeightStock> stocks;
+        /** 当天要捅破的那条线：混沌期=混沌高，周期内=在位龙板数。破壁线 = ceiling + 1。 */
+        private Integer ceiling;
+        /** 当天是否首次捅破混沌天花板。 */
+        private Boolean isBreak;
+        /** 被捅破的那个 chaosHigh，仅破壁日有值。 */
+        private Integer prevHigh;
+        /** 破壁股（新龙），仅破壁日有值。 */
+        private HeightStock breakStock;
+        /** 当天换龙：某票把市场最高板抬过在册总龙头的高度，周期归它（伴生票超高度也算）。 */
+        private Boolean isLeader;
+        /** 登龙的个股，仅换龙日有值。 */
+        private HeightStock leaderStock;
+        /** 截至当天的周期最高板。 */
+        private Integer cycleTop;
+        /** 截至当天的周期总龙头名字。 */
+        private String cycleLeader;
+    }
+
+    /** 高度曲线 tooltip 里的一只个股。 */
+    @Data
+    public static class HeightStock {
+        private final String code;
+        private final String name;
+    }
 }

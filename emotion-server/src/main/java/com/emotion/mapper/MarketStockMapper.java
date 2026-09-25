@@ -56,4 +56,51 @@ public interface MarketStockMapper extends BaseMapper<MarketStock> {
     @Select("SELECT DISTINCT trade_date FROM t_market_stock "
             + "WHERE trade_date <= #{to} AND trade_date >= #{from} ORDER BY trade_date")
     List<LocalDate> listDetailDatesBetween(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /**
+     * 日期区间内每天的最高连板高度及打到这个高度的个股（涨停池）。供连板高度曲线用，一条 SQL 出 N 天数据，
+     * 避免逐日调 snapshot 的 N 次往返。
+     *
+     * <p>一天<b>可能多行</b>：并列最高板是常态（最高板仅 2 板的那天能并列几十只），
+     * 按日收敛成曲线上的一个点在 {@link com.emotion.service.TiantiService#heightRange} 做。
+     */
+    @Select("SELECT t.trade_date AS tradeDate, t.consecutive AS maxHeight, t.code AS code, t.name AS name "
+            + "FROM t_market_stock t "
+            + "INNER JOIN (SELECT trade_date, MAX(consecutive) AS max_c "
+            + "  FROM t_market_stock WHERE pool='ZT' AND trade_date BETWEEN #{from} AND #{to} "
+            + "  GROUP BY trade_date) m ON t.trade_date = m.trade_date AND t.consecutive = m.max_c "
+            + "WHERE t.pool='ZT' AND t.trade_date BETWEEN #{from} AND #{to} "
+            + "ORDER BY t.trade_date")
+    List<MaxBoardRow> listMaxBoardRange(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /**
+     * 区间内<b>每一只</b>涨停个股的逐日连板数，用于反推「启动日」判伴生。
+     *
+     * <p>破壁要求新龙 {@code 启动日 > 旧龙断板日}，只看每日最高板的那份名单判不出来：
+     * 断板次日接棒创新高的往往是上一周期里就在场的伴生票（反包尾巴），不算破壁。
+     *
+     * <p>一天三个池 100~200 只、这里只取 ZT 池，90 日窗口约万行，调用方别传开区间。
+     */
+    @Select("SELECT trade_date AS tradeDate, code AS code, name AS name, consecutive AS consecutive "
+            + "FROM t_market_stock WHERE pool='ZT' AND trade_date BETWEEN #{from} AND #{to} "
+            + "ORDER BY trade_date, code")
+    List<BoardRow> listBoardSeries(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /** 逐票连板轨迹行：日期 / 代码 / 名称 / 当日连板数。 */
+    @lombok.Data
+    class BoardRow {
+        LocalDate tradeDate;
+        String code;
+        String name;
+        Integer consecutive;
+    }
+
+    /** 每日最高板行：日期 / 板高 / 代码 / 名称。 */
+    @lombok.Data
+    class MaxBoardRow {
+        LocalDate tradeDate;
+        Integer maxHeight;
+        String code;
+        String name;
+    }
 }

@@ -2,6 +2,7 @@ package com.emotion.controller;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
+import java.util.List;
 
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -51,6 +52,16 @@ public class PrdController {
     public ApiResponse<TiantiVO> tianti(Authentication auth,
                                         @RequestParam(required = false) String date) {
         return ApiResponse.ok(tiantiService.vo(userId(auth), parse(date)));
+    }
+
+    /**
+     * 连板高度曲线：日期区间内每天一个点，y=当日最高板，附并列最高板个股。
+     * 前端画"连板高度走势"用，一条 SQL 出 N 天数据，hover 看个股、破前高标点。
+     */
+    @GetMapping("/tianti/height-range")
+    public ApiResponse<List<TiantiVO.HeightPoint>> heightRange(@RequestParam String start,
+                                                               @RequestParam String end) {
+        return ApiResponse.ok(tiantiService.heightRange(parse(start), parse(end)));
     }
 
     /** 首板池：封住/炸板两表 + 1 进 2 晋级统计（PRD P3）。 */

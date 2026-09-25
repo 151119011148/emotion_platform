@@ -112,8 +112,19 @@
       </div>
     </section>
 
-    <!-- D3 分走势：点任意一天切日期 -->
-    <DimScoreCurve :rows="curveRows" :selected="date" name="连板生态" @select="date = $event" />
+    <!-- D3 连板生态分走势曲线：默认折叠 -->
+    <section class="block curve-block" :class="{ 'curve-collapsed': !curveOpen }">
+      <div class="block-head curve-head" @click="curveOpen = !curveOpen">
+        <h3>连板生态分走势 <span class="fold-tag">{{ curveOpen ? '收起 ▲' : '展开 ▼' }}</span></h3>
+        <span class="sub">近 {{ curveRows.length }} 个交易日 · 点任意一天切日期</span>
+      </div>
+      <div v-if="curveOpen">
+        <DimScoreCurve :rows="curveRows" :selected="date" name="连板生态" :hide-header="true" @select="date = $event" />
+      </div>
+    </section>
+
+    <!-- D3 连板高度曲线：默认展开，点任意一天切日期 -->
+    <BoardHeightCurve :rows="heightCurveRows" :selected="date" name="连板高度" @select="date = $event" />
 
     <div class="stat-grid" v-loading="loading">
       <div class="stat">
@@ -282,6 +293,7 @@ import { signed, fiveDimBandClassOf } from '../utils/scores'
 import { useTradingCalendar } from '../utils/tradingCalendar'
 import { useScoringStore } from '../stores/scoring'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
+import BoardHeightCurve from '../components/BoardHeightCurve.vue'
 import DimIntroTip from '../components/DimIntroTip.vue'
 
 const { disabledDate, cellClass, loadTradingDays } = useTradingCalendar()
@@ -302,6 +314,10 @@ const vo = ref(null)
 const LOOKBACK_DAYS = 90
 const CURVE_ROWS = 30
 const curveRows = ref([])
+// 连板高度曲线数据
+const heightCurveRows = ref([])
+// 连板生态分走势曲线默认折叠
+const curveOpen = ref(false)
 // 连板生态打分明细块默认折叠（与其他维度一致），可展开
 const scoreOpen = ref(false)
 // 人工总龙头：当前设定 + 选择弹层的暂存
@@ -566,6 +582,22 @@ async function load() {
       date: r.tradeDate,
       score: r.scoreBoard
     }))
+    // 连板高度曲线：同一时间窗口，取每日最高板及对应个股
+    const heightRes = await prdApi.heightRange(shiftDays(date.value, LOOKBACK_DAYS), date.value).catch(() => null)
+    heightCurveRows.value = ((heightRes && heightRes.data) || []).slice(-CURVE_ROWS).map((r) => ({
+      date: r.tradeDate,
+      maxHeight: r.maxHeight,
+      stockCount: r.stockCount,
+      stocks: r.stocks || [],
+      ceiling: r.ceiling,
+      isBreak: !!r.isBreak,
+      prevHigh: r.prevHigh,
+      breakStock: r.breakStock || null,
+      isLeader: !!r.isLeader,
+      leaderStock: r.leaderStock || null,
+      cycleTop: r.cycleTop,
+      cycleLeader: r.cycleLeader
+    }))
   } finally {
     loading.value = false
   }
@@ -624,6 +656,14 @@ watch(date, load)
 .score-head:hover .fold-tag { color: #ffd166; border-color: #ffd166; background: #2b3d52; }
 .score-head:active .fold-tag { transform: translateY(1px); background: #2f4258; }
 .score-block.score-collapsed .block-head { margin-bottom: 0; border-bottom: 1px dashed #33455a; }
+/* 连板生态分走势折叠块：不设背景，DimScoreCurve 自带 */
+.curve-block { padding: 0; margin-bottom: 20px; background: transparent; }
+.curve-head { cursor: pointer; user-select: none; border-radius: 8px 8px 0 0; transition: background .15s; margin-bottom: 0; padding: 14px 20px; background: #1a2332; }
+.curve-head:hover { background: rgba(255, 255, 255, .025); }
+.curve-head:hover h3 { color: #fff; }
+.curve-block.curve-collapsed .curve-head { border-radius: 8px; }
+.curve-block .curve-head .sub { font-size: 12px; color: #8899a6; margin-left: 10px; }
+.curve-block :deep(.dim-curve) { border-radius: 0 0 12px 12px; margin-bottom: 0; }
 .dim-score {
   font-size: 16px; font-weight: 700; color: #e1e8ed;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
