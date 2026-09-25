@@ -11,13 +11,26 @@
     </div>
     <el-empty v-if="!rows.length" description="近 90 天还没有打分记录（五维打分上线前的日子没有分）" :image-size="60" />
     <div v-else ref="chartRef" class="canvas"></div>
+    <AxisZoomBar
+      v-if="zoomable"
+      :can-zoom-in="zoom.canZoomIn()"
+      :can-zoom-out="zoom.canZoomOut()"
+      :can-pan-left="zoom.canPanLeft()"
+      :can-pan-right="zoom.canPanRight()"
+      @zoom-in="run(zoom.zoomIn)"
+      @zoom-out="run(zoom.zoomOut)"
+      @pan-left="run(() => zoom.pan(-1))"
+      @pan-right="run(() => zoom.pan(1))"
+    />
     <p v-if="!hideHeader" class="hint">点图上任意一天＝把上面那个日期切到那天，下方各块随日期刷新（一天一次请求）。</p>
   </section>
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
+import AxisZoomBar from './AxisZoomBar.vue'
+import { useCurveZoom, MIN_SPAN } from '../utils/curveZoom'
 import { fiveDimBandOf } from '../utils/scores'
 import { STAGE_COLORS, NO_STAGE_COLOR } from '../utils/stages'
 
@@ -44,6 +57,15 @@ const emit = defineEmits(['select'])
 const chartRef = ref(null)
 let chart = null
 
+const zoom = useCurveZoom(() => (props.rows || []).length)
+const zoomable = computed(() => (props.rows || []).length > MIN_SPAN)
+
+/** 改窗口 → 重画（option 整份重建，可见切片由 zoom 决定） */
+function run(fn) {
+  fn()
+  renderChart()
+}
+
 // 背景四带铺色与首页温度曲线同一套色值（markArea 不带 name：带了会被渲染成带内堆叠乱文）
 const BANDS = [
   { label: '高潮', min: 85, max: 100, fill: 'rgba(245,34,45,0.09)' },
@@ -56,6 +78,7 @@ const BANDS = [
  * 自适应纵轴：与首页温度曲线 yRange 同一套规则 —— 数据落点上下各留 4 分空白，
  * 且 40/60 两条带下界强制留在视野内（min(vMin,38)/max(vMax,62) 兜底），
  * 放大波动不能丢位置参照，40/60/85 阈值线也才有得画。
+ * 传进来的是可见窗口切片，所以按 + 是真放大（纵轴跟着摊开），不是只压横轴。
  */
 function axisRange(rows) {
   const vals = rows
@@ -72,17 +95,20 @@ function axisRange(rows) {
 }
 
 function buildOption() {
-  const rows = props.rows || []
-  if (!rows.length) return {}
+  const all = props.rows || []
+  if (!all.length) return {}
+  // 按 ±/≪≫ 的窗口切片：轴类目、系列数据、tooltip 与点击换算的下标一律走同一份可见数组
+  const rows = zoom.visible(all)
   const dates = rows.map((r) => r.date)
   const range = axisRange(rows)
 
   // 日变化：今日-昨日分差；前后任一未评=该日无柱（与首页温度曲线同一套柱样式）
-  const deltas = rows.map((r, i) => {
-    const prev = i === 0 ? null : rows[i - 1].score
+  // 先按全量算再切片，否则缩放后最左那天的柱子会因为邻居被切掉而凭空消失
+  const deltas = zoom.visible(all.map((r, i) => {
+    const prev = i === 0 ? null : all[i - 1].score
     if (r.score == null || prev == null) return null
     return +(Number(r.score) - Number(prev)).toFixed(1)
-  })
+  }))
   const dMax = Math.max(...deltas.filter((v) => v != null).map(Math.abs), 5)
 
   // 只画与可见纵轴重叠的带（自适应缩放后越界的带不铺，避免一大片无意义底色）。
@@ -110,9 +136,10 @@ function buildOption() {
       lineStyle: { color: '#2d3748', type: 'dashed', width: 1 }
     }))
 
-  // 最新一条已评分的横线：一眼看出当前分落在哪；样式对齐首页"当前温度"金线
+  // 最新一条已评分的横线：一眼看出当前分落在哪；样式对齐首页"当前温度"金线。
+  // 取全量最后一天而不是窗口最后一天：缩放看历史时"最新"仍然指当下。
   let latest = null
-  rows.forEach((r) => { if (r.score != null) latest = Number(r.score) })
+  all.forEach((r) => { if (r.score != null) latest = Number(r.score) })
   const latestLine = latest != null
     ? [{
         yAxis: latest,
@@ -286,13 +313,20 @@ function buildOption() {
 }
 
 function renderChart() {
-  if (!chartRef.value) return
-  if (!chart) {
+  if (!chartRef.value) {
+    chart?.dispose()
+    chart = null
+    return
+  }
+  // canvas 会被 v-if/v-else 销毁重建，缓存的实例还指着已脱离文档的旧节点；
+  // 只判 !chart 会让重画静默落到旧节点上，曲线就永久空白
+  if (!chart || chart.getDom() !== chartRef.value) {
+    chart?.dispose()
     chart = echarts.init(chartRef.value)
     // 只监听画布、不再单独挂 series click：点挂在点上等于把"点一天换一天"这条主交互退化成碰运气。
     // 坐标换算按 grid 定位（加了日变化柱后 seriesIndex 0 变成了柱系列，按 series 找会找错）
     chart.getZr().on('click', (e) => {
-      const rows = props.rows || []
+      const rows = zoom.visible(props.rows || [])
       const pos = [e.offsetX, e.offsetY]
       if (!rows.length || !chart.containPixel({ gridIndex: 0 }, pos)) return
       const i = Math.round(chart.convertFromPixel({ gridIndex: 0 }, pos)[0])

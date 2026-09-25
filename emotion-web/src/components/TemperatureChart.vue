@@ -1,10 +1,25 @@
 <template>
-  <div ref="chartRef" class="temperature-chart"></div>
+  <div class="temp-chart">
+    <div ref="chartRef" class="temperature-chart"></div>
+    <AxisZoomBar
+      v-if="zoomable"
+      :can-zoom-in="zoom.canZoomIn()"
+      :can-zoom-out="zoom.canZoomOut()"
+      :can-pan-left="zoom.canPanLeft()"
+      :can-pan-right="zoom.canPanRight()"
+      @zoom-in="run(zoom.zoomIn)"
+      @zoom-out="run(zoom.zoomOut)"
+      @pan-left="run(() => zoom.pan(-1))"
+      @pan-right="run(() => zoom.pan(1))"
+    />
+  </div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
+import AxisZoomBar from './AxisZoomBar.vue'
+import { useCurveZoom, MIN_SPAN } from '../utils/curveZoom'
 import { STAGE_COLORS, NO_STAGE_COLOR } from '../utils/stages'
 
 const props = defineProps({
@@ -17,6 +32,25 @@ const emit = defineEmits(['select-date'])
 
 const chartRef = ref(null)
 let chart = null
+
+const zoom = useCurveZoom(() => (props.data?.dates || []).length)
+const zoomable = computed(() => (props.data?.dates || []).length > MIN_SPAN)
+
+/** 改窗口 → 重画 */
+function run(fn) {
+  fn()
+  renderChart()
+}
+
+// 曲线一份数据是七条等长并行数组，缩放窗口必须一起切，否则下标就不再指同一天
+const SERIES_KEYS = ['dates', 'temperatures', 'stages', 'isoDates', 'summaries', 'dims', 'labels']
+
+/** @returns 只含可见窗口的数据视图（与 props.data 同结构，缺的键给空数组） */
+function visibleView() {
+  const out = {}
+  for (const k of SERIES_KEYS) out[k] = zoom.visible(props.data?.[k])
+  return out
+}
 
 /**
  * 动态 y 量程：把坐标压到数据附近，日间波动才看得见（0-100 全量程会把 ±8° 的波动压成 8% 画布高度）。
@@ -45,17 +79,20 @@ function valueToOffset(v, yMin, yMax) {
 }
 
 function buildOption() {
-  const { dates, temperatures, stages, summaries, dims, labels } = props.data
-  if (!dates?.length) return {}
+  const src = props.data || {}
+  if (!src.dates?.length) return {}
+  // ±/≪≫ 的可见窗口：轴类目和其余并行数组一起切，下标才还在同一天
+  const { dates, temperatures, stages, summaries, dims, labels, isoDates } = visibleView()
 
   const { yMin, yMax } = yRange(temperatures)
 
   // 日变化：今日-昨日温度差；前后任一为空=该日无柱。正=升温(暖橙) 负=降温(冷蓝)
-  const deltas = (temperatures || []).map((t, i) => {
-    const prev = i === 0 ? null : temperatures[i - 1]
+  // 先按全量算再切片，否则缩放后最左那天的柱子会因为邻居被切掉而凭空消失
+  const deltas = zoom.visible((src.temperatures || []).map((t, i) => {
+    const prev = i === 0 ? null : src.temperatures[i - 1]
     if (t == null || prev == null) return null
     return +(t - prev).toFixed(1)
-  })
+  }))
   const dMax = Math.max(...deltas.filter((v) => v != null).map(Math.abs), 5)
 
   // 阈值背景带：随动态量程裁剪，超界的带（如数据从未到 85）自然消失
@@ -80,18 +117,18 @@ function buildOption() {
     { offset: 1, color: 'rgba(24,144,255,0.04)' }
   ].sort((a, b) => a.offset - b.offset)
 
-  // 当前值 = 最后一个有读数的点，画一条金色横线
+  // 当前值 = 最后一个有读数的点，画一条金色横线。取全量而不是窗口：缩放看历史时"当前"仍指当下
   let current = null
-  for (let i = temperatures.length - 1; i >= 0; i--) {
-    if (temperatures[i] != null) {
-      current = temperatures[i]
+  for (let i = (src.temperatures || []).length - 1; i >= 0; i--) {
+    if (src.temperatures[i] != null) {
+      current = src.temperatures[i]
       break
     }
   }
 
   // 选中日期高亮：在 x 轴上定位，画金色竖线 + 该点放大描边。
-  // dates 是 MM/dd 展示串，匹配/回传一律走 isoDates（ISO），否则 /records/date/09/10 会 404
-  const isoDates = props.data?.isoDates || []
+  // dates 是 MM/dd 展示串，匹配/回传一律走 isoDates（ISO），否则 /records/date/09/10 会 404。
+  // isoDates 已跟着窗口切过：选中的那天不在视野里时这里就是 -1，不画竖线而不是画错位置。
   const activeIdx = props.activeDate && isoDates.length ? isoDates.indexOf(props.activeDate) : -1
 
   // 逐点着色而不是 visualMap：阶段是"哪个点属于哪个阶段"，
@@ -123,6 +160,8 @@ function buildOption() {
         ]
         if (bar && bar.value != null) lines.push(`日变化: <b>${bar.value > 0 ? '+' : ''}${bar.value}</b>`)
         if (!stages[i] && dims && dims[i] != null) lines.push(`仅 ${dims[i]} 维参与打分，不出阶段`)
+        else if (stages[i] && dims && dims[i] != null && dims[i] < 5)
+          lines.push(`仅 ${dims[i]}/5 维参与打分（缺维已剔除，读数偏窄）`)
         if (summaries && summaries[i]) lines.push(`<span style="color:#8899a6">${summaries[i]}</span>`)
         return lines.join('<br/>')
       }
@@ -258,9 +297,10 @@ function renderChart() {
   chart.on('click', (params) => {
     if (params?.componentType !== 'series') return
     const idx = params.dataIndex
-    if (idx == null || idx < 0 || idx >= (props.data?.dates || []).length) return
-    // 回传 ISO 日期（isoDates 与 dates 同序），dashboard 才能直接按日期取记录
-    emit('select-date', (props.data?.isoDates && props.data.isoDates[idx]) || props.data.dates[idx])
+    const view = visibleView()
+    if (idx == null || idx < 0 || idx >= view.dates.length) return
+    // 回传 ISO 日期（isoDates 与 dates 同序、同窗口），dashboard 才能直接按日期取记录
+    emit('select-date', view.isoDates[idx] || view.dates[idx])
   })
   chart.setOption(buildOption(), true)
 }
@@ -280,6 +320,9 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.temp-chart {
+  width: 100%;
+}
 .temperature-chart {
   width: 100%;
   height: 320px;

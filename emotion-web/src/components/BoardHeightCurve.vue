@@ -5,12 +5,25 @@
     </div>
     <el-empty v-if="!rows.length" description="暂无连板高度数据" :image-size="60" />
     <div v-else ref="chartRef" class="canvas"></div>
+    <AxisZoomBar
+      v-if="zoomable"
+      :can-zoom-in="zoom.canZoomIn()"
+      :can-zoom-out="zoom.canZoomOut()"
+      :can-pan-left="zoom.canPanLeft()"
+      :can-pan-right="zoom.canPanRight()"
+      @zoom-in="run(zoom.zoomIn)"
+      @zoom-out="run(zoom.zoomOut)"
+      @pan-left="run(() => zoom.pan(-1))"
+      @pan-right="run(() => zoom.pan(1))"
+    />
   </section>
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
+import AxisZoomBar from './AxisZoomBar.vue'
+import { useCurveZoom, MIN_SPAN } from '../utils/curveZoom'
 
 /**
  * 连板高度曲线：X 轴日期，Y 轴最高板高度，灰虚线阶梯 = 当天要捅破的动态破壁线（混沌高+1）。
@@ -35,6 +48,15 @@ const emit = defineEmits(['select'])
 
 const chartRef = ref(null)
 let chart = null
+
+const zoom = useCurveZoom(() => (props.rows || []).length)
+const zoomable = computed(() => (props.rows || []).length > MIN_SPAN)
+
+/** 改窗口 → 重画：buildOption 按新窗口重新切片，Y 轴量程跟着可见数据走 */
+function run(fn) {
+  fn()
+  renderChart()
+}
 
 /**
  * 破壁点直接读后端判定：判伴生要逐票启动日，曲线这份聚合数据里没有。
@@ -70,8 +92,10 @@ function readLeaders(rows) {
 }
 
 function buildOption() {
-  const rows = props.rows || []
-  if (!rows.length) return {}
+  const all = props.rows || []
+  if (!all.length) return {}
+  // 按 ±/≪≫ 的窗口切片：轴类目、系列数据、标记坐标、tooltip 与点击换算的下标必须是同一份数组
+  const rows = zoom.visible(all)
   const dates = rows.map((r) => r.date)
   const heights = rows.map((r) => r.maxHeight)
   const ceilings = rows.map((r) => (r.ceiling == null ? null : r.ceiling))
@@ -80,9 +104,10 @@ function buildOption() {
   const breakByIndex = new Map(breaks.map((b) => [b.index, b]))
   const leaderByIndex = new Map(leaders.map((l) => [l.index, l]))
 
-  // Y 轴范围：最低从 2 开始（连板至少 2 板），最高留一点空白
+  // Y 轴按可见窗口算：只收窄横轴、纵轴还按全量，放大就只是把线压扁，等于没放大。
+  // 破壁线（ceiling）也计入上界——它是从更早的高点继承来的，可能高于当天最高板。
   const yMin = 2
-  const yMax = Math.max(...heights, 5) + 1
+  const yMax = Math.max(...heights, ...ceilings.filter((v) => v != null), 5) + 1
 
   // 首次破壁的点用红色星标标记
   const breakPoints = breaks.map((b) => ({
@@ -118,14 +143,29 @@ function buildOption() {
     }
   }))
 
-  // 选中日期竖线
+  // 选中日期竖线：必须两点式。单点 {xAxis} 的端点贴着网格底，标签会被钳进 X 轴刻度行
+  // （选最左一天时实测 y182-194，与首个刻度标签正面重叠）；锚到 yMax 后恒在 y157-167。
   const selIdx = props.selected ? dates.indexOf(props.selected) : -1
   const selectedLine = selIdx >= 0
-    ? [{
-        xAxis: dates[selIdx],
-        lineStyle: { color: '#fbbf24', width: 1.5, type: 'dashed' },
-        label: { formatter: dates[selIdx].slice(5), position: 'insideEndTop', color: '#fbbf24', fontSize: 10 }
-      }]
+    ? [[
+        { xAxis: dates[selIdx], yAxis: yMin },
+        {
+          xAxis: dates[selIdx],
+          yAxis: yMax,
+          // rotate:0 关掉沿竖线旋转标签的默认行为，否则日期竖排压住刻度；
+          // 底色：标签落在网格内、压在琥珀色面积上，不铺底读不出来
+          label: {
+            formatter: dates[selIdx].slice(5),
+            position: 'insideEndTop',
+            rotate: 0,
+            color: '#fbbf24',
+            fontSize: 10,
+            backgroundColor: '#1a2332',
+            padding: [2, 3],
+            borderRadius: 3
+          }
+        }
+      ]]
     : []
 
   return {
@@ -214,7 +254,7 @@ function buildOption() {
         markLine: selectedLine.length ? {
           silent: true,
           symbol: 'none',
-          lineStyle: { type: 'dashed', color: '#2d3748' },
+          lineStyle: { type: 'dashed', color: '#fbbf24', width: 1.5 },
           data: selectedLine
         } : undefined
       },
@@ -246,7 +286,7 @@ function renderChart() {
     chart?.dispose()
     chart = echarts.init(chartRef.value)
     chart.getZr().on('click', (e) => {
-      const rows = props.rows || []
+      const rows = zoom.visible(props.rows || [])
       const pos = [e.offsetX, e.offsetY]
       if (!rows.length || !chart.containPixel({ gridIndex: 0 }, pos)) return
       const i = Math.round(chart.convertFromPixel({ gridIndex: 0 }, pos)[0])
