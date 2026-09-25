@@ -7,17 +7,20 @@
 #     因此上层可以 `out=$(expect ssh_run.exp ...)` 拿到命令返回值。
 #   · 可选把输出同时追加写到一个本地日志文件（供部署留痕）。
 #
-# 用法（5 个位置参数）：
-#   expect ssh_run.exp <HOST> <USER> <PASS> <REMOTE_CMD> <LOG_FILE>
+# 用法（5-6 个位置参数）：
+#   expect ssh_run.exp <HOST> <USER> <PASS> <REMOTE_CMD> <LOG_FILE> [TIMEOUT]
 #     HOST       远程服务器 IP
 #     USER       登录用户名（一般 root）
 #     PASS       登录密码
 #     REMOTE_CMD 远端要执行的命令字符串
 #     LOG_FILE   远端输出追加写到此文件；传空串 "" 表示不落盘（此时只有 stdout）
+#     TIMEOUT    可选，expect 等待秒数（默认 300）；长任务(如数据回补)请传更大值
 #
 # 退出码：成功返回远端命令退出码；连接/认证失败返回 1。
 # ============================================================================
-set timeout 300
+set t [lindex $argv 5]
+if {$t eq ""} { set t 300 }
+set timeout $t
 
 set host [lindex $argv 0]
 set user [lindex $argv 1]
