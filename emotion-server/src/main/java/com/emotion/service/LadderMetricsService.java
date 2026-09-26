@@ -142,12 +142,18 @@ public class LadderMetricsService {
         if (h != null) {
             out.put("max_height", BigDecimal.valueOf(h));
         }
+        // 名义天梯（复盘文档回填）只有连板名，没有行情字段：这类日子能出高度/家数，
+        // 但一切"数不出来就是 0"的叶子都是假读数，必须继续缺席。
+        boolean quoted = hasQuote(todayZT);
 
         // Counters from today's ZT pool: absent (unscored) when the fetcher returned nothing,
         // never a fake 0 -- 0 would read as "we looked and there were truly no boards today".
         if (!todayZT.isEmpty()) {
             putScalar(out, "board_total_count", sumBoards(todayByBoard, 2));
-            putScalar(out, "first_count", todayByBoard.getOrDefault(1, 0));
+            // 文档里从不列首板名，所以未抓明细的日子 first_count=0 是"没数"而不是"零家首板"。
+            if (quoted) {
+                putScalar(out, "first_count", todayByBoard.getOrDefault(1, 0));
+            }
         }
 
         Map<String, Integer> prevCodeBoard = codeToBoard(prevZT);
@@ -165,12 +171,12 @@ public class LadderMetricsService {
         // 四层（时间截面 PRD v2.0：全部 T-1→T；低位层种子=昨日首板，1进2已并入 jr/prem/big_low）
         if (h != null && h >= 2) {
             computeLayers(out, h, todayByBoard, prevByBoard, prevCodeBoard, lossCodes,
-                    tiers, prevZT, todayZtCodes, perf);
+                    tiers, prevZT, todayZtCodes, perf, !todayZT.isEmpty());
         }
 
         // ---- D4 首板生态（纯 T 日）：只看今天新诞生的首板与首板炸板 ----
-        if (!todayZT.isEmpty()) {
-            buildFirstBoardDayMetrics(out, todayZT, todayZB, !prevZT.isEmpty(), prevCodeBoard);
+        if (quoted) {
+            buildFirstBoardDayMetrics(out, todayZT, todayZB, hasQuote(prevZT), prevCodeBoard);
         }
 
         // 炸板质量（家数封板率 / 回封率）用三池家数现算。
@@ -204,13 +210,16 @@ public class LadderMetricsService {
      * 四层指标（时间截面 PRD v2.0）。层级一律以<b>今日板高</b>命名：
      * 低位=今2板(种子昨1板)、中位=今3-4板、中高/极高动态划界。
      * jr 用今 b 板/昨 b-1 板（本就是今日视角）；prem/big 的种子是昨 b 板，归 layerIndex(b+1,h)。
+     *
+     * <p>{@code ladderSeen}=当日涨停池明细存在。复盘文档里有整月不填连板格子的交易日，
+     * 那种日子昨日池有名字、今日池一个都没有，晋级率会算成 0%——那是"没数"，不是"全军覆没"。
      */
     private static void computeLayers(Map<String, BigDecimal> out, int h,
                                       Map<Integer, Integer> todayByBoard, Map<Integer, Integer> prevByBoard,
                                       Map<String, Integer> prevCodeBoard, Set<String> lossCodes,
                                       List<MarketMetrics.TierPremium> tiers,
                                       List<MarketStock> prevZT, Set<String> todayZtCodes,
-                                      Map<String, BigDecimal> perf) {
+                                      Map<String, BigDecimal> perf, boolean ladderSeen) {
         String[] keyPrefix = {"jr", "prem", "big"};
         // 三层（2026-09-13 简化，对齐高位生态 D5 边界）：low=2板 / mid=3-4板 / high=5板+
         String[] layerSuffix = {"low", "mid", "high"};
@@ -220,6 +229,9 @@ public class LadderMetricsService {
             int[] count = new int[3];
             switch (p) {
                 case "jr":
+                    if (!ladderSeen) {
+                        break; // 今日没有天梯明细：晋级率未评，不是 0%
+                    }
                     for (int b = 2; b <= h; b++) {
                         int li = layerIndex(b, h);
                         num[li] += nz(todayByBoard.get(b));
@@ -235,8 +247,10 @@ public class LadderMetricsService {
                     }
                     break;
                 case "big":
-                    if (prevCodeBoard.isEmpty()) {
-                        break; // no yesterday pool: cannot attribute big-loss to layers; keys stay absent
+                    // 大面按"昨日池逐只归属"，昨池必须是真抓的完整池：名义天梯既无首板也无行情，
+                    // 放进去只会让每层都"0 家大面"，把缺数读成满分。
+                    if (prevCodeBoard.isEmpty() || !hasQuote(prevZT)) {
+                        break;
                     }
                     int[] seedBase = new int[3];
                     for (MarketStock prev : prevZT) {
@@ -365,6 +379,19 @@ public class LadderMetricsService {
             }
         }
         return m;
+    }
+
+    /**
+     * 这批明细是真抓出来的、还是复盘文档回填的名义天梯。名义行只有 code/名称/板高，
+     * 行情字段全空，用 change_pct 非空做判据（与 {@code MarketStockMapper.countPools} 的闸同一把钥匙）。
+     */
+    static boolean hasQuote(List<MarketStock> rows) {
+        for (MarketStock s : rows) {
+            if (s.getChangePct() != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Set<String> lossCodes(List<MarketStock> loss) {

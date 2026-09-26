@@ -32,10 +32,14 @@ public interface MarketStockMapper extends BaseMapper<MarketStock> {
      *
      * <p>IFNULL 不是装饰：那天一行明细都没有时 SUM 返回 NULL，直接映射进 int 会得到 0 还是抛异常
      * 取决于驱动，而"没有明细"必须是 {@link com.emotion.market.PoolCounts#isEmpty()} 说出来的话。
+     *
+     * <p>{@code change_pct IS NOT NULL} 是把"名义天梯"那批行挡在统计外的闸：那些行只有名称+板高
+     * （从复盘文档的二板…八板列回填，只补到 2026-08-03 之前），既没有当日行情也没有炸板池。
+     * 放它们进分子，炸板家数恒为 0，那一天就被读成 100% 封板率——缺数得继续按缺数走。
      */
     @Select("SELECT IFNULL(SUM(pool='ZT'),0) AS zt_count, IFNULL(SUM(pool='ZB'),0) AS zb_count, "
             + "IFNULL(SUM(pool='ZT' AND IFNULL(break_count,0)>0),0) AS reseal_count "
-            + "FROM t_market_stock WHERE trade_date=#{date}")
+            + "FROM t_market_stock WHERE trade_date=#{date} AND change_pct IS NOT NULL")
     PoolCounts countPools(@Param("date") LocalDate date);
 
     /**

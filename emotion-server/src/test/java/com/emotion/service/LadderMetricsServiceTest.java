@@ -36,6 +36,17 @@ class LadderMetricsServiceTest {
         s.setCode(code);
         s.setConsecutive(board);
         s.setPool(MarketStock.POOL_LIMIT_UP);
+        // 真抓出来的涨停池必带涨跌幅；没有它=复盘文档回填的名义天梯（见下面 nominal()）。
+        s.setChangePct(new BigDecimal("10.00"));
+        return s;
+    }
+
+    /** 名义天梯行：只有板高与名称，行情字段全空。 */
+    private static MarketStock nominal(String code, int board) {
+        MarketStock s = new MarketStock();
+        s.setCode(code);
+        s.setConsecutive(board);
+        s.setPool(MarketStock.POOL_LIMIT_UP);
         return s;
     }
 
@@ -288,6 +299,49 @@ class LadderMetricsServiceTest {
         assertAmount("2", m.get("board_total_count"));
         // 1进2晋级率时间截面重构后=低位晋级 jr_low（今2板2/昨1板4）
         assertAmount("50.00", m.get("jr_low"));
+    }
+
+    @Test
+    void nominalLadder_keepsHeightAndPromotion_dropsFakeZeroLeaves() {
+        // 复盘文档回填的名义天梯：板高、连板家数、逐层晋级率都是真实读数；
+        // 首板与大面数不出来，必须继续缺席，而不是写成"0 只首板""0 家大面"发满分。
+        List<MarketStock> today = Arrays.asList(nominal("N1", 3), nominal("N2", 2), nominal("N3", 2));
+        List<MarketStock> prev = Collections.singletonList(nominal("P1", 2));
+        Map<String, BigDecimal> m = agg(today, Collections.emptyList(), prev, null,
+                Collections.emptyList(), Collections.emptyList(), null, Collections.emptyList());
+        assertAmount("3", m.get("max_height"));
+        assertAmount("3", m.get("board_total_count"));
+        assertAmount("100.00", m.get("jr_mid"));
+        assertFalse(m.containsKey("first_count"), "名义日写 0 首板=假读数");
+        assertFalse(m.containsKey("big_mid"), "名义日写 0 大面=假读数");
+        assertFalse(m.containsKey("big_high"), "名义日写 0 大面=假读数");
+        assertFalse(m.containsKey("first_sealed_rate"));
+    }
+
+    @Test
+    void realDay_afterNominalPrev_keepsFirstCount_butNoCrossDayLeaves() {
+        // 真实明细的第一天，前一交易日只有名义天梯：当日首板照数，跨日归属（大面/首板炸板）判不了。
+        List<MarketStock> today = Arrays.asList(zt("N1", 1), zt("N2", 2));
+        List<MarketStock> prev = Collections.singletonList(nominal("P1", 2));
+        Map<String, BigDecimal> m = agg(today, Collections.emptyList(), prev, null,
+                Collections.emptyList(), Collections.emptyList(), null, Collections.emptyList());
+        assertAmount("1", m.get("first_count"));
+        assertFalse(m.containsKey("big_mid"), "昨池不完整时大面必须未评");
+        assertFalse(m.containsKey("first_bomb_rate"), "昨池不完整时首板炸板率必须未评");
+    }
+
+    @Test
+    void blankLadderDay_heightStillReads_butPromotionRateStaysUnscored() {
+        // 复盘文档有整月不填连板格子的日子（2025-12 全是）：高度还能从客观日行拿，
+        // 但今日池是空的，晋级率必须未评，不能报"昨日连板今天 0% 晋级"。
+        List<MarketStock> prev = Collections.singletonList(zt("P1", 2));
+        Map<String, BigDecimal> m = agg(Collections.<MarketStock>emptyList(), Collections.<MarketStock>emptyList(),
+                prev, null, Collections.<MarketMetrics.TierPremium>emptyList(),
+                Collections.<IndexClose>emptyList(), record(3, null, null, null, null, null),
+                Collections.<MarketDaily>emptyList());
+        assertAmount("3", m.get("max_height"));
+        assertFalse(m.containsKey("jr_mid"), "格子空着不等于 0% 晋级");
+        assertFalse(m.containsKey("board_total_count"));
     }
 
     // ---------------- D4 首板生态·纯 T 日指标 ----------------
