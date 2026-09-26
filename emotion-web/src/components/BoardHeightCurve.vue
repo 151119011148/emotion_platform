@@ -1,7 +1,7 @@
 <template>
   <section class="height-curve">
     <div class="curve-head">
-      <h3>{{ name }} <span class="sub">近 {{ rows.length }} 个交易日 · 点任意一天切日期 · <i class="lk break">★</i>破壁 <i class="lk leader">◆</i>总龙头 <i class="lk line">- -</i>破壁线</span></h3>
+      <h3>{{ name }} <span class="sub">近 {{ visibleCount }} 个交易日 · 共 {{ rows.length }} 天可回看 · 点任意一天切日期 · <i class="lk break">★</i>破壁 <i class="lk leader">◆</i>总龙头 <i class="lk line">- -</i>破壁线</span></h3>
     </div>
     <el-empty v-if="!rows.length" description="暂无连板高度数据" :image-size="60" />
     <div v-else ref="chartRef" class="canvas"></div>
@@ -51,6 +51,7 @@ let chart = null
 
 const zoom = useCurveZoom(() => (props.rows || []).length)
 const zoomable = computed(() => (props.rows || []).length > MIN_SPAN)
+const visibleCount = computed(() => zoom.span())
 
 /** 改窗口 → 重画：buildOption 按新窗口重新切片，Y 轴量程跟着可见数据走 */
 function run(fn) {

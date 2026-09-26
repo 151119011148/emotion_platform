@@ -1,7 +1,7 @@
 <template>
   <section class="dim-curve">
     <div v-if="!hideHeader" class="curve-head">
-      <h3>{{ name }}分走势 <span class="sub">近 {{ rows.length }} 个交易日 · 空档=未评</span></h3>
+      <h3>{{ name }}分走势 <span class="sub">近 {{ visibleCount }} 个交易日 · 共 {{ rows.length }} 天可回看 · 空档=未评</span></h3>
       <span class="legend">
         <i class="lg" style="background: #dc2626"></i>高潮
         <i class="lg" style="background: #d97706"></i>发酵
@@ -9,7 +9,7 @@
         <i class="lg" style="background: #4a5568"></i>退潮
       </span>
     </div>
-    <el-empty v-if="!rows.length" description="近 90 天还没有打分记录（五维打分上线前的日子没有分）" :image-size="60" />
+    <el-empty v-if="!rows.length" description="取到的这段区间还没有打分记录（五维打分上线前的日子没有分）" :image-size="60" />
     <div v-else ref="chartRef" class="canvas"></div>
     <AxisZoomBar
       v-if="zoomable"
@@ -59,6 +59,7 @@ let chart = null
 
 const zoom = useCurveZoom(() => (props.rows || []).length)
 const zoomable = computed(() => (props.rows || []).length > MIN_SPAN)
+const visibleCount = computed(() => zoom.span())
 
 /** 改窗口 → 重画（option 整份重建，可见切片由 zoom 决定） */
 function run(fn) {
@@ -271,8 +272,8 @@ function buildOption() {
           // hover 给金色描边，提示这些点可以点
           itemStyle: { borderColor: '#fbbf24', borderWidth: 1.5 }
         },
-        // 点位数值标签只在点数不多时开（首页曲线数据量小开标签没问题；
-        // 五维曲线近 90 天，全开会在 220px 高度里挤成一团）
+        // 点位数值标签只在可见窗口点数不多时开（首页曲线数据量小开标签没问题；
+        // 五维曲线 − 到底能铺几百天，全开会在 220px 高度里挤成一团）
         label: rows.length <= 31
           ? {
               show: true,

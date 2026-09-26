@@ -2,7 +2,7 @@
   <div class="tianti-page">
     <div class="page-header">
       <h2>连板生态
-        <DimIntroTip title="连板天梯：按板高 H→2 逐层、左对齐排布；3 板及以上层级把晋级失败个股并入同层（灰色半透明标注）"
+        <DimIntroTip title="连板天梯：按引擎分层归成 高/中/低 三张卡，卡内逐板层级从高到低、虚线分隔；3 板及以上层级把晋级失败个股并入同层（灰色半透明标注）"
           body="一字=开盘前封死且全天 0 炸板；T字=开盘封死但盘中开过又回封；其余为换手板。同层个股按封单金额从大到小排序。" />
       </h2>
       <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" :clearable="false"
@@ -116,7 +116,7 @@
     <section class="block curve-block" :class="{ 'curve-collapsed': !curveOpen }">
       <div class="block-head curve-head" @click="curveOpen = !curveOpen">
         <h3>连板生态分走势 <span class="fold-tag">{{ curveOpen ? '收起 ▲' : '展开 ▼' }}</span></h3>
-        <span class="sub">近 {{ curveRows.length }} 个交易日 · 点任意一天切日期</span>
+        <span class="sub">共 {{ curveRows.length }} 天可回看 · 默认最近 20 个交易日 · 点任意一天切日期</span>
       </div>
       <div v-if="curveOpen">
         <DimScoreCurve :rows="curveRows" :selected="date" name="连板生态" :hide-header="true" @select="date = $event" />
@@ -143,7 +143,7 @@
     <section class="block" v-loading="loading">
       <div class="block-head">
         <h3>连板天梯</h3>
-        <span class="sub">从高板到 2 板左对齐；空层=断档；灰色半透明=昨日该板个股今日晋级失败（含 1进2 的 2 板层）</span>
+        <span class="sub">高/中/低三张卡（分层口径同打分引擎）；卡内从高板到低板虚线分隔；空层=断档；灰色半透明=昨日该板个股今日晋级失败（含 1进2 的 2 板层）</span>
         <div class="leader-pill" :class="{ set: !!leader.code }">
           <span class="leader-label">总龙头</span>
           <template v-if="leader.code">
@@ -170,45 +170,64 @@
         </div>
       </el-popover>
       <div v-if="!vo?.levels?.length && !loading" class="none-hint">当日无 ≥2 板个股</div>
-      <div class="ladder">
-        <div v-for="lvl in vo?.levels || []" :key="lvl.board" class="lad-band" :class="{ empty: !lvl.rows.length }">
-          <div class="lad-head">
-            <span class="lad-title">{{ lvl.board }} 板</span>
-            <el-tag size="small" effect="plain" class="layer-tag">{{ lvl.layerLabel }}</el-tag>
-            <span v-if="!lvl.rows.length" class="gap-tag">断层</span>
+      <div ref="ladderEl" class="ladder">
+        <div v-for="g in ladderGroups" :key="g.label" class="lad-band" :class="g.cls">
+          <div class="lad-band-head">
+            <span class="lad-tier">{{ g.label }}</span>
+            <span class="lad-tier-range">{{ g.rangeText }}</span>
           </div>
-          <div class="chips">
-            <div v-for="r in lvl.rows" :key="r.code" class="chip" :class="roleChipClass(r.role)">
-              <span class="chip-name">{{ r.name }}</span>
-              <el-tag v-if="r.role" size="small" :type="ROLE_TYPE[r.role] || 'info'" effect="dark">{{ r.role }}</el-tag>
-              <el-tag v-if="r.manualLeader" size="small" type="warning" effect="dark">总龙头</el-tag>
-              <span v-if="r.sealForm" class="chip-sealform"
-                :title="`封板形态：${r.sealForm}（首封 ${fmtSeal(r.firstSealTime)}；炸板 ${r.breakCount ?? 0} 次）`">
-                {{ r.sealForm }}
-              </span>
-              <el-tag v-if="r.oneWordKilling" size="small" type="danger" effect="dark" class="oneword-badge"
-                :title="`一字断魂刀：今日+昨日连续锁死(首封≤93030且0炸板)，流通市值约 ${r.floatMv != null ? yiText(r.floatMv) : '-'}亿，换手 ${r.turnoverRate ?? '-'}%，封成比 ${r.sealRatio ?? '-'}`">
-                一字断魂刀
-              </el-tag>
-              <span v-if="r.breakCount != null && r.breakCount > 0" class="chip-reseal"
-                :title="`日内开板 ${r.breakCount} 次后封住（炸后回封）`">
-                开板{{ r.breakCount }}次↩回封
-              </span>
-              <span v-if="r.promoted === true" class="chip-promoted ok">晋级</span>
-              <span v-if="r.promoted === false" class="chip-promoted bad">持稳</span>
-              <span v-if="r.sealAmount != null" class="chip-seal">封单 {{ moneyText(r.sealAmount) }}</span>
-              <span v-if="r.turnoverRate != null" class="chip-turn">换手 {{ r.turnoverRate }}%</span>
-              <span v-if="r.sealRatio != null" class="chip-sealratio">封成比 {{ r.sealRatio }}</span>
-              <span :class="pctClass(r.changePct)" class="chip-pct">{{ signed(r.changePct) }}%</span>
+          <div v-for="lvl in g.levels" :key="lvl.board" class="lad-level" :class="{ empty: !lvl.rows.length }">
+            <div class="lad-head">
+              <span class="lad-title">{{ lvl.board }} 板</span>
+              <span v-if="!lvl.rows.length" class="gap-tag">断层</span>
             </div>
-            <!-- 2 板层=1进2 兑现名单（PRD 时间截面：昨首板种子今兑现）；3 板+失败常显，2 板默认折叠 -->
-            <template v-if="lvl.board === 2 && (lvl.failed || []).length">
-              <div class="fail-toggle" @click="toggleLowFail">
-                <span class="fail-toggle-badge">1进2 失败 {{ lvl.failed.length }} 只</span>
-                <span class="fail-toggle-link">{{ lowFailExpanded ? '收起 ▲' : '展开兑现名单 ▼' }}</span>
+            <div class="chips">
+              <div v-for="r in lvl.rows" :key="r.code" class="chip" :class="[roleChipClass(r.role), { 'chip-highlight': r.code === highlightCode }]" :data-code="r.code">
+                <span class="chip-name">{{ r.name }}</span>
+                <el-tag v-if="r.role" size="small" :type="ROLE_TYPE[r.role] || 'info'" effect="dark">{{ r.role }}</el-tag>
+                <el-tag v-if="r.manualLeader" size="small" type="warning" effect="dark">总龙头</el-tag>
+                <span v-if="r.sealForm" class="chip-sealform"
+                  :title="`封板形态：${r.sealForm}（首封 ${fmtSeal(r.firstSealTime)}；炸板 ${r.breakCount ?? 0} 次）`">
+                  {{ r.sealForm }}
+                </span>
+                <el-tag v-if="r.oneWordKilling" size="small" type="danger" effect="dark" class="oneword-badge"
+                  :title="`一字断魂刀：今日+昨日连续锁死(首封≤93030且0炸板)，流通市值约 ${r.floatMv != null ? yiText(r.floatMv) : '-'}亿，换手 ${r.turnoverRate ?? '-'}%，封成比 ${r.sealRatio ?? '-'}`">
+                  一字断魂刀
+                </el-tag>
+                <span v-if="r.breakCount != null && r.breakCount > 0" class="chip-reseal"
+                  :title="`日内开板 ${r.breakCount} 次后封住（炸后回封）`">
+                  开板{{ r.breakCount }}次↩回封
+                </span>
+                <span v-if="r.promoted === true" class="chip-promoted ok">晋级</span>
+                <span v-if="r.promoted === false" class="chip-promoted bad">持稳</span>
+                <span v-if="r.sealAmount != null" class="chip-seal">封单 {{ moneyText(r.sealAmount) }}</span>
+                <span v-if="r.turnoverRate != null" class="chip-turn">换手 {{ r.turnoverRate }}%</span>
+                <span v-if="r.sealRatio != null" class="chip-sealratio">封成比 {{ r.sealRatio }}</span>
+                <span :class="pctClass(r.changePct)" class="chip-pct">{{ signed(r.changePct) }}%</span>
               </div>
-              <template v-if="lowFailExpanded">
-                <div v-for="f in lvl.failed" :key="'f' + f.code" class="chip chip-fail" :title="failTitle(f)">
+              <!-- 2 板层=1进2 兑现名单（PRD 时间截面：昨首板种子今兑现）；3 板+失败常显，2 板默认折叠 -->
+              <template v-if="lvl.board === 2 && (lvl.failed || []).length">
+                <div class="fail-toggle" @click="toggleLowFail">
+                  <span class="fail-toggle-badge">1进2 失败 {{ lvl.failed.length }} 只</span>
+                  <span class="fail-toggle-link">{{ lowFailExpanded ? '收起 ▲' : '展开兑现名单 ▼' }}</span>
+                </div>
+                <template v-if="lowFailExpanded">
+                  <div v-for="f in lvl.failed" :key="'f' + f.code" class="chip chip-fail" :title="failTitle(f)">
+                    <span class="chip-name">{{ f.name }}</span>
+                    <el-tag size="small" :type="FAIL_TYPE[f.todayStatus] || 'info'" effect="plain">
+                      {{ FAIL_LABEL[f.todayStatus] || '未触板' }}
+                    </el-tag>
+                    <span v-if="f.changePct != null" :class="pctClass(f.changePct)" class="chip-pct">
+                      {{ signed(f.changePct) }}%
+                    </span>
+                    <span v-else class="chip-missing">明细未覆盖</span>
+                    <span v-if="f.pullbackPct != null" class="chip-pullback">回撤 {{ f.pullbackPct }}%</span>
+                  </div>
+                </template>
+              </template>
+              <template v-if="lvl.board >= 3">
+                <div v-for="f in (lvl.failed || [])" :key="'f' + f.code" class="chip chip-fail"
+                  :title="failTitle(f)">
                   <span class="chip-name">{{ f.name }}</span>
                   <el-tag size="small" :type="FAIL_TYPE[f.todayStatus] || 'info'" effect="plain">
                     {{ FAIL_LABEL[f.todayStatus] || '未触板' }}
@@ -220,21 +239,7 @@
                   <span v-if="f.pullbackPct != null" class="chip-pullback">回撤 {{ f.pullbackPct }}%</span>
                 </div>
               </template>
-            </template>
-            <template v-if="lvl.board >= 3">
-              <div v-for="f in (lvl.failed || [])" :key="'f' + f.code" class="chip chip-fail"
-                :title="failTitle(f)">
-                <span class="chip-name">{{ f.name }}</span>
-                <el-tag size="small" :type="FAIL_TYPE[f.todayStatus] || 'info'" effect="plain">
-                  {{ FAIL_LABEL[f.todayStatus] || '未触板' }}
-                </el-tag>
-                <span v-if="f.changePct != null" :class="pctClass(f.changePct)" class="chip-pct">
-                  {{ signed(f.changePct) }}%
-                </span>
-                <span v-else class="chip-missing">明细未覆盖</span>
-                <span v-if="f.pullbackPct != null" class="chip-pullback">回撤 {{ f.pullbackPct }}%</span>
-              </div>
-            </template>
+            </div>
           </div>
         </div>
       </div>
@@ -286,7 +291,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { prdApi, leaderApi, recordApi } from '../api/modules'
 import { signed, fiveDimBandClassOf } from '../utils/scores'
@@ -308,14 +313,31 @@ const FAIL_TYPE = { ZT: 'warning', ZB: 'danger', DT: 'danger', GONE: 'info' }
 
 const todayStr = new Date().toLocaleDateString('en-CA')
 const date = ref(route.query.date || todayStr)
+const highlightCode = ref(route.query.code || null)
 const loading = ref(false)
 const vo = ref(null)
-/** 曲线往回取多少个日历日去凑最近 30 个交易日：留足长假，取 90 天。 */
-const LOOKBACK_DAYS = 90
-const CURVE_ROWS = 30
+/** 曲线取数窗口：往前留够两年，回补出来的历史一路都能用 −/≪ 翻回来。 */
+const LOOKBACK_DAYS = 760
 const curveRows = ref([])
 // 连板高度曲线数据
 const heightCurveRows = ref([])
+/**
+ * 曲线全量只取一次：records/range 一行带近百列、全量 700KB+，height-range 服务端要 1.8s，
+ * 而这两份数据只跟「看到哪一天」有关、跟当前选中日期无关——每换一天重拉一遍不值当。
+ * 所以一次拉满，右端在本地按所选日期截。
+ */
+let curveBase = null
+async function loadCurveBase() {
+  if (!curveBase) {
+    const start = shiftDays(todayStr, LOOKBACK_DAYS)
+    const [rec, height] = await Promise.all([
+      recordApi.getRange(start, todayStr).catch(() => null),
+      prdApi.heightRange(start, todayStr).catch(() => null)
+    ])
+    curveBase = { rec: (rec && rec.data) || [], height: (height && height.data) || [] }
+  }
+  return curveBase
+}
 // 连板生态分走势曲线默认折叠
 const curveOpen = ref(false)
 // 连板生态打分明细块默认折叠（与其他维度一致），可展开
@@ -329,6 +351,62 @@ const lowFailExpanded = ref(false)
 function toggleLowFail() {
   lowFailExpanded.value = !lowFailExpanded.value
 }
+
+/* ---- 天梯三张卡：层级归属完全跟引擎 layerLabel，前端只按标签归桶，不另起阈值 ---- */
+const LAYER_CARDS = [
+  { label: '高位', cls: 'tier-high' },
+  { label: '中位', cls: 'tier-mid' },
+  { label: '低位', cls: 'tier-low' }
+]
+const ladderGroups = computed(() => {
+  const levels = vo.value?.levels || []
+  return LAYER_CARDS.map((c) => {
+    // levels 已由服务端按板高降序给出，filter 保序即得"高板在上"
+    const rows = levels.filter((l) => l.layerLabel === c.label)
+    if (!rows.length) return null
+    const boards = rows.filter((l) => (l.rows || []).length).map((l) => l.board)
+    const onBoard = rows.reduce((s, l) => s + (l.rows || []).length, 0)
+    const range = boards.length
+      ? (boards.length === 1 ? `${boards[0]} 板` : `${Math.max(...boards)}–${Math.min(...boards)} 板`)
+      : '全部断档'
+    return { ...c, levels: rows, rangeText: `${range} · ${onBoard} 只在板` }
+  }).filter(Boolean)
+})
+
+/* 三张卡等宽、宽度跟着当日最宽一行走：天梯块不再顶满页面 1100 的上限、右侧留半片空白 */
+const ladderEl = ref(null)
+/** 卡片左右 padding 14×2 + 左边框 3 + 右边框 1 */
+const LAD_BAND_OVERHEAD = 32
+
+function measureLadder() {
+  const el = ladderEl.value
+  if (!el) return
+  // 先回落到自然全宽再量：在上一次量出的窄宽度上量，会一轮比一轮窄
+  el.style.width = ''
+  let want = 0
+  for (const band of el.querySelectorAll('.lad-band')) {
+    let inner = 0
+    for (const row of band.querySelectorAll('.lad-band-head, .lad-head, .chips')) {
+      // 同一行的元素按渲染顶边归组，取首尾差即这一行实际占用的宽度
+      // 折叠条 flex-basis:100%，自己就占满一行，不能参与取宽
+      const lines = new Map()
+      for (const c of row.children) {
+        if (c.classList.contains('fail-toggle')) continue
+        const r = c.getBoundingClientRect()
+        const k = Math.round(r.top)
+        const cur = lines.get(k) || { l: r.left, r: r.right }
+        lines.set(k, { l: Math.min(cur.l, r.left), r: Math.max(cur.r, r.right) })
+      }
+      for (const { l, r } of lines.values()) inner = Math.max(inner, r - l)
+    }
+    want = Math.max(want, inner + LAD_BAND_OVERHEAD)
+  }
+  if (want > 0) el.style.width = `${Math.min(want, el.clientWidth)}px`
+}
+
+watch([ladderGroups, lowFailExpanded], measureLadder, { flush: 'post' })
+onMounted(() => window.addEventListener('resize', measureLadder))
+onUnmounted(() => window.removeEventListener('resize', measureLadder))
 
 /* ---- 人工总龙头：手动指定（只从当日天梯在板个股里选）---- */
 const leaderCandidates = computed(() => {
@@ -576,15 +654,22 @@ async function load() {
       scoring.loadDetail(date.value, true).catch(() => null)
     ])
     vo.value = tiantiRes?.data || null
-    // 曲线与异动监管页同一取数口：range 返回按日升序，切出最近一段直接喂图
-    const rangeRes = await recordApi.getRange(shiftDays(date.value, LOOKBACK_DAYS), date.value).catch(() => null)
-    curveRows.value = ((rangeRes && rangeRes.data) || []).slice(-CURVE_ROWS).map((r) => ({
+    if (highlightCode.value) {
+      nextTick(() => {
+        const el = document.querySelector(`.chip[data-code="${highlightCode.value}"]`)
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
+      })
+    }
+    // 曲线取数见 loadCurveBase：一次拉满全量，这里只按所选日期右截，可见宽度交给曲线自己的缩放
+    const base = await loadCurveBase()
+    curveRows.value = base.rec.filter((r) => r.tradeDate <= date.value).map((r) => ({
       date: r.tradeDate,
       score: r.scoreBoard
     }))
     // 连板高度曲线：同一时间窗口，取每日最高板及对应个股
-    const heightRes = await prdApi.heightRange(shiftDays(date.value, LOOKBACK_DAYS), date.value).catch(() => null)
-    heightCurveRows.value = ((heightRes && heightRes.data) || []).slice(-CURVE_ROWS).map((r) => ({
+    heightCurveRows.value = base.height.filter((r) => r.tradeDate <= date.value).map((r) => ({
       date: r.tradeDate,
       maxHeight: r.maxHeight,
       stockCount: r.stockCount,
@@ -723,27 +808,49 @@ watch(date, load)
 .b-climax { color: #f87171; }
 .missing { color: #6b7c8c; }
 
-/* 天梯：左对齐、全宽、逐层堆叠 */
-.ladder { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+/* 天梯：高/中/低三张卡，卡内逐板层级用虚线分隔；色带沿用曲线区"低=冷蓝、高=暖红"的温度语义 */
+.ladder { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
 .lad-band {
+  --tier: #94a3b8;
+  --tier-soft: rgba(148, 163, 184, .10);
+  /* 全局没有 box-sizing 重置：不设 border-box，width:100% 量的是内容盒，
+     28px padding + 4px 边框会额外加到右边，整张卡片就顶出页面右边界 */
+  box-sizing: border-box;
   width: 100%;
+  min-width: 0;
   background: linear-gradient(180deg, #223041, #1b2735);
   border: 1px solid #2d3748;
+  border-left: 3px solid var(--tier);
   border-radius: 8px;
   padding: 10px 14px;
 }
-.lad-band.empty { background: rgba(251,191,36,.06); border-style: dashed; border-color: #fbbf24; }
+.lad-band.tier-high { --tier: #f87171; --tier-soft: rgba(248, 113, 113, .12); }
+.lad-band.tier-mid { --tier: #fbbf24; --tier-soft: rgba(251, 191, 36, .12); }
+.lad-band.tier-low { --tier: #60a5fa; --tier-soft: rgba(96, 165, 250, .12); }
+.lad-band-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 2px; }
+.lad-tier { font-size: 13px; font-weight: 700; color: var(--tier); letter-spacing: 1px; }
+.lad-tier-range { font-size: 11px; color: #6b7c8c; }
+.lad-level { padding: 10px 0; }
+.lad-level + .lad-level { border-top: 1px dashed #3a4450; }
+.lad-level.empty { background: var(--tier-soft); border-radius: 6px; }
 .lad-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
-.lad-title { font-size: 15px; font-weight: 700; color: #fbbf24; }
-.layer-tag { flex: none; }
+.lad-title { font-size: 15px; font-weight: 700; color: var(--tier); }
 .gap-tag { color: #fbbf24; font-size: 12px; font-weight: 600; }
-.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+/* min-width:0 + chip 自身 max-width：否则长药丸撑破卡片右边界被视口裁掉 */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .chip {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; flex-wrap: wrap;
+  gap: 4px 6px; max-width: 100%;
   background: #0f1419; border: 1px solid #2d3748; border-radius: 999px;
   padding: 4px 10px; font-size: 12px;
 }
+.chip > * { white-space: nowrap; }
 .chip.role-总龙头 { border-color: #ef4444; box-shadow: 0 0 0 1px rgba(239,68,68,.35); }
+.chip.chip-highlight {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59,130,246,.45), 0 0 12px rgba(59,130,246,.3);
+  background: rgba(59,130,246,.1);
+}
 .chip-name { color: #e1e8ed; font-weight: 600; }
 .chip-promoted { font-size: 11px; }
 .chip-promoted.ok { color: #6ee7b7; }

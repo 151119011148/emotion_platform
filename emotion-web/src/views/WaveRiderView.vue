@@ -64,7 +64,7 @@
                 <template #content>
                   <div>代码 {{ row.code }}</div>
                 </template>
-                <span class="nm-text">{{ row.name }}</span>
+                <span class="nm-text" @click="goTianti(row)">{{ row.name }}</span>
               </el-tooltip>
               <span class="nm-tags">
                 <el-tag v-for="t in nodeTagsOf(row)" :key="t.kind" size="small" effect="dark"
@@ -286,11 +286,13 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { waveriderApi } from '../api/modules'
 import { useTradingCalendar } from '../utils/tradingCalendar'
 
 const { cellClass } = useTradingCalendar()
+const router = useRouter()
 
 const strategies = ref([])
 const strategyId = ref(null)
@@ -317,6 +319,10 @@ const NODE_KIND_TYPE = { NODE_STOCK: 'danger', ANCHOR: 'warning', D0_CAND: 'info
 const nodeTagCount = computed(
   () => candidates.value.filter((c) => c.nodeTags && c.nodeTags.length).length
 )
+
+function goTianti(row) {
+  router.push({ path: '/tianti', query: { date: date.value, code: row.code } })
+}
 
 /**
  * 同一角色可能命中多条节点事件（一只票既当过甲节点的节点票、又是乙节点的 D0 候选），
@@ -677,7 +683,7 @@ onMounted(async () => {
 .nm-text {
   color: #e1e8ed;
   font-weight: 600;
-  cursor: help;
+  cursor: pointer;
   border-bottom: 1px dashed rgba(136, 153, 166, 0.45);
 }
 .nm-tags,
