@@ -119,12 +119,15 @@
         <span class="sub">共 {{ curveRows.length }} 天可回看 · 默认最近 20 个交易日 · 点任意一天切日期</span>
       </div>
       <div v-if="curveOpen">
-        <DimScoreCurve :rows="curveRows" :selected="date" name="连板生态" :hide-header="true" @select="date = $event" />
+        <!-- zoom-group 与下面高度曲线同名：两张图共用一份缩放窗口，点任一图的 + − ≪ ≫ 两张一起变 -->
+        <DimScoreCurve :rows="curveRows" :selected="date" name="连板生态" :hide-header="true"
+                       zoom-group="tianti-curve" @select="date = $event" />
       </div>
     </section>
 
     <!-- D3 连板高度曲线：默认展开，点任意一天切日期 -->
-    <BoardHeightCurve :rows="heightCurveRows" :selected="date" name="连板高度" @select="date = $event" />
+    <BoardHeightCurve :rows="heightCurveRows" :selected="date" name="连板高度"
+                      zoom-group="tianti-curve" @select="date = $event" />
 
     <div class="stat-grid" v-loading="loading">
       <div class="stat">

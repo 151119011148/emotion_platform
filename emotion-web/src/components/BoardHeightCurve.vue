@@ -1,7 +1,7 @@
 <template>
   <section class="height-curve">
     <div class="curve-head">
-      <h3>{{ name }} <span class="sub">近 {{ visibleCount }} 个交易日 · 共 {{ rows.length }} 天可回看 · 点任意一天切日期 · <i class="lk probe">☆</i>试探 <i class="lk break">★</i>破壁成功 <i class="lk line">- -</i>破壁线{{ originNote }}</span></h3>
+      <h3>{{ name }} <span class="sub">近 {{ visibleCount }} 个交易日 · 共 {{ rows.length }} 天可回看 · 点任意一天切日期 · <i class="lk probe">☆</i>试探 <i class="lk break">★</i>破壁成功 <i class="lk line" :style="{ color: focusedColor }">- -</i>破壁线{{ originNote }}</span></h3>
     </div>
     <el-empty v-if="!rows.length" description="暂无连板高度数据" :image-size="60" />
     <div v-else ref="chartRef" class="canvas"></div>
@@ -11,10 +11,10 @@
       :can-zoom-out="zoom.canZoomOut()"
       :can-pan-left="zoom.canPanLeft()"
       :can-pan-right="zoom.canPanRight()"
-      @zoom-in="run(zoom.zoomIn)"
-      @zoom-out="run(zoom.zoomOut)"
-      @pan-left="run(() => zoom.pan(-1))"
-      @pan-right="run(() => zoom.pan(1))"
+      @zoom-in="zoom.zoomIn"
+      @zoom-out="zoom.zoomOut"
+      @pan-left="() => zoom.pan(-1)"
+      @pan-right="() => zoom.pan(1)"
     />
   </section>
 </template>
@@ -23,11 +23,13 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
 import AxisZoomBar from './AxisZoomBar.vue'
-import { useCurveZoom, MIN_SPAN } from '../utils/curveZoom'
+import { useCurveZoom, DEFAULT_SPAN, MIN_SPAN } from '../utils/curveZoom'
 
 /**
- * 连板高度曲线：X 轴日期，Y 轴最高板高度，灰虚线阶梯 = 当天要追平的破壁线
+ * 连板高度曲线：X 轴日期，Y 轴最高板高度，虚线阶梯 = 当天要追平的破壁线
  * （旧龙断板那天起钉在它的高度上 H−1 个交易日，之后一级一级往下降）。
+ * 破壁线按**来源**（哪天哪只票打出这个高度）切成一段一段分色，段首标出来源；
+ * 同一条线被人追平续钉不算新来源（还是原来那只票的颜色），只有换了一级才换色。
  * hover 列出当日并列打到这个高度的全部个股。
  * ☆ 试探破壁 = 另一只票追平这条线（空心红星）；★ 破壁成功 = 这只试探股次日继续涨停（实心红，同一次破壁只标首次）。
  * 判定全在后端（要逐票名单与破壁线），组件只读。
@@ -43,7 +45,9 @@ const props = defineProps({
   /** 当前查看的日期，高亮竖线 */
   selected: { type: String, default: '' },
   /** 标题名 */
-  name: { type: String, default: '连板高度' }
+  name: { type: String, default: '连板高度' },
+  /** 联动组名：同名的曲线共用一份缩放窗口（连板生态页与分数曲线同组） */
+  zoomGroup: { type: String, default: '' }
 })
 const emit = defineEmits(['select'])
 
@@ -59,7 +63,7 @@ const STAR_PATH =
   'path://M50,0 L61.76,33.82 L97.55,34.55 L69.02,56.18 L79.39,90.45 ' +
   'L50,70 L20.61,90.45 L30.98,56.18 L2.45,34.55 L38.24,33.82 Z'
 
-const zoom = useCurveZoom(() => (props.rows || []).length)
+const zoom = useCurveZoom(() => (props.rows || []).length, DEFAULT_SPAN, props.zoomGroup)
 const zoomable = computed(() => (props.rows || []).length > MIN_SPAN)
 const visibleCount = computed(() => zoom.span())
 
@@ -93,11 +97,36 @@ const originNote = computed(() => {
   return o ? ` ${r.ceiling}板 · 来自 ${o}` : ` ${r.ceiling}板`
 })
 
-/** 改窗口 → 重画：buildOption 按新窗口重新切片，Y 轴量程跟着可见数据走 */
-function run(fn) {
-  fn()
-  renderChart()
+const LINE_GREY = '#6b7f95'
+/** 来源分色的调色板：避开琥珀（最高连板那条线）和红（星） */
+const ORIGIN_COLORS = ['#22d3ee', '#a78bfa', '#f472b6', '#34d399', '#60a5fa', '#e879f9']
+
+/** 一条线的身份 = 板高 + 来源那天 + 那只票。追平续钉不改身份，降级才换。 */
+function originKey(r) {
+  if (!r || r.ceiling == null) return ''
+  return `${r.ceiling}|${r.lineOriginDate || '—'}|${(r.lineOriginStock && r.lineOriginStock.code) || '—'}`
 }
+
+/** 颜色按**全量**顺序分配，不按可见窗口：平移缩放时同一条线不会变色。 */
+const colorByKey = computed(() => {
+  const m = new Map()
+  for (const r of props.rows || []) {
+    const k = originKey(r)
+    if (k && !m.has(k)) m.set(k, ORIGIN_COLORS[m.size % ORIGIN_COLORS.length])
+  }
+  return m
+})
+
+function colorOf(r) {
+  const k = originKey(r)
+  return (k && colorByKey.value.get(k)) || LINE_GREY
+}
+
+const focusedColor = computed(() => (focusedRow.value ? colorOf(focusedRow.value) : LINE_GREY))
+
+/** 改窗口 → 重画：buildOption 按新窗口重新切片，Y 轴量程跟着可见数据走。
+ *  重画由下面对 zoom.state 的 watch 统一触发，本图的按钮也走同一条路，
+ *  这样同组另一条曲线按了 + 这边才会跟着变。 */
 
 /**
  * 破壁点直接读后端判定：判伴生要逐票启动日，曲线这份聚合数据里没有。
@@ -133,6 +162,23 @@ function readProbes(rows) {
   return out
 }
 
+/**
+ * 把破壁线按来源切成段：连着几天都是同一本账（同一个板高、同一天同一只票打出来的）就是一段，
+ * 换账起新段。段与段各自上色，段首那颗点是这段的来源。
+ */
+function readLineRuns(rows) {
+  const runs = []
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]
+    if (r.ceiling == null) continue
+    const k = originKey(r)
+    const cur = runs[runs.length - 1]
+    if (cur && cur.key === k && cur.ceiling === r.ceiling) cur.end = i
+    else runs.push({ key: k, ceiling: r.ceiling, start: i, end: i, row: r })
+  }
+  return runs
+}
+
 function buildOption() {
   const all = props.rows || []
   if (!all.length) return {}
@@ -142,9 +188,7 @@ function buildOption() {
   const heights = rows.map((r) => r.maxHeight)
   const ceilings = rows.map((r) => (r.ceiling == null ? null : r.ceiling))
   const breaks = readBreaks(rows)
-  const breakByIndex = new Map(breaks.map((b) => [b.index, b]))
   const probes = readProbes(rows)
-  const probeByIndex = new Map(probes.map((q) => [q.index, q]))
 
   // Y 轴按可见窗口算：只收窄横轴、纵轴还按全量，放大就只是把线压扁，等于没放大。
   // 破壁线（ceiling）也计入上界——它是从更早的高点继承来的，可能高于当天最高板。
@@ -217,6 +261,82 @@ function buildOption() {
       ]]
     : []
 
+  /**
+   * 破壁线：一段一段画，颜色 = 这段的来源（同一本账连续的日子并成一段）。每段是一条等高虚线，
+   * 段首多点一笔落在上一级高度上，用它补出阶梯下落的那一竖（不这么补，两段之间是两根悬浮的横线）。
+   * 段首标出来源（「08-28 深中华A」）：段宽放得下、且不压到已经占位的标签才标，
+   * 放大到全量 59 个来源时只留颜色＋那颗点；选中那天所在的那段和窗口尾段永远标，读者靠它认色。
+   */
+  const lineRuns = readLineRuns(rows)
+  const innerW = Math.max((chartRef.value ? chartRef.value.clientWidth : 0) - 70, 120)
+  const pxPerDay = innerW / Math.max(rows.length - 1, 1)
+  const meta = lineRuns.map((run, n) => {
+    const text = originPhrase(run.row)
+    const cjk = (text.match(/[^\x00-\xff]/g) || []).length
+    const needW = cjk * 10 + (text.length - cjk) * 5.5 + 16
+    const lastIdx = n + 1 < lineRuns.length ? lineRuns[n + 1].start : run.end
+    const x0 = 40 + run.start * pxPerDay
+    return {
+      run,
+      n,
+      lastIdx,
+      text,
+      needW,
+      x0,
+      x1: x0 + needW,
+      // 选中那天所在的那段（以及窗口尾段）一定要标，读者靠它认色
+      forced: (selIdx >= run.start && selIdx <= lastIdx) || n === lineRuns.length - 1
+    }
+  })
+  const taken = meta.filter((m) => m.forced && m.text).map((m) => [m.x0 - 4, m.x1 + 4])
+  meta.forEach((m) => {
+    if (!m.text) { m.show = false; return }
+    if (m.forced) { m.show = true; return }
+    const days = (m.lastIdx - m.run.start + 1) * pxPerDay
+    // 段太窄放不下就退成"只有颜色＋那颗点"；放得下也不许压到别人已经占住的位置
+    const clash = taken.some(([a, b]) => m.x0 < b && m.x1 > a)
+    m.show = days >= m.needW && !clash
+    if (m.show) taken.push([m.x0 - 4, m.x1 + 4])
+  })
+  const lineSeries = meta.map((m) => {
+    const run = m.run
+    const prev = m.n > 0 && lineRuns[m.n - 1].end === run.start - 1 ? lineRuns[m.n - 1] : null
+    const pts = []
+    if (prev) pts.push([dates[run.start], prev.ceiling])
+    for (let i = run.start; i <= m.lastIdx; i++) pts.push([dates[i], run.ceiling])
+    const col = colorOf(run.row)
+    return {
+      name: '破壁线',
+      type: 'line',
+      data: pts,
+      symbol: 'none',
+      silent: true,
+      lineStyle: { width: 1, type: 'dashed', color: col },
+      z: 3,
+      tooltip: { show: false },
+      markPoint: {
+        silent: true,
+        data: [{
+          coord: [dates[run.start], run.ceiling],
+          symbol: 'circle',
+          symbolSize: 5,
+          itemStyle: { color: col, borderColor: '#1a2332', borderWidth: 1 },
+          label: {
+            show: m.show,
+            formatter: m.text,
+            position: run.ceiling >= yMax - 0.6 ? 'bottom' : 'top',
+            distance: 5,
+            color: col,
+            fontSize: 9,
+            backgroundColor: 'rgba(26,35,50,0.88)',
+            padding: [2, 4],
+            borderRadius: 3
+          }
+        }]
+      }
+    }
+  })
+
   return {
     tooltip: {
       trigger: 'axis',
@@ -230,27 +350,11 @@ function buildOption() {
       formatter: (params) => {
         const p = params[0]
         if (!p) return ''
-        const i = p.dataIndex
-        const r = rows[i]
+        const r = rows[p.dataIndex]
         if (!r) return ''
-        const brk = breakByIndex.get(i)
-        const prb = probeByIndex.get(i)
-        const heads = []
-        if (prb) {
-          heads.push(`<span style="color:#ef4444;font-weight:bold">☆ 试探追平 ${prb.line} 板线</span>`)
-        }
-        if (brk) {
-          heads.push(`<span style="color:#ef4444;font-weight:bold">★ 破壁成功 ${brk.prevHigh}→${brk.board}</span>`)
-        }
-        const lines = [heads.length ? `${r.date} ${heads.join(' ')}` : `${r.date}`]
-        lines.push(`最高连板: <b>${r.maxHeight} 板</b> · ${r.stockCount} 只并列`)
-        const from = originPhrase(r)
-        lines.push(`破壁线: <b>${r.ceiling} 板</b>${from ? ` · 来自 ${from}` : ''}（定线票 ${r.lineStock ? r.lineStock.name : '—'}，另一只票追平才算试探）`)
-        if (brk) {
-          lines.push(`破壁股: <b>${brk.stock ? brk.stock.name : '—'}</b>（捅破 ${brk.prevHigh} 板线）`)
-        } else if (prb) {
-          lines.push(`试探股: <b>${prb.stock ? prb.stock.name : '—'}</b>（明天继续涨停才算破壁）`)
-        }
+        // 只报日期和当天并列打到最高板的票：破壁线、试探/破壁判定这些图上已有点和标签，
+        // 再在 hover 里铺一遍就把这块 300px 高的浮层撑成一屏说明文
+        const lines = [r.date]
         const stocks = r.stocks || []
         for (let k = 0; k < stocks.length; k += 4) {
           const cells = stocks.slice(k, k + 4)
@@ -273,8 +377,11 @@ function buildOption() {
       type: 'value',
       min: yMin,
       max: yMax,
+      // 一格一板：板高是整数刻度，"6 板半"没有意义。缩到十几板时让标签自己避让，
+      // 网格线还是每板一条，只是挤不动的标签不硬贴
+      interval: 1,
+      axisLabel: { color: '#8899a6', hideOverlap: true },
       splitLine: { lineStyle: { color: '#2d3748' } },
-      axisLabel: { color: '#8899a6' },
       name: '板高',
       nameTextStyle: { color: '#8899a6', fontSize: 10 }
     },
@@ -306,18 +413,8 @@ function buildOption() {
           data: selectedLine
         } : undefined
       },
-      {
-        // 动态破壁线：不画出来，红星标为什么有时在 5 板、有时在 7 板就无从核对
-        name: '破壁线',
-        type: 'line',
-        data: ceilings,
-        step: 'end',
-        symbol: 'none',
-        connectNulls: true,
-        lineStyle: { width: 1, type: 'dashed', color: '#6b7f95' },
-        z: 3,
-        tooltip: { show: false }
-      }
+      ...lineSeries
+      // 上面按来源切的每一段各一条；这里不再有一条全量的破壁线系列
     ]
   }
 }
@@ -348,6 +445,8 @@ function renderChart() {
 const onResize = () => chart?.resize()
 
 watch(() => [props.rows, props.selected], renderChart, { deep: true, flush: 'post' })
+// 窗口状态可能在同组另一条曲线的按钮上被改，所以重画挂在状态上，不挂在本图的点击上
+watch(() => [zoom.state.back, zoom.state.span], renderChart, { flush: 'post' })
 onMounted(() => {
   renderChart()
   window.addEventListener('resize', onResize)
