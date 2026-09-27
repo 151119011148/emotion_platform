@@ -358,8 +358,15 @@ public class NodeService {
      * <p>三种角色都算：节点票（{@code node_stock}，带代码、可精确匹配）、锚定龙头
      * （{@code anchor_stock}，只有名称）、D0 候选（{@code d0_candidates}，名称数组）。
      *
-     * <p>不限日期。一只票可能既是甲事件的节点票、又是乙事件的 D0 候选，也可能事隔一个月才又涨停；
-     * 全都列出来、每条带上 D0 与状态，比只留最近一条有用——这段周期还作不作数由看的人判断。
+     * <p>前两种是身份标，不限日期：一只票是不是某节点的节点票/锚定龙头，跟它哪天涨停无关。
+     * D0 候选不一样——那份名单是「D0 当天的高板池」，它只描述 D0 → 次一交易日这一跳，
+     * 隔几天再撞同名一次，打的是过期标（09-23 的名单不该在 11 月还标着「D0 候选」）。
+     * 所以 D0 候选只在候选行的上一个有明细的交易日 {@code == } 事件的 {@code d0_date} 时才挂；
+     * {@code d0_date} 为空的事件没有 D0 锚点，不再产出 D0 候选标。
+     *
+     * <p>「上一个交易日」用 {@code prevDetailDate}（上一个有涨停池明细的日子），不用日历：
+     * 名单本来就是从这份明细里拉的，两者必须同一口径，否则明细缺失的那天会既当不上 D0、
+     * 又把次日的标一起弄没——那是数据缺口的真实反映，不是匹配写错。
      *
      * <p>匹配口径与 {@link #stockCodeOf}、名称去空白保持一致：明细里的名字是「罗 牛 山」，
      * 而 d0_candidates 里写的是「罗牛山」，直接 equals 会漏掉。
@@ -376,7 +383,8 @@ public class NodeService {
         // 先按「代码 / 去空白名称」把事件建成索引，再拿候选去撞，免得每行都重解析一遍事件
         Map<String, List<NodeEvent>> byNodeCode = new HashMap<String, List<NodeEvent>>();
         Map<String, List<NodeEvent>> byAnchor = new HashMap<String, List<NodeEvent>>();
-        Map<String, List<NodeEvent>> byD0 = new HashMap<String, List<NodeEvent>>();
+        // D0 名单按 D0 日期分桶，只有撞对日子的候选才去查这一桶
+        Map<LocalDate, Map<String, List<NodeEvent>>> byD0 = new HashMap<LocalDate, Map<String, List<NodeEvent>>>();
         for (NodeEvent e : events) {
             String code = stockCodeOf(e.getNodeStock());
             if (code != null) {
@@ -386,20 +394,44 @@ public class NodeService {
             if (anchor != null) {
                 index(byAnchor, anchor, e);
             }
+            if (e.getD0Date() == null) {
+                continue;
+            }
+            Map<String, List<NodeEvent>> names = byD0.get(e.getD0Date());
+            if (names == null) {
+                names = new HashMap<String, List<NodeEvent>>();
+                byD0.put(e.getD0Date(), names);
+            }
             for (String name : parseD0(e.getD0Candidates())) {
                 String key = norm(name);
                 if (key != null) {
-                    index(byD0, key, e);
+                    index(names, key, e);
                 }
             }
         }
+        Map<LocalDate, LocalDate> prevDates = new HashMap<LocalDate, LocalDate>();
         for (CandidateStock c : rows) {
             List<NodeTagVO> tags = new ArrayList<NodeTagVO>();
             collect(tags, byNodeCode.get(c.getCode()), NodeTagVO.KIND_NODE_STOCK, c);
             collect(tags, byAnchor.get(norm(c.getName())), NodeTagVO.KIND_ANCHOR, c);
-            collect(tags, byD0.get(norm(c.getName())), NodeTagVO.KIND_D0_CAND, c);
+            LocalDate d0 = prevDetailDate(c.getTradeDate(), prevDates);
+            Map<String, List<NodeEvent>> names = d0 == null ? null : byD0.get(d0);
+            collect(tags, names == null ? null : names.get(norm(c.getName())), NodeTagVO.KIND_D0_CAND, c);
             c.setNodeTags(tags);
         }
+    }
+
+    /** 候选行的上一个有明细的交易日；同一天只查一次，缺失也记账免得反复打库。 */
+    private LocalDate prevDetailDate(LocalDate tradeDate, Map<LocalDate, LocalDate> cache) {
+        if (tradeDate == null) {
+            return null;
+        }
+        if (cache.containsKey(tradeDate)) {
+            return cache.get(tradeDate);
+        }
+        LocalDate prev = marketStockMapper.prevDetailDate(tradeDate);
+        cache.put(tradeDate, prev);
+        return prev;
     }
 
     private static void index(Map<String, List<NodeEvent>> m, String key, NodeEvent e) {

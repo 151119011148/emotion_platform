@@ -379,7 +379,7 @@
           <div class="plan-row">锚定龙头：{{ plan.anchorStock || '—' }}（{{ plan.anchorMaxBoard }}板）</div>
           <div class="plan-row">题材/板块：{{ plan.theme || '（可不填）' }}</div>
           <div class="plan-row">D0 日期：{{ plan.d0Date || '—' }}</div>
-          <div class="plan-row">候选票：{{ plan.candsText }}</div>
+          <div class="plan-row">候选票（D0 二板）：{{ plan.candsText }}</div>
           <div class="plan-row">前置过滤器：涨停{{ plan.limitUpCount ?? '未知' }} / 跌停{{ plan.limitDownCount ?? '未知' }}</div>
         </div>
       </template>
@@ -571,7 +571,7 @@ function pickedLeader() {
   const c = leaderChoices.value.find(x => x.ld.code === ladderPickedCode.value)
   return c ? c.ld : null
 }
-/** 天梯方案预览：以所选龙头为锚，候选取自全市场涨停池。板块节点（原系统B）已下线，不再产出同板块收敛版本。 */
+/** 天梯方案预览：以所选龙头为锚，候选取 D0 的二连板。板块节点（原系统B）已下线，不再产出同板块收敛版本。 */
 const plan = computed(() => buildPlan(pickedLeader()))
 function buildPlan(ld) {
   const d0 = ladderPreview.value.date || ''
@@ -580,7 +580,10 @@ function buildPlan(ld) {
   if (!ld) {
     return { anchorStock: '', anchorMaxBoard: 0, theme: '', d0Date: d0, candsText: '', limitUpCount: limitUp, limitDownCount: limitDown, cands: [] }
   }
-  const cands = ladderLeaders.value.map(x => x.name)
+  // §三「D0 候选＝当天的二板」，复算的分母也是这个口径。intel.leaders 是全场 ≥2 板，
+  // 整份存进 d0_candidates 会让策略选股页把 4 板、5 板也标成 D0 候选，跟复算表对不上。
+  // 只收二板，leaders 本身不动——龙头下拉要的是当日最高板。
+  const cands = ladderLeaders.value.filter(x => Number(x.board) === 2).map(x => x.name)
   const candsText = cands.length
     ? cands.slice(0, 6).join('、') + (cands.length > 6 ? ' 等' + cands.length + '只' : '')
     : '（候选为空）'

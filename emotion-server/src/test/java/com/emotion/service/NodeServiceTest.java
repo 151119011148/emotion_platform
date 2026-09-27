@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.emotion.entity.CandidateStock;
 import com.emotion.entity.NodeEvent;
+import com.emotion.mapper.MarketStockMapper;
 import com.emotion.mapper.NodeEventMapper;
 import com.emotion.vo.NodeTagVO;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,7 +20,9 @@ import java.lang.reflect.Proxy;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 节点历史那一张表的顺序。
@@ -89,10 +92,44 @@ class NodeServiceTest {
                 });
     }
 
-    private static CandidateStock candidate(String code, String name) {
+    /**
+     * D0 候选现在要按日子撞，所以得有「上一个有明细的交易日」。
+     * 这里不连库，给一张写死的表：键是候选行那天，值是它的上一交易日。
+     */
+    private static MarketStockMapper stockMapper(Map<LocalDate, LocalDate> prevOf) {
+        return (MarketStockMapper) Proxy.newProxyInstance(
+                MarketStockMapper.class.getClassLoader(),
+                new Class<?>[]{MarketStockMapper.class},
+                (proxy, method, args) -> {
+                    String name = method.getName();
+                    if ("prevDetailDate".equals(name)) {
+                        return prevOf.get((LocalDate) args[0]);
+                    }
+                    if ("toString".equals(name)) {
+                        return "stockMapper";
+                    }
+                    if ("equals".equals(name)) {
+                        return proxy == args[0];
+                    }
+                    if ("hashCode".equals(name)) {
+                        return System.identityHashCode(proxy);
+                    }
+                    return null;
+                });
+    }
+
+    private static final Map<LocalDate, LocalDate> PREV = new HashMap<LocalDate, LocalDate>() {{
+        put(LocalDate.of(2026, 9, 5), LocalDate.of(2026, 9, 4));
+        put(LocalDate.of(2026, 9, 18), LocalDate.of(2026, 9, 17));
+        // 明细缺一天：09-22 那天没有涨停池，它的上一个有明细的日子直接跳到 09-18
+        put(LocalDate.of(2026, 9, 22), LocalDate.of(2026, 9, 18));
+    }};
+
+    private static CandidateStock candidate(String code, String name, LocalDate tradeDate) {
         CandidateStock c = new CandidateStock();
         c.setCode(code);
         c.setName(name);
+        c.setTradeDate(tradeDate);
         return c;
     }
 
@@ -134,16 +171,19 @@ class NodeServiceTest {
         node7.setStatus("待验证");
 
         NodeService svc = new NodeService(eventMapper(Arrays.asList(node1, node7)),
-                null, null, null, null, null, null, new ObjectMapper());
+                null, null, stockMapper(PREV), null, null, null, new ObjectMapper());
 
-        CandidateStock byNodeStock = candidate("600865", "百大集团");
-        CandidateStock byAnchor = candidate("000993", "闽东电力");
-        CandidateStock byD0 = candidate("000735", "罗 牛 山");
-        CandidateStock none = candidate("300001", "特锐德");
+        LocalDate day = LocalDate.of(2026, 9, 18);
+        CandidateStock byNodeStock = candidate("600865", "百大集团", day);
+        CandidateStock byAnchor = candidate("000993", "闽东电力", day);
+        CandidateStock byD0 = candidate("000735", "罗 牛 山", day);
+        CandidateStock none = candidate("300001", "特锐德", day);
         // 一只票同时是某节点的节点票、又是它的锚定龙头：少见，但匹配是按字段各自进行的
-        CandidateStock both = candidate("600865", "国芳集团");
+        CandidateStock both = candidate("600865", "国芳集团", day);
+        // 在 node1 的 D0 名单里，但那天离 09-04 已经隔了十来个交易日：过期标不该再挂
+        CandidateStock staleD0 = candidate("600892", "龙版传媒", day);
 
-        svc.tagCandidates(Arrays.asList(byNodeStock, byAnchor, byD0, none, both), USER);
+        svc.tagCandidates(Arrays.asList(byNodeStock, byAnchor, byD0, none, both, staleD0), USER);
 
         assertEquals(Arrays.asList("NODE_STOCK"), kinds(byNodeStock), "节点票该被认出来");
         assertEquals(Arrays.asList("ANCHOR"), kinds(byAnchor), "锚定龙头按名称匹配");
@@ -151,6 +191,32 @@ class NodeServiceTest {
         assertEquals(0, kinds(none).size(), "不在任何节点事件里的票不该被打标");
         assertEquals(Arrays.asList("NODE_STOCK", "ANCHOR"), kinds(both),
                 "同一只票命中多种角色时要全部保留，不能只留第一条");
+        assertEquals(0, kinds(staleD0).size(), "D0 名单只对它的次一交易日出标");
+    }
+
+    /**
+     * D0 候选的日期闸门。
+     *
+     * <p>「上一个有明细的交易日」用的是明细本身，不是日历：09-22 缺涨停池记录时，
+     * 它的上一有明细日子直接跳到 09-18，于是 09-22 的行撞的是 09-18 那批名单。
+     * 名单本来就是从这份明细拉的，两边必须同一口径。
+     */
+    @Test
+    void d0CandidateTagOnlyAppliesToTheDayAfterD0() {
+        NodeEvent node = new NodeEvent();
+        node.setId(9L);
+        node.setD0Date(LocalDate.of(2026, 9, 17));
+        node.setD0Candidates("[\"世联行\"]");
+
+        NodeService svc = new NodeService(eventMapper(Arrays.asList(node)),
+                null, null, stockMapper(PREV), null, null, null, new ObjectMapper());
+
+        CandidateStock nextDay = candidate("002285", "世联行", LocalDate.of(2026, 9, 18));
+        CandidateStock laterDay = candidate("002285", "世联行", LocalDate.of(2026, 9, 22));
+        svc.tagCandidates(Arrays.asList(nextDay, laterDay), USER);
+
+        assertEquals(Arrays.asList("D0_CAND"), kinds(nextDay), "D0 的次一交易日该挂标");
+        assertEquals(0, kinds(laterDay).size(), "往后第二天起就不是这份名单的接力日了");
     }
 
     /** 一条节点事件都没有时（新用户），不该给候选行留下空的 nodeTags。 */
@@ -158,7 +224,7 @@ class NodeServiceTest {
     void tagCandidatesLeavesNoTagsWhenNoEvents() {
         NodeService svc = new NodeService(eventMapper(new ArrayList<NodeEvent>()),
                 null, null, null, null, null, null, new ObjectMapper());
-        CandidateStock c = candidate("600865", "百大集团");
+        CandidateStock c = candidate("600865", "百大集团", LocalDate.of(2026, 9, 18));
         svc.tagCandidates(Arrays.asList(c), USER);
         assertEquals(0, kinds(c).size());
     }
