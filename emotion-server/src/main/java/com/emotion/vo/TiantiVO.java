@@ -117,6 +117,15 @@ public class TiantiVO {
         private Integer ceiling;
         /** 挂着这条线的定线票：降一级时换成记下这个高度的那只；它自己再追平只算周期延续，不算试探。 */
         private HeightStock lineStock;
+        /**
+         * 这条破壁线的高度是<b>哪个交易日</b>由哪只票打出来的。先立起这一级的人记名，<b>唯一的改记</b>是断板钉线：
+         * 线钉在那条断板龙自己的高度上就归它——8.31 起这道 7 板线报 08-28 的深中华Ａ，不再报更早到 7 板的百花医药。
+         * 只<b>追平</b>这条线的人不改记（试探、越线回到同一级、定线票换名都不算来源），
+         * 所以 9.09~9.24 那道 6 板线始终是 9.07 的龙版传媒，不是 9.16 追平的闽东电力。
+         */
+        private LocalDate lineOriginDate;
+        /** 在 {@link #lineOriginDate} 那天打出这个板高的票。 */
+        private HeightStock lineOriginStock;
         /** 试探破壁：另一只票追平当前这条线，还要等它次日续板才算成功。 */
         private Boolean isProbe;
         /** 试探股，仅试探日有值。 */

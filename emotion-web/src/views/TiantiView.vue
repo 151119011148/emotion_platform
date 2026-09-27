@@ -352,6 +352,8 @@ function mapHeightRow(r) {
     stocks: r.stocks || [],
     ceiling: r.ceiling,
     lineStock: r.lineStock || null,
+    lineOriginDate: r.lineOriginDate || null,
+    lineOriginStock: r.lineOriginStock || null,
     isProbe: !!r.isProbe,
     probeStock: r.probeStock || null,
     isBreak: !!r.isBreak,

@@ -1,7 +1,7 @@
 <template>
   <section class="height-curve">
     <div class="curve-head">
-      <h3>{{ name }} <span class="sub">近 {{ visibleCount }} 个交易日 · 共 {{ rows.length }} 天可回看 · 点任意一天切日期 · <i class="lk probe">☆</i>试探 <i class="lk break">★</i>破壁成功 <i class="lk line">- -</i>破壁线</span></h3>
+      <h3>{{ name }} <span class="sub">近 {{ visibleCount }} 个交易日 · 共 {{ rows.length }} 天可回看 · 点任意一天切日期 · <i class="lk probe">☆</i>试探 <i class="lk break">★</i>破壁成功 <i class="lk line">- -</i>破壁线{{ originNote }}</span></h3>
     </div>
     <el-empty v-if="!rows.length" description="暂无连板高度数据" :image-size="60" />
     <div v-else ref="chartRef" class="canvas"></div>
@@ -35,7 +35,8 @@ import { useCurveZoom, MIN_SPAN } from '../utils/curveZoom'
 const props = defineProps({
   /**
    * [{date, maxHeight, stockCount, stocks:[{code,name}],
-   *   ceiling, lineStock, isProbe, probeStock, isBreak, prevHigh, breakStock}]
+   *   ceiling, lineStock, lineOriginDate, lineOriginStock,
+   *   isProbe, probeStock, isBreak, prevHigh, breakStock}]
    * 按日期升序、一天一个点。
    */
   rows: { type: Array, default: () => [] },
@@ -61,6 +62,36 @@ const STAR_PATH =
 const zoom = useCurveZoom(() => (props.rows || []).length)
 const zoomable = computed(() => (props.rows || []).length > MIN_SPAN)
 const visibleCount = computed(() => zoom.span())
+
+/** 图例报的是「当前这条线」：选中那天优先，选中的日子不在窗口里就按窗口里最新一天。 */
+const focusedRow = computed(() => {
+  const vis = zoom.visible(props.rows || [])
+  if (!vis.length) return null
+  return vis.find((r) => r.date === props.selected) || vis[vis.length - 1]
+})
+
+/**
+ * 「09-07 龙版传媒」——这条线的高度是哪天、哪只票打出来的。
+ * 跨年时补上年份，否则看着 2027 年的日子说「来自 05-19」会被读成当年的 5 月。
+ */
+function originPhrase(r) {
+  if (!r || !r.lineOriginDate) return ''
+  const full = r.lineOriginDate.slice(0, 4) !== r.date.slice(0, 4)
+  const day = full ? r.lineOriginDate : r.lineOriginDate.slice(5)
+  const name = r.lineOriginStock ? ` ${r.lineOriginStock.name}` : ''
+  return `${day}${name}`
+}
+
+/**
+ * 图例后缀「 6板 · 来自 09-07 龙版传媒」。来源只在这个板高第一次立起来时记，
+ * 之后被人追平续钉、定线票换个名字挂线都不改——追平它的那只票不是它的来源。
+ */
+const originNote = computed(() => {
+  const r = focusedRow.value
+  if (!r || r.ceiling == null) return ''
+  const o = originPhrase(r)
+  return o ? ` ${r.ceiling}板 · 来自 ${o}` : ` ${r.ceiling}板`
+})
 
 /** 改窗口 → 重画：buildOption 按新窗口重新切片，Y 轴量程跟着可见数据走 */
 function run(fn) {
@@ -213,7 +244,8 @@ function buildOption() {
         }
         const lines = [heads.length ? `${r.date} ${heads.join(' ')}` : `${r.date}`]
         lines.push(`最高连板: <b>${r.maxHeight} 板</b> · ${r.stockCount} 只并列`)
-        lines.push(`破壁线: <b>${r.ceiling} 板</b>（定线票 ${r.lineStock ? r.lineStock.name : '—'}，另一只票追平才算试探）`)
+        const from = originPhrase(r)
+        lines.push(`破壁线: <b>${r.ceiling} 板</b>${from ? ` · 来自 ${from}` : ''}（定线票 ${r.lineStock ? r.lineStock.name : '—'}，另一只票追平才算试探）`)
         if (brk) {
           lines.push(`破壁股: <b>${brk.stock ? brk.stock.name : '—'}</b>（捅破 ${brk.prevHigh} 板线）`)
         } else if (prb) {
