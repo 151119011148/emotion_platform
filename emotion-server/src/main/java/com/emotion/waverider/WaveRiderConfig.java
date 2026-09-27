@@ -91,13 +91,48 @@ public class WaveRiderConfig {
     @JsonProperty("threshold_mode")
     private String thresholdMode = THRESHOLD_DYNAMIC;
 
-    /** 各类型节点的评分权重。键与 t_node_detect.node_type 的存储值一致，全部大写。 */
+    /**
+     * 各类型节点的评分权重。键与 node_type 的存储值一致，全部大写。
+     *
+     * <p>高低切一族按「方向越确定、给分越高」排：转切走的是新方向、可以超越老龙，0.35 高于
+     * 借题材余温、天花板受老龙限制的补位 0.3；接位还没定性，只给 0.2——未定性的东西不值得重仓。
+     */
     @JsonProperty("node_type_weights")
-    private Map<String, Double> nodeTypeWeights = new LinkedHashMap<String, Double>() {{
-        put("START", 1.0);
-        put("SWITCH", 0.8);
-        put("DIVERGE", 0.6);
-    }};
+    private Map<String, Double> nodeTypeWeights = defaultNodeTypeWeights();
+
+    /** 类型轴的默认权重，唯一的一份；{@link #fillMissingNodeTypeWeights()} 补存量配置也用它。 */
+    public static Map<String, Double> defaultNodeTypeWeights() {
+        Map<String, Double> w = new LinkedHashMap<>();
+        w.put("START", 1.0);
+        w.put("SWITCH", 0.8);
+        w.put("DIVERGE", 0.6);
+        w.put("SWITCH_CROSS", 0.35);
+        w.put("FILL_SAME", 0.3);
+        w.put("SPLIT_PENDING", 0.2);
+        return w;
+    }
+
+    /**
+     * 存量配置里没写的新类型键，按 {@link #defaultNodeTypeWeights()} 补上；<b>已有的键一个不改</b>。
+     *
+     * <p>必须补：{@code WaveRiderEngine.nodePart} 对「有类型但权重表里查不到」是给 0 分的，
+     * 不补就等于复算第一次给老策略的节点标上「补位」，那条节点的节点分从 1.0 无声掉到 0。
+     *
+     * <p>为什么不做成迁移：{@code t_strategy_version} 是历史版本只读，
+     * {@code t_strategy_run.version_id} 靠它保证同一次运行随时可复算——改存量行等于改历史的结论。
+     * 所以只在读进来时补，落库的快照保持原样。
+     */
+    public void fillMissingNodeTypeWeights() {
+        if (nodeTypeWeights == null) {
+            nodeTypeWeights = defaultNodeTypeWeights();
+            return;
+        }
+        for (Map.Entry<String, Double> e : defaultNodeTypeWeights().entrySet()) {
+            if (!nodeTypeWeights.containsKey(e.getKey())) {
+                nodeTypeWeights.put(e.getKey(), e.getValue());
+            }
+        }
+    }
 
     /** 每题材最多取几只节点票，控制选拔率。 */
     @JsonProperty("node_stock_limit_per_theme")

@@ -444,16 +444,20 @@ const statusFilter = ref('')
 const dateRange = ref(null)
 
 /**
- * 类型轴的五个取值（PRD §2）。后端 NodeService.nodeTypeLabel 认的就是这五个，
- * 落库也是这五个原值；筛选器选项与展示文案共用这一份，避免前后端口径漂移。
- * 周期节点 = 启动/分歧/切换（横向），空间节点 = 破局日/破局次日（纵向）。
+ * 类型轴的取值闭集（PRD §2）。后端 NodeService.nodeTypeLabel 认的就是这些，
+ * 落库也是这些原值；筛选器选项与展示文案共用这一份，避免前后端口径漂移。
+ * 周期节点 = 启动/分歧/切换（横向），空间节点 = 破局日/破局次日（纵向），
+ * 高低切节点 = 接位/补位/转切（纵向，老龙断板后按题材同不同属性分流，复算算出来后采纳才落库）。
  */
 const NODE_TYPES = [
   { value: 'START', label: '启动日' },
   { value: 'DIVERGE', label: '分歧日' },
   { value: 'SWITCH', label: '切换日' },
   { value: 'SPACE_BREAK', label: '破局日 · 观察' },
-  { value: 'SPACE_BREAK_NEXT', label: '破局次日 · 出手' }
+  { value: 'SPACE_BREAK_NEXT', label: '破局次日 · 出手' },
+  { value: 'SPLIT_PENDING', label: '接位 · 待定' },
+  { value: 'FILL_SAME', label: '补位节点' },
+  { value: 'SWITCH_CROSS', label: '转切节点' }
 ]
 /** 筛「未识别」的哨兵值：node_type 为 NULL 的行，不能用一个空字符串糊过去。 */
 const NONE_KEY = '__NONE__'
@@ -467,9 +471,15 @@ const nodeTypeFilter = ref('')
 function nodeTypeLabel(row) {
   return row?.nodeTypeLabel || '未识别'
 }
-/** 配色类名，按 node_type 原值拼；没有类型就是 nt-none（灰）。 */
+/**
+ * 配色类名，按 node_type 原值拼；没有类型、或原值不在闭集里，一律 nt-none（灰）。
+ * 兜这一下是因为没配色的类名不会报错，只会让标签在深色卡片上变成"白字透明底"直接看不见——
+ * 后端闭集再加词而前端漏配 CSS 时，宁可退成灰色，也别无声地消失。
+ */
+const KNOWN_NODE_TYPES = new Set(NODE_TYPES.map(t => t.value))
 function nodeTypeClass(row) {
-  return 'nt-' + (row?.nodeType || 'none')
+  const t = row?.nodeType
+  return 'nt-' + (t && KNOWN_NODE_TYPES.has(t) ? t : 'none')
 }
 /** 观察日（破局日）：当天 0 候选是规则要求，不是数据缺失。 */
 function isObserveDay(row) {
@@ -912,14 +922,8 @@ onMounted(() => {
 .muted { color: #8899a6; font-weight: 400; font-size: 12px; }
 .surv-desc { color: #f87171; font-size: 12px; margin: 6px 0 0; }
 
-.ntag {
-  display: inline-flex; align-items: center; align-self: center; padding: 1px 8px; border-radius: 4px;
-  font-size: 12px; line-height: 1.7; white-space: nowrap; border: 1px solid transparent;
-}
-.nt-SPACE_BREAK { color: var(--node-sb, #a78bfa); background: rgba(167, 139, 250, .14); border-color: rgba(167, 139, 250, .35); }
-.nt-SPACE_BREAK_NEXT { color: var(--node-nxt, #34d399); background: rgba(52, 211, 153, .14); border-color: rgba(52, 211, 153, .35); }
-.nt-START, .nt-SWITCH, .nt-DIVERGE { color: var(--node-phase, #60a5fa); background: rgba(96, 165, 250, .14); border-color: rgba(96, 165, 250, .35); }
-.nt-none { color: var(--node-none, #8899a6); background: rgba(136, 153, 166, .12); border-color: rgba(136, 153, 166, .28); }
+/* 节点类型标签的 .ntag / .nt-* 配色在全局 App.vue：NodeSuggestPanel 也要用同一份，
+   放 scoped 里它读不到。别再往这里抄一遍。 */
 
 .node-timeline { display: flex; position: relative; margin: 16px 0; }
 .timeline-step { flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; padding: 0 12px; }

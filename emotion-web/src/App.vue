@@ -3,7 +3,7 @@
 </template>
 
 <style>
-/* ===== 节点类型语义色（破局节点 V34）=====
+/* ===== 节点类型语义色（破局节点 V34 ＋ 高低切分流）=====
    类型轴的展示色，NodeView 与后续 NodeSuggestPanel 共用。
    放 :root 而不是页面 scoped：scoped 里的变量别的组件读不到，
    而这些色不止一处要用，硬编码在两处迟早会走轮。 */
@@ -12,7 +12,29 @@
   --node-nxt: #34d399;
   --node-phase: #60a5fa;
   --node-none: #8899a6;
+  /* 高低切一族：接位是"方向未定"的黄，补位/转切是分流后的两个去向，
+     两者判据相同、只差题材同不同属性，所以给同明度不同色相的一对。 */
+  --node-pending: #fbbf24;
+  --node-fill: #22d3ee;
+  --node-cross: #f472b6;
 }
+
+/* ===== 节点类型标签 =====
+   放在全局是必须的：NodeView 的 scoped 副本 NodeSuggestPanel 读不到，
+   而"建议是哪个类型"必须在采纳之前就看得见——指纹里带着它，
+   看不见就点采纳等于点了个假的采纳。所以整份配色只留这一处。 */
+.ntag {
+  display: inline-flex; align-items: center; align-self: center; padding: 1px 8px; border-radius: 4px;
+  font-size: 12px; line-height: 1.7; white-space: nowrap; border: 1px solid transparent;
+}
+.nt-SPACE_BREAK { color: var(--node-sb, #a78bfa); background: rgba(167, 139, 250, .14); border-color: rgba(167, 139, 250, .35); }
+.nt-SPACE_BREAK_NEXT { color: var(--node-nxt, #34d399); background: rgba(52, 211, 153, .14); border-color: rgba(52, 211, 153, .35); }
+.nt-START, .nt-SWITCH, .nt-DIVERGE { color: var(--node-phase, #60a5fa); background: rgba(96, 165, 250, .14); border-color: rgba(96, 165, 250, .35); }
+/* 高低切一族：接位是还没定性的黄；补位/转切是同一判据分流出来的两个去向，同明度异色相。 */
+.nt-SPLIT_PENDING { color: var(--node-pending, #fbbf24); background: rgba(251, 191, 36, .14); border-color: rgba(251, 191, 36, .35); }
+.nt-FILL_SAME { color: var(--node-fill, #22d3ee); background: rgba(34, 211, 238, .14); border-color: rgba(34, 211, 238, .35); }
+.nt-SWITCH_CROSS { color: var(--node-cross, #f472b6); background: rgba(244, 114, 182, .14); border-color: rgba(244, 114, 182, .35); }
+.nt-none { color: var(--node-none, #8899a6); background: rgba(136, 153, 166, .12); border-color: rgba(136, 153, 166, .28); }
 
 body {
   margin: 0;

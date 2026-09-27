@@ -58,6 +58,44 @@ class WaveRiderEngineNodePartTest {
                 new LinkedHashMap<String, Double>()), 1e-9);
     }
 
+    /**
+     * 高低切一族分流出来就自带权重：转切 0.35／补位 0.3／接位 0.2。
+     *
+     * <p>这一档必须和判定同一轮上线：{@code nodePart} 对「有类型但表里查不到」是给 0 分的，
+     * 复算第一次把节点标成补位时若权重表还不认，那条节点的节点分会从 1.0 无声掉到 0。
+     */
+    @Test
+    void highLowSplitTypesCarryTheirOwnWeights() {
+        Map<String, Double> weights = new WaveRiderConfig().getNodeTypeWeights();
+        assertEquals(0.35, WaveRiderEngine.nodePart(typed("SWITCH_CROSS"), weights), 1e-9);
+        assertEquals(0.3, WaveRiderEngine.nodePart(typed("FILL_SAME"), weights), 1e-9);
+        assertEquals(0.2, WaveRiderEngine.nodePart(typed("SPLIT_PENDING"), weights), 1e-9);
+    }
+
+    /**
+     * 这三个类型之前落库的版本快照里没有对应的键，读进来要按默认值补齐；<b>已有键一个都不改</b>。
+     *
+     * <p>补齐只发生在 parse 之后、不回写快照：历史版本只读，{@code t_strategy_run.version_id}
+     * 要靠它原样复算。不补则老策略遇到被复算标成补位的节点直接拿 0 分。
+     */
+    @Test
+    void storedConfigWithoutTheNewKeysGetsThemBackfilled() {
+        WaveRiderConfig cfg = new WaveRiderConfig();
+        Map<String, Double> legacy = new LinkedHashMap<>();
+        legacy.put("START", 1.2);
+        legacy.put("SWITCH", 0.8);
+        legacy.put("DIVERGE", 0.6);
+        cfg.setNodeTypeWeights(legacy);
+
+        cfg.fillMissingNodeTypeWeights();
+
+        Map<String, Double> after = cfg.getNodeTypeWeights();
+        assertEquals(1.2, after.get("START"), 1e-9);
+        assertEquals(0.35, after.get("SWITCH_CROSS"), 1e-9);
+        assertEquals(0.3, after.get("FILL_SAME"), 1e-9);
+        assertEquals(0.2, after.get("SPLIT_PENDING"), 1e-9);
+    }
+
     private static NodeEvent typed(String nodeType) {
         NodeEvent e = new NodeEvent();
         e.setNodeType(nodeType);

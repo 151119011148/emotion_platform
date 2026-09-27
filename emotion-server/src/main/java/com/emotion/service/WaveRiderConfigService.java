@@ -320,7 +320,11 @@ public class WaveRiderConfigService {
             return new WaveRiderConfig();
         }
         try {
-            return objectMapper.readValue(json, WaveRiderConfig.class);
+            WaveRiderConfig cfg = objectMapper.readValue(json, WaveRiderConfig.class);
+            // 存量快照里不会有后来才加的类型键。只补这里的读路径、不回写快照：
+            // 历史版本要能被 t_strategy_run 原样复算，补键是"读的时候认得"，不是"改过的历史"。
+            cfg.fillMissingNodeTypeWeights();
+            return cfg;
         } catch (Exception e) {
             throw new IllegalArgumentException("配置 JSON 解析失败：" + e.getMessage());
         }

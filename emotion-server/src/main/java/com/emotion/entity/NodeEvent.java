@@ -50,9 +50,16 @@ public class NodeEvent {
      * <strong>破局次日 = 修复日 = 出手日（唯一产候选的日子）</strong>，
      * 两者都是 t_node_event 既有「D0 → T+1 → 确认」两日结构的一种取法，所以不新开表。
      *
-     * <p>nodeType 是「类型轴」，只认 START/DIVERGE/SWITCH/SPACE_BREAK/SPACE_BREAK_NEXT 五个具体值；
-     * 策略没识别出来的就是 NULL，展示层显示「未识别」——不要回落成「普通 / 常规 / 其他」，
+     * <p>nodeType 是「类型轴」，取值是一个闭集：周期一族 START/DIVERGE/SWITCH，
+     * 空间一族 SPACE_BREAK/SPACE_BREAK_NEXT，
+     * <b>高低切一族 SPLIT_PENDING 接位／FILL_SAME 补位／SWITCH_CROSS 转切</b>——
+     * 最后这三个由节点复算（{@link com.emotion.service.NodeSuggestService}）按老龙与接位票的题材同不同属性分流出来，
+     * 经他采纳才落库，是这张表上第一个真被自动算出来的类型。
+     *
+     * <p>策略没识别出来的就是 NULL，展示层显示「未识别」——不要回落成「普通 / 常规 / 其他」，
      * 那是反义定义，每加一个 node_type 词义就要跟着变一次（PRD §2 命名约定）。
+     *
+     * <p>列宽 VARCHAR(16)，而 SPACE_BREAK_NEXT 已经占满 16 个字符：再加新类型必须先改 V34 的列宽。
      */
     private String nodeType;
     /** 破局股代码：破局日里那只断了板的空间板本身。它是锚，不进候选池。 */

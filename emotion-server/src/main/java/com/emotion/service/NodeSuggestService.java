@@ -8,9 +8,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 
 import org.springframework.stereotype.Service;
@@ -58,6 +60,13 @@ public class NodeSuggestService {
     static final int HEIGHT_COMPRESS_DAYS = 3;
     /** §三 系统A 判定规则「D0 二板晋级数量 ≥3 只 → 强节点；1-2 只 → 中等；0 只 → 失败」。 */
     static final int A_STRONG_PROMOTION = 3;
+    /**
+     * §三 系统A 的 D0 候选池＝D0 当天全部<b>二板</b>。
+     *
+     * <p>候选池打标的复算（{@code NodeService.d0CandidatePools}）用的是同一个数：屏幕上挂
+     * 「D0候选」标的，必须就是判据算晋级率时数的那几只。两处各写一个 2 迟早会对不上。
+     */
+    static final int A_CANDIDATE_BOARD = 2;
     /** §三 系统A 操作流程 T+1「收盘确认：D0 二板晋级率 ≥ 30% → 节点有效」。百分数。 */
     static final BigDecimal A_MIN_RATE = new BigDecimal("30.00");
     /**
@@ -68,6 +77,19 @@ public class NodeSuggestService {
      * systemB 恒为 false，这段就走不到。整体删除排在破局节点（V34）之后，不混在同一次改动里。
      */
     static final int B_MIN_PROMOTION = 2;
+
+    /**
+     * 高低切分流的助攻下限：接位票所在属性在分流窗口内要有 ≥2 只别的涨停票跟进才算方向立住。
+     * 不足这个数就还挂在接位上，等窗口下一天。
+     */
+    static final int MIN_SUPPORT = 2;
+
+    /** 类型码·接位：老龙断板当天有票接住，但方向未定，分流窗口内还在等助攻。 */
+    static final String TYPE_SPLIT_PENDING = "SPLIT_PENDING";
+    /** 类型码·补位：接位票与老龙同属性，借的是老龙的题材余温。 */
+    static final String TYPE_FILL_SAME = "FILL_SAME";
+    /** 类型码·转切：接位票与老龙异属性，借的是老龙断板腾出来的势，走的是新方向。 */
+    static final String TYPE_SWITCH_CROSS = "SWITCH_CROSS";
 
     /** 老龙反查的左边界：往前 30 天足够覆盖一轮 7 板周期的起爆。 */
     private static final int ANCHOR_LOOKBACK_DAYS = 30;
@@ -83,10 +105,10 @@ public class NodeSuggestService {
     /** 板块节点类型码。已下线：仅供识别存量脏数据，不得用于新建分支。 */
     static final String SYSTEM_B = "B";
 
-    /** 采纳要落的八个字段。指纹、比对、写库三处共用这一张表——漏一个字段就是点了个假的采纳。 */
+    /** 采纳要落的九个字段。指纹、比对、写库三处共用这一张表——漏一个字段就是点了个假的采纳。 */
     private static final List<String> FP_KEYS = Collections.unmodifiableList(Arrays.asList(
             "status", "t1Date", "t1AnchorRepack", "t1PromotionCount", "t1PromotionRate",
-            "nodeValid", "nodeStock", "nodeStockMaxBoard"));
+            "nodeValid", "nodeStock", "nodeStockMaxBoard", "nodeType"));
     private static final Map<String, String> FP_LABELS = labels();
 
     private static Map<String, String> labels() {
@@ -99,6 +121,7 @@ public class NodeSuggestService {
         map.put("nodeValid", "节点是否有效");
         map.put("nodeStock", "节点票");
         map.put("nodeStockMaxBoard", "节点票最高板数");
+        map.put("nodeType", "节点类型");
         return Collections.unmodifiableMap(map);
     }
 
@@ -152,6 +175,10 @@ public class NodeSuggestService {
         node.setNodeStockMaxBoard(fresh.getNodeStockMaxBoard());
         node.setStatusNote(cut(fresh.getReason(), STATUS_NOTE_MAX));
         node.setConclusionReason(fresh.getConclusionReason());
+        // 没判出类型就不动他已有的标：这条采纳的是状态与晋级，不该把自己没算出来的东西抹成空
+        if (fresh.getNodeType() != null) {
+            node.setNodeType(fresh.getNodeType());
+        }
         node.setLastRecalcAt(LocalDateTime.now());
         nodeEventMapper.updateById(node);
         return node;
@@ -184,6 +211,15 @@ public class NodeSuggestService {
         Map<String, Integer> t1Boards;
         /** 候选票在 D0 之后（含 D0）出现过的最高连板数。 */
         Map<String, Integer> maxBoards = new TreeMap<>();
+        /**
+         * 分流窗口（D0 之后 max(H−1,1) 个交易日）内逐日的涨停明细，行业已按 TDX 二级行业口径重映射。
+         * 助攻只数从这里数，判据本身仍是纯函数。
+         */
+        List<MarketStock> supportRows = new ArrayList<>();
+        /** 窗口应有的交易日数：老龙断板前的板高 H 定出来的 max(H−1,1)，与破壁线钉线同一个参数。 */
+        Integer splitWindowDays;
+        /** 库里已经落了几天的明细。小于 {@link #splitWindowDays} 就说明窗口还没走完，接位还得等。 */
+        int splitWindowLanded;
         List<String> missing = new ArrayList<>();
     }
 
@@ -198,6 +234,7 @@ public class NodeSuggestService {
         readAnchor(r, node);
         readT1(r, node);
         readCandidates(r, node);
+        readSupportWindow(r, node);
         return r;
     }
 
@@ -311,7 +348,7 @@ public class NodeSuggestService {
      */
     private void readCandidates(Readings r, NodeEvent node) {
         boolean systemB = SYSTEM_B.equals(node.getSystemType());
-        int wantBoard = systemB ? 1 : 2;
+        int wantBoard = systemB ? 1 : A_CANDIDATE_BOARD;
         if (systemB && !notBlank(r.sector)) {
             r.missing.add("系统B 要按板块取 D0 首板，但老龙的行业没反查出来，板块范围无从定");
             return;
@@ -373,6 +410,42 @@ public class NodeSuggestService {
                 }
             }
         }
+    }
+
+    /**
+     * 高低切的分流窗口：D0 之后 max(H−1, 1) 个交易日的逐日涨停明细。
+     *
+     * <p>窗口长度用的是老龙断板前的板高 H，与 {@link TiantiService} 把破壁线钉住
+     * {@code max(chaosH - 1, 1)} 个交易日同一个参数——一轮老龙腾出来的位置，市场认它多久，
+     * 「等它几天分流」和「这道线钉几天」不该是两把尺子。
+     *
+     * <p>行业必须跟老龙那边一样过一遍 {@code industryClassify.apply()}：两边口径不同源时
+     * 「同属性还是异属性」会答错，而答错是无声的——补位会被判成转切。
+     */
+    private void readSupportWindow(Readings r, NodeEvent node) {
+        Integer h = node.getAnchorMaxBoard();
+        if (h == null || h <= 0) {
+            // 只进 warnings 不进 missing：板高缺失是分不了「补位还是转切」，
+            // 不该顺手把这条节点的状态采纳一起卡死——那是一天前还能采纳、改完反而不能了。
+            return;
+        }
+        int days = Math.max(h - 1, 1);
+        r.splitWindowDays = days;
+        // 交易日没法直接按个数取，先按 3 倍自然日宽取够、再由调用方按天数截断
+        List<LocalDate> dates = marketStockMapper.listDetailDatesBetween(
+                r.d0.plusDays(1), r.d0.plusDays(days * 3L + 15));
+        r.splitWindowLanded = Math.min(dates.size(), days);
+        if (dates.isEmpty()) {
+            return;
+        }
+        List<LocalDate> window = dates.subList(0, r.splitWindowLanded);
+        List<MarketStock> rows = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
+                .in(MarketStock::getTradeDate, window)
+                .eq(MarketStock::getPool, MarketStock.POOL_LIMIT_UP));
+        if (industryClassify != null) {
+            industryClassify.apply(rows);
+        }
+        r.supportRows = rows;
     }
 
     // ---------- 判定 ----------
@@ -446,6 +519,10 @@ public class NodeSuggestService {
             vo.setNodeStock(node.getNodeStock() == null ? "" : node.getNodeStock());
             vo.setNodeStockMaxBoard(node.getNodeStockMaxBoard() == null ? 0 : node.getNodeStockMaxBoard());
         }
+        // 类型分流排在指纹之前：nodeType 是采纳要落的第九个值，晚一步就进不了指纹
+        TypeSplit split = resolveSplit(r, takerOf(cands, leader));
+        vo.setNodeType(split.type);
+        vo.setNodeTypeLabel(NodeService.nodeTypeLabel(split.type));
         vo.getMissing().addAll(r.missing);
         if (!decided && vo.getMissing().isEmpty()) {
             // 取数侧每种判不了都留了一句具体的，这句是兜底：不变式"判不了 ⇒ 不 ready"不能靠约定撑
@@ -453,6 +530,12 @@ public class NodeSuggestService {
         }
         vo.setReady(vo.getMissing().isEmpty());
         vo.setReason(reason(r, vo, systemB, count, total, rate, status));
+        if (split.type != null) {
+            vo.setReason(vo.getReason() + "；类型 " + vo.getNodeTypeLabel() + "：" + split.note);
+        } else {
+            // 判不了也要出声：一片「未识别」里分不清"还在等窗口"和"原料就没有"，等于让人猜
+            vo.getWarnings().add("节点类型未识别｜" + split.note);
+        }
         addWarnings(r, vo);
         vo.setFingerprint(fingerprint(json, vo));
         return vo;
@@ -492,6 +575,16 @@ public class NodeSuggestService {
         return null;
     }
 
+    /** 板高降序、并列取代码小：纯为让"哪一只是它"这个结论可复现。 */
+    private static final Comparator<NodeSuggestVO.Candidate> BY_BOARD_THEN_CODE =
+            new Comparator<NodeSuggestVO.Candidate>() {
+                @Override
+                public int compare(NodeSuggestVO.Candidate a, NodeSuggestVO.Candidate b) {
+                    int byBoard = b.getMaxBoard().compareTo(a.getMaxBoard());
+                    return byBoard != 0 ? byBoard : a.getCode().compareTo(b.getCode());
+                }
+            };
+
     /** 最强节点票：D0 之后最高板数最大的那只；并列取代码小的，纯为让结论可复现。 */
     private static NodeSuggestVO.Candidate strongest(List<NodeSuggestVO.Candidate> cands) {
         List<NodeSuggestVO.Candidate> promoted = new ArrayList<>();
@@ -503,14 +596,97 @@ public class NodeSuggestService {
         if (promoted.isEmpty()) {
             return null;
         }
-        Collections.sort(promoted, new Comparator<NodeSuggestVO.Candidate>() {
-            @Override
-            public int compare(NodeSuggestVO.Candidate a, NodeSuggestVO.Candidate b) {
-                int byBoard = b.getMaxBoard().compareTo(a.getMaxBoard());
-                return byBoard != 0 ? byBoard : a.getCode().compareTo(b.getCode());
-            }
-        });
+        Collections.sort(promoted, BY_BOARD_THEN_CODE);
         return promoted.get(0);
+    }
+
+    /** 高低切分流的结果。{@link #type} 为 null 就是判不了，保持「未识别」，不兜任何反义定义。 */
+    static class TypeSplit {
+        String type;
+        boolean sameSeat;
+        int support;
+        /** 怎么算的一句话，进 warnings：判不了和还在等是两种完全不同的空，得说得出差别。 */
+        String note;
+    }
+
+    /**
+     * 接位票：优先用挑得出的节点票；T+1 还没走完、一只都没晋级时退回 D0 候选里板高最大的那只。
+     *
+     * <p>接位这件事发生在断板当天，等 T+1 才有对象可比就等于窗口前几天什么都判不了。
+     * 两种取法用的是同一个比较器，所以 T+1 落地之后接位票不会悄悄换人。
+     */
+    private static NodeSuggestVO.Candidate takerOf(List<NodeSuggestVO.Candidate> cands,
+                                                  NodeSuggestVO.Candidate leader) {
+        if (leader != null) {
+            return leader;
+        }
+        List<NodeSuggestVO.Candidate> pool = new ArrayList<>();
+        for (NodeSuggestVO.Candidate each : cands) {
+            if (each.getMaxBoard() != null) {
+                pool.add(each);
+            }
+        }
+        if (pool.isEmpty()) {
+            return null;
+        }
+        Collections.sort(pool, BY_BOARD_THEN_CODE);
+        return pool.get(0);
+    }
+
+    /**
+     * 高低切分流：补位与转切<b>只差一个题材同不同属性</b>，判据其余部分完全相同。
+     *
+     * <p>同属性＝借老龙的题材余温（国芳→百大），异属性＝借的是老龙「死」这件事腾出来的势
+     * （金健→深中华，涨的是黄金不是粮食）。两类都要窗口内 ≥{@link #MIN_SUPPORT} 只同/异属性助攻
+     * 才算方向立住；立不住就还挂接位——断板当天只有"有票接住了"这一个事实，扩散与跟进都还没发生。
+     *
+     * <p>助攻数的是窗口内去重后的只数，老龙自己与接位票自己都不算助攻。
+     */
+    static TypeSplit resolveSplit(Readings r, NodeSuggestVO.Candidate taker) {
+        TypeSplit out = new TypeSplit();
+        if (taker == null) {
+            out.note = "D0 候选里挑不出接位票，补位还是转切无从谈起";
+            return out;
+        }
+        if (r.splitWindowDays == null) {
+            out.note = "老龙断板前的板高没登记，分流窗口有多长定不了，接位分不了流";
+            return out;
+        }
+        if (!notBlank(r.sector) || !notBlank(taker.getIndustry())) {
+            out.note = "老龙的行业或接位票 " + taker.getName() + " 的行业在明细里是空的，"
+                    + "同属性/异属性判不了";
+            return out;
+        }
+        out.sameSeat = r.sector.equals(taker.getIndustry());
+        String target = out.sameSeat ? r.sector : taker.getIndustry();
+        Set<String> helpers = new HashSet<>();
+        for (MarketStock row : r.supportRows) {
+            if (target.equals(row.getIndustry())
+                    && !row.getCode().equals(taker.getCode())
+                    && !row.getCode().equals(r.anchorCode)) {
+                helpers.add(row.getCode());
+            }
+        }
+        out.support = helpers.size();
+        if (out.support >= MIN_SUPPORT) {
+            out.type = out.sameSeat ? TYPE_FILL_SAME : TYPE_SWITCH_CROSS;
+            out.note = "接位票 " + taker.getName() + "(" + taker.getCode() + ") 行业「" + taker.getIndustry()
+                    + "」与老龙「" + r.sector + "」" + (out.sameSeat ? "同属性" : "异属性")
+                    + "；窗口内 " + target + " 助攻 " + out.support + " 只 ≥" + MIN_SUPPORT
+                    + " → " + NodeService.nodeTypeLabel(out.type);
+            return out;
+        }
+        out.type = TYPE_SPLIT_PENDING;
+        if (r.splitWindowLanded >= r.splitWindowDays) {
+            out.note = "分流窗口 " + r.splitWindowDays + " 个交易日已走完，" + target + " 助攻只有 "
+                    + out.support + " 只（判据 ≥" + MIN_SUPPORT + "）——按状态机这该降孤板，"
+                    + "作废判定本轮未实现，先留在接位";
+        } else {
+            out.note = "分流窗口才走 " + r.splitWindowLanded + "/" + r.splitWindowDays + " 个交易日，"
+                    + target + " 助攻 " + out.support + " 只、还差 " + (MIN_SUPPORT - out.support)
+                    + " 只，方向未定 → 接位";
+        }
+        return out;
     }
 
     private static List<NodeSuggestVO.Candidate> candidates(Readings r) {
@@ -742,6 +918,8 @@ public class NodeSuggestService {
         values.put("nodeStock", text(vo.getNodeStock()));
         values.put("nodeStockMaxBoard",
                 vo.getNodeStockMaxBoard() == null ? "" : vo.getNodeStockMaxBoard().toString());
+        // 存中文标签不是类型码：与 status 存"有效/失效"同一个道理，比对不一致时那句 diff 他才看得懂
+        values.put("nodeType", text(vo.getNodeTypeLabel()));
         try {
             return json.writeValueAsString(values);
         } catch (Exception e) {
@@ -751,7 +929,7 @@ public class NodeSuggestService {
     }
 
     /**
-     * 他看到的那八个值 vs 现在算出来的八个值，不一样的逐条报出来。
+     * 他看到的那九个值 vs 现在算出来的九个值，不一样的逐条报出来。
      *
      * <p>只说"不一致"等于让他猜哪一格变了——这里报的是"晋级数量：5 → 现在算出 6"这种能当场看懂的话。
      */

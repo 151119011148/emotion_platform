@@ -4,6 +4,8 @@
       <span class="title">平台复算</span>
       <template v-if="s">
         <el-tag :type="statusType(s.suggestedStatus)" size="small">建议 {{ s.suggestedStatus }}</el-tag>
+        <!-- 类型是采纳要落的第九个值，进指纹：看不见就点采纳，点的就是个假的采纳 -->
+        <span class="ntag" v-if="s.nodeType" :class="'nt-' + s.nodeType">建议 {{ s.nodeTypeLabel }}</span>
         <el-tag v-if="!s.ready" type="info" size="small">判据不齐，不能采纳</el-tag>
         <span class="same" v-if="sameAsStored">与库里那条一字不差</span>
       </template>

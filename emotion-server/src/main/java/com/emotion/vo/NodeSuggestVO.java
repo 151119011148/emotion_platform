@@ -32,7 +32,7 @@ public class NodeSuggestVO {
     /** 状态来路细分原因：有效·强/有效·中等/有效·板块达标；反包失效/晋级清零失效。采纳时写进 conclusion_reason。 */
     private String conclusionReason;
 
-    // ---- 建议写入的八个字段（今天前端一个字都写不进去的那八个），全部与实体同名同类型 ----
+    // ---- 建议写入的九个字段（今天前端一个字都写不进去的那九个），全部与实体同名同类型 ----
     private LocalDate t1Date;
     private Integer t1AnchorRepack;
     private Integer t1PromotionCount;
@@ -41,6 +41,13 @@ public class NodeSuggestVO {
     private String nodeStock;
     private Integer nodeStockMaxBoard;
     private String status;
+    /**
+     * 高低切分流出来的类型码：SPLIT_PENDING 接位 / FILL_SAME 补位 / SWITCH_CROSS 转切。
+     * 判不出来就是 null——保持「未识别」，不兜成任何一个反义定义。
+     */
+    private String nodeType;
+    /** {@link #nodeType} 的中文展示名，进指纹的就是这一份（与 status 存"有效/失效"同一个道理）。 */
+    private String nodeTypeLabel;
 
     private Promotion promotion;
     private List<FilterItem> filter = new ArrayList<>();
@@ -51,7 +58,7 @@ public class NodeSuggestVO {
     private List<String> missing = new ArrayList<>();
 
     /**
-     * 八个建议值 + 建议状态的规范 JSON。采纳时必须原样带回来，服务端重算后逐字段比对。
+     * 九个建议值 + 建议状态的规范 JSON。采纳时必须原样带回来，服务端重算后逐字段比对。
      *
      * <p>用一串规范文本而不是让前端回传八个字段：他要点的就是"这个结论"，中间不该再有一次
      * 序列化把 50.00 变成 50、把 有效 变成别的东西。指纹不一致 ⇒ 那天的盘面在这期间被回补过 ⇒ 拒。

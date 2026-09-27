@@ -24,11 +24,25 @@ public class NodeDetect {
 
     public static final String TYPE_START = "START";
     public static final String TYPE_DIVERGE = "DIVERGE";
+    /** 周期节点的「切换日」。<b>别和下面的 SWITCH_CROSS「转切节点」混为一谈</b>：一个是横向的周期切换。 */
     public static final String TYPE_SWITCH = "SWITCH";
     /** 空间破局日 = 空间板断板日 = 观察日（不产票）。V34 引入。 */
     public static final String TYPE_SPACE_BREAK = "SPACE_BREAK";
     /** 破局次日 = 修复日 = 唯一出手日。 */
     public static final String TYPE_SPACE_BREAK_NEXT = "SPACE_BREAK_NEXT";
+
+    // ---------- 高低切一族：老龙断板之后资金去了哪儿（纵向，由节点复算分流） ----------
+
+    /** 接位：断板当天有票接住了，但分流窗口还没走完，方向未定。 */
+    public static final String TYPE_SPLIT_PENDING = "SPLIT_PENDING";
+    /** 补位：接位票与老龙<b>同属性</b>，借的是老龙的题材余温，天花板受老龙高度限制。 */
+    public static final String TYPE_FILL_SAME = "FILL_SAME";
+    /**
+     * 转切：接位票与老龙<b>异属性</b>，借的是老龙断板腾出来的势，走的是新方向，可超越老龙。
+     *
+     * <p>这是纵向的题材切换，与上面横向的 {@link #TYPE_SWITCH 切换日}不是一回事。
+     */
+    public static final String TYPE_SWITCH_CROSS = "SWITCH_CROSS";
 
     public static final String SOURCE_AUTO = "AUTO";
     public static final String SOURCE_MANUAL = "MANUAL";
