@@ -125,6 +125,14 @@ class NodeServiceTest {
         put(LocalDate.of(2026, 9, 22), LocalDate.of(2026, 9, 18));
     }};
 
+    /** 节点加分要往回数 N 个「有明细的日子」，这条链就是那把尺子：09-19/09-20 没有明细。 */
+    private static final Map<LocalDate, LocalDate> WINDOW = new HashMap<LocalDate, LocalDate>() {{
+        put(LocalDate.of(2026, 9, 21), LocalDate.of(2026, 9, 18));
+        put(LocalDate.of(2026, 9, 18), LocalDate.of(2026, 9, 17));
+        put(LocalDate.of(2026, 9, 17), LocalDate.of(2026, 9, 16));
+        put(LocalDate.of(2026, 9, 16), LocalDate.of(2026, 9, 15));
+    }};
+
     private static CandidateStock candidate(String code, String name, LocalDate tradeDate) {
         CandidateStock c = new CandidateStock();
         c.setCode(code);
@@ -227,6 +235,55 @@ class NodeServiceTest {
         CandidateStock c = candidate("600865", "百大集团", LocalDate.of(2026, 9, 18));
         svc.tagCandidates(Arrays.asList(c), USER);
         assertEquals(0, kinds(c).size());
+    }
+
+    /**
+     * 节点加分的四道闸，一道都不许松，因为这一项要动仓位：
+     * 窗口内的未失效节点、有 D0、节点票解得出代码，四条各占一样。
+     */
+    @Test
+    void scoredNodeStocksKeepsOnlyLiveNodesInsideTheWindow() {
+        NodeEvent inWindow = node(11L, "内蒙新华(603230)", LocalDate.of(2026, 9, 17), "待验证");
+        NodeEvent tooOld = node(12L, "国芳集团(601086)", LocalDate.of(2026, 8, 31), "有效");
+        NodeEvent dead = node(13L, "百大集团(600865)", LocalDate.of(2026, 9, 18), "失效");
+        NodeEvent noD0 = node(14L, "桂林旅游(000978)", null, "有效");
+        // 节点票只写了名称、没带(代码)：解不出代码就不认，宁可少给分也不按名称乱撞
+        NodeEvent noCode = node(15L, "天威视讯", LocalDate.of(2026, 9, 21), "有效");
+
+        NodeService svc = new NodeService(
+                eventMapper(Arrays.asList(inWindow, tooOld, dead, noD0, noCode)),
+                null, null, stockMapper(WINDOW), null, null, null, new ObjectMapper());
+
+        Map<String, NodeEvent> got = svc.scoredNodeStocks(USER, LocalDate.of(2026, 9, 21), 3);
+
+        assertEquals(Arrays.asList("603230"), new ArrayList<>(got.keySet()),
+                "09-21 往前数 3 个有明细的日子是 09-21/09-18/09-17，只有这条 D0 撞得上");
+        assertEquals(inWindow, got.get("603230"));
+    }
+
+    /** 同一只票挂在多条节点下时留 D0 最近的那条：加分看的是它现在属于哪个节点，多条叠乘会把 0.2 撑成 0.4。 */
+    @Test
+    void scoredNodeStocksKeepsTheNearestNodePerStock() {
+        NodeEvent older = node(21L, "内蒙新华(603230)", LocalDate.of(2026, 9, 18), "有效");
+        NodeEvent newer = node(22L, "内蒙新华(603230)", LocalDate.of(2026, 9, 21), "有效");
+
+        NodeService svc = new NodeService(eventMapper(Arrays.asList(older, newer)),
+                null, null, stockMapper(WINDOW), null, null, null, new ObjectMapper());
+
+        Map<String, NodeEvent> got = svc.scoredNodeStocks(USER, LocalDate.of(2026, 9, 21), 3);
+
+        assertEquals(1, got.size(), "同一只票只留一条");
+        assertEquals(newer, got.get("603230"));
+    }
+
+    private static NodeEvent node(Long id, String nodeStock, LocalDate d0, String status) {
+        NodeEvent e = new NodeEvent();
+        e.setId(id);
+        e.setUserId(USER);
+        e.setNodeStock(nodeStock);
+        e.setD0Date(d0);
+        e.setStatus(status);
+        return e;
     }
 
     private static Wrapper<NodeEvent> historyWrapper() {

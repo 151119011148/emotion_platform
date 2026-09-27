@@ -6,8 +6,10 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
@@ -432,6 +434,64 @@ public class NodeService {
         LocalDate prev = marketStockMapper.prevDetailDate(tradeDate);
         cache.put(tradeDate, prev);
         return prev;
+    }
+
+    /**
+     * 节点加分票：给策略引擎的 {@code score_weights.node} 那一项用的「这只候选是不是当下这个
+     * 周期的节点票」。
+     *
+     * <p>认的是 {@link #tagCandidates} 那个「节点票」标<b>同一列</b>（{@code node_stock} 都经
+     * {@link #stockCodeOf}），但加分比打标<b>严</b>：打标是身份、不限日期，这一项是钱、要卡周期。
+     * 所以下面两道闸会让「界面上标着节点票、分数里没加成」成为合法结果——判据就写在策略选股页
+     * 那个「得分怎么算」气泡里，别把它当成匹配写错。
+     *
+     * <p>两道闸：
+     * <ol>
+     *   <li><b>失效节点不算</b>。他 Skill §三 里失效＝那一轮不做，八月一条已失效的节点
+     *       今天这只票再涨停也不该拿加成。</li>
+     *   <li><b>D0 要落在最近 {@code window} 个有明细交易日内</b>（含候选日当天）。节点是周期里的
+     *       一个位置，不是永久头衔。窗口取配置项 {@code node_scan_window}，「交易日」同样走
+     *       {@code prevDetailDate} 而不是日历——与 D0 候选标一个口径，缺明细的那天本就不存在。</li>
+     * </ol>
+     *
+     * <p>同一只票撞进多条节点时留 D0 最近的那条：加分看的是它现在挂在哪个节点下，
+     * 多条叠乘会把 0.2 撑成 0.4。
+     *
+     * @return 节点票代码 → 那条节点事件；没有合格节点时是空表
+     */
+    public Map<String, NodeEvent> scoredNodeStocks(Long userId, LocalDate tradeDate, int window) {
+        Map<String, NodeEvent> out = new HashMap<String, NodeEvent>();
+        Set<LocalDate> dates = recentDetailDates(tradeDate, window);
+        if (dates.isEmpty()) {
+            return out;
+        }
+        List<NodeEvent> events = nodeEventMapper.selectList(
+                new LambdaQueryWrapper<NodeEvent>().eq(NodeEvent::getUserId, userId));
+        for (NodeEvent e : events) {
+            if ("失效".equals(e.getStatus()) || e.getD0Date() == null || !dates.contains(e.getD0Date())) {
+                continue;
+            }
+            String code = stockCodeOf(e.getNodeStock());
+            if (code == null) {
+                continue;
+            }
+            NodeEvent held = out.get(code);
+            if (held == null || e.getD0Date().isAfter(held.getD0Date())) {
+                out.put(code, e);
+            }
+        }
+        return out;
+    }
+
+    /** 最近 n 个有明细的交易日（含 {@code from} 当天）；明细断在哪天就只数到那天。 */
+    private Set<LocalDate> recentDetailDates(LocalDate from, int n) {
+        Set<LocalDate> dates = new LinkedHashSet<LocalDate>();
+        LocalDate cur = from;
+        while (cur != null && dates.size() < Math.max(n, 0)) {
+            dates.add(cur);
+            cur = marketStockMapper.prevDetailDate(cur);
+        }
+        return dates;
     }
 
     private static void index(Map<String, List<NodeEvent>> m, String key, NodeEvent e) {

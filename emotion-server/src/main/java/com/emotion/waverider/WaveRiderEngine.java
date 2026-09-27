@@ -5,6 +5,7 @@ import com.emotion.entity.CandidateStock;
 import com.emotion.entity.CandidateT1;
 import com.emotion.entity.MarketStock;
 import com.emotion.entity.NodeDetect;
+import com.emotion.entity.NodeEvent;
 import com.emotion.entity.Stock;
 import com.emotion.entity.Strategy;
 import com.emotion.entity.StrategyRun;
@@ -16,6 +17,7 @@ import com.emotion.mapper.NodeDetectMapper;
 import com.emotion.mapper.StockMapper;
 import com.emotion.mapper.StrategyRunMapper;
 import com.emotion.service.DailyBarService;
+import com.emotion.service.NodeService;
 import com.emotion.service.WaveRiderConfigService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -54,9 +56,13 @@ import java.util.Set;
  * 「T+1 买不进」的变量，且强单调（&lt;15%→8.4% 一字 ｜ 150~300%→52.9% ｜ ≥300%→87.0%）。
  * 越过 {@code seal_lock_ratio} 的直接出池。
  *
- * <p><strong>尚未实现</strong>：自动节点识别（PRD §5 的 {@code node_rules} AST）与节点票选拔。
- * 当日节点仍会从 {@code t_node_detect} 读出来并计入 run.node_count，但不会因此产出候选。
- * 这一版只做身位板一条原则，别把「没有 NODE 标签」当成过滤掉了。
+ * <p><strong>尚未实现</strong>：自动节点识别（PRD §5 的 {@code node_rules} AST）。当日节点仍会从
+ * {@code t_node_detect} 读出来并计入 run.node_count，但不会因此产出候选。
+ *
+ * <p>评分里的<strong>节点分是活的</strong>：它读的是他手工录的 {@code t_node_event}，而不是
+ * PRD §5.5 点名的 {@code t_node_detect}——后者要等自动节点识别才有数据，照它实现这一项仍是恒 0。
+ * 匹配口径与策略选股页那个「节点票」标同源，见 {@link #build}；{@code node_type} 为 NULL 时
+ * 按 1.0 计，理由写在 {@link #nodePart} 上。
  */
 @Service
 public class WaveRiderEngine {
@@ -74,6 +80,8 @@ public class WaveRiderEngine {
     private final CandidateT1Mapper t1Mapper;
     private final StrategyRunMapper runMapper;
     private final DailyBarService dailyBarService;
+    /** 节点票身份的唯一出处：与策略选股页那个「节点票」标共用一套匹配，见 {@link #build}。 */
+    private final NodeService nodeService;
     private final ObjectMapper objectMapper;
 
     public WaveRiderEngine(WaveRiderConfigService configService,
@@ -84,6 +92,7 @@ public class WaveRiderEngine {
                            CandidateT1Mapper t1Mapper,
                            StrategyRunMapper runMapper,
                            DailyBarService dailyBarService,
+                           NodeService nodeService,
                            ObjectMapper objectMapper) {
         this.configService = configService;
         this.marketStockMapper = marketStockMapper;
@@ -93,6 +102,7 @@ public class WaveRiderEngine {
         this.t1Mapper = t1Mapper;
         this.runMapper = runMapper;
         this.dailyBarService = dailyBarService;
+        this.nodeService = nodeService;
         this.objectMapper = objectMapper;
     }
 
@@ -179,7 +189,7 @@ public class WaveRiderEngine {
                 // 不是失败：没有节点日就只是没有节点票。身位板照跑。
                 warnings.add("NO_NODE");
             }
-            chosen = select(strategyId, tradeDate, cfg, run.getId(), funnel, warnings);
+            chosen = select(strategyId, strategy.getUserId(), tradeDate, cfg, run.getId(), funnel, warnings);
 
             if (!dryRun) {
                 // 整日替换：AC-9 要求同一天重跑多次候选行数不变（run 表会多行留痕）。
@@ -215,7 +225,7 @@ public class WaveRiderEngine {
      * 选股主体。漏斗每一步都记数——这是界面回答「为什么只剩这几只」的唯一依据，
      * 也是防止某个阈值悄悄变成死分支的手段（PRD AC-11 要求近 20 日触发次数可见）。
      */
-    private List<CandidateStock> select(Long strategyId, LocalDate tradeDate, WaveRiderConfig cfg,
+    private List<CandidateStock> select(Long strategyId, Long userId, LocalDate tradeDate, WaveRiderConfig cfg,
                                         Long runId, Map<String, Integer> funnel, List<String> warnings) {
         List<MarketStock> pool = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
                 .eq(MarketStock::getTradeDate, tradeDate)
@@ -277,7 +287,7 @@ public class WaveRiderEngine {
         List<MarketStock> picked = pickPositions(step, cfg);
         funnel.put("取身位", picked.size());
 
-        List<CandidateStock> rows = build(strategyId, tradeDate, runId, cfg, picked);
+        List<CandidateStock> rows = build(strategyId, userId, tradeDate, runId, cfg, picked);
 
         // ---- 清单长度上限（相对当日涨停池）。
         // 必须放在【排序之后】截断。放在排序之前，砍掉的是「题材遍历顺序靠后」的票——
@@ -333,11 +343,17 @@ public class WaveRiderEngine {
     }
 
     /** 组装候选行：算分、算仓位、打风险标、排展示顺序。 */
-    private List<CandidateStock> build(Long strategyId, LocalDate tradeDate, Long runId,
+    private List<CandidateStock> build(Long strategyId, Long userId, LocalDate tradeDate, Long runId,
                                        WaveRiderConfig cfg, List<MarketStock> picked) {
         if (picked.isEmpty()) {
             return new ArrayList<>();
         }
+        // 节点分查的是 t_node_event（他手工录的那份），不是 PRD §5.5 说的 t_node_detect：
+        // 后者要靠自动节点识别才有数据，那张表至今 0 行，照它实现这一项仍是恒 0。
+        // 认的列和策略选股页那个「节点票」标相同，但这里多卡失效与窗口两道闸，
+        // 「有标不加分」是设计而非 bug，判据见 NodeService#scoredNodeStocks。
+        Map<String, NodeEvent> nodeStocks =
+                nodeService.scoredNodeStocks(userId, tradeDate, cfg.getNodeScanWindow());
         int maxBoard = 0;
         for (MarketStock m : picked) {
             maxBoard = Math.max(maxBoard, nz(m.getConsecutive()));
@@ -356,8 +372,9 @@ public class WaveRiderEngine {
             double riskPenalty = riskPenalty(m, cfg);
             String riskFlag = riskFlag(m, cfg, riskPenalty);
             boolean isTopOfTopic = nz(m.getConsecutive()) >= topicTop.getOrDefault(topic(m), 0);
+            double nodePart = nodePart(nodeStocks.get(m.getCode()), cfg.getNodeTypeWeights());
 
-            double score = weightedScore(cfg, m, maxBoard, isTopOfTopic, riskPenalty);
+            double score = weightedScore(cfg, m, maxBoard, isTopOfTopic, riskPenalty, nodePart);
             scores.add(score);
             maxScore = Math.max(maxScore, score);
 
@@ -447,16 +464,37 @@ public class WaveRiderEngine {
 
     /** PRD §6.2 的评分公式。算出来的分只作展示与追溯，默认不参与排序（见类注释）。 */
     private double weightedScore(WaveRiderConfig cfg, MarketStock m, int maxBoard,
-                                 boolean isTopOfTopic, double riskPenalty) {
+                                 boolean isTopOfTopic, double riskPenalty, double nodePart) {
         Map<String, Double> w = cfg.getScoreWeights();
         double boardPart = maxBoard > 0 ? (double) nz(m.getConsecutive()) / maxBoard : 0;
-        double nodeWeight = 0;   // 节点票选拔未实现，这一项当前恒为 0
         boolean early = isEarlySeal(m.getFirstSealTime());
         return w("board", w) * boardPart
                 + w("position", w) * (isTopOfTopic ? 1 : 0)
-                + w("node", w) * nodeWeight
+                + w("node", w) * nodePart
                 + w("timing", w) * (early ? 1 : 0)
                 - w("risk", w) * riskPenalty;
+    }
+
+    /**
+     * 节点分＝PRD §6.2 的 {@code node_type_weight}：启动 1.0／切换 0.8／分歧 0.6，不是节点票则 0。
+     *
+     * <p><b>没录类型的节点按 1.0 计</b>——这一条是明知偏离字面公式后的选择：{@code node_type}
+     * 现存 6 条全是 NULL（自动识别 PRD §5 没实现，节点追踪表单也不给选类型），照字面只认类型
+     * 就等于这一项永远拿 0，跟没接一样。而「它是这条节点的节点票」这件事本身是真的，
+     * 只是还没归到某个类型上，所以缺类型不惩罚。
+     *
+     * <p>反过来，<b>有类型但权重表里查不到 → 0 分</b>：{@code node_type_weights} 是 PRD 那三个值
+     * 的闭集（配置校验还逼着键必须大写），拼错或新加类型时宁可给 0，也不替它猜一个权重。
+     */
+    static double nodePart(NodeEvent node, Map<String, Double> typeWeights) {
+        if (node == null) {
+            return 0;
+        }
+        if (node.getNodeType() == null) {
+            return 1.0;
+        }
+        Double w = typeWeights == null ? null : typeWeights.get(node.getNodeType());
+        return w == null ? 0 : w;
     }
 
     /**

@@ -538,9 +538,18 @@ function riskText(flag) {
 const SCORE_TERMS = [
   { key: 'board', name: '身位', desc: '连板数 ÷ 当日入选候选的最高板（所以是相对身位，跨日不可比）' },
   { key: 'position', name: '卡位', desc: '是否所属题材内的最高板，并列最高都算；题材取通达信行业，不是「题材」列那些概念标签' },
-  { key: 'node', name: '节点', desc: '节点票权重：选拔未实现，服务端当前恒按 0 计，这一项权重是空转的' },
+  { key: 'node', name: '节点', desc: '' },
   { key: 'timing', name: '时间', desc: '是否 10:00 前首封' }
 ]
+
+/** 节点那一项的判据。窗口是配置项，跟着他改走，不写死。 */
+function nodeTermDesc(c) {
+  const n = c.node_scan_window
+  return '是节点票本人：D0 落在最近 ' + (n == null ? '—' : n)
+    + ' 个有明细交易日内、且该节点未失效。一条命中即给满这一项；'
+    + '没录节点类型的节点按 1.0 计（PRD 的启动1.0／切换0.8／分歧0.6 现在还没数据可分）。'
+    + '注意「节点票」标是身份、不限日期，所以可能只显示标不加分'
+}
 
 function w2(v) {
   return v == null ? '—' : Number(v).toFixed(2)
@@ -550,11 +559,16 @@ const scoreRule = computed(() => {
   const c = cfg.value || {}
   const w = c.score_weights || {}
   return {
-    terms: SCORE_TERMS.map((t) => ({ ...t, weight: w2(w[t.key]) })),
+    terms: SCORE_TERMS.map((t) => ({
+      ...t,
+      weight: w2(w[t.key]),
+      desc: t.key === 'node' ? nodeTermDesc(c) : t.desc
+    })),
     risk: w2(w.risk),
     minAmount: c.filter_min_amount == null ? '—' : Number(c.filter_min_amount).toFixed(1),
-    // 满分只加正项：节点项恒为 0，把它的权重算进天花板会让人以为还有分没拿到
-    ceiling: w2((Number(w.board) || 0) + (Number(w.position) || 0) + (Number(w.timing) || 0)),
+    // 满分只加正项。节点项现在是活的：命中节点票本人就给满 W_node。
+    ceiling: w2((Number(w.board) || 0) + (Number(w.position) || 0)
+      + (Number(w.node) || 0) + (Number(w.timing) || 0)),
     maxPos: c.max_position_per_stock == null ? '—'
       : (Number(c.max_position_per_stock) * 100).toFixed(0) + '%'
   }
