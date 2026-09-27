@@ -17,10 +17,10 @@
       :can-zoom-out="zoom.canZoomOut()"
       :can-pan-left="zoom.canPanLeft()"
       :can-pan-right="zoom.canPanRight()"
-      @zoom-in="run(zoom.zoomIn)"
-      @zoom-out="run(zoom.zoomOut)"
-      @pan-left="run(() => zoom.pan(-1))"
-      @pan-right="run(() => zoom.pan(1))"
+      @zoom-in="zoom.zoomIn"
+      @zoom-out="zoom.zoomOut"
+      @pan-left="() => zoom.pan(-1)"
+      @pan-right="() => zoom.pan(1)"
     />
     <p v-if="!hideHeader" class="hint">点图上任意一天＝把上面那个日期切到那天，下方各块随日期刷新（一天一次请求）。</p>
   </section>
@@ -30,7 +30,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
 import AxisZoomBar from './AxisZoomBar.vue'
-import { useCurveZoom, MIN_SPAN } from '../utils/curveZoom'
+import { useCurveZoom, DEFAULT_SPAN, MIN_SPAN } from '../utils/curveZoom'
 import { fiveDimBandOf } from '../utils/scores'
 import { STAGE_COLORS, NO_STAGE_COLOR } from '../utils/stages'
 
@@ -50,22 +50,20 @@ const props = defineProps({
   /** 维度名，用于标题与 tooltip，如「大盘生态」 */
   name: { type: String, default: '维度' },
   /** 隐藏头部（标题+图例），用于嵌入折叠块时避免重复 */
-  hideHeader: { type: Boolean, default: false }
+  hideHeader: { type: Boolean, default: false },
+  /** 联动组名：同名的曲线共用一份缩放窗口（连板生态页与高度曲线同组） */
+  zoomGroup: { type: String, default: '' }
 })
 const emit = defineEmits(['select'])
 
 const chartRef = ref(null)
 let chart = null
 
-const zoom = useCurveZoom(() => (props.rows || []).length)
+const zoom = useCurveZoom(() => (props.rows || []).length, DEFAULT_SPAN, props.zoomGroup)
 const zoomable = computed(() => (props.rows || []).length > MIN_SPAN)
 const visibleCount = computed(() => zoom.span())
 
-/** 改窗口 → 重画（option 整份重建，可见切片由 zoom 决定） */
-function run(fn) {
-  fn()
-  renderChart()
-}
+// 重画由下面对 zoom.state 的 watch 统一触发：本图按钮和同组另一条曲线的按钮走同一条路
 
 // 背景四带铺色与首页温度曲线同一套色值（markArea 不带 name：带了会被渲染成带内堆叠乱文）
 const BANDS = [
@@ -344,6 +342,8 @@ const onResize = () => chart?.resize()
 // 默认的 pre-flush 会在 DOM 更新前就跑到 → chartRef.value 还是 null，整条曲线永远不会 init。
 // post-flush 保证 ref 已绑上真实节点，echarts.init 才拿得到容器尺寸。
 watch(() => [props.rows, props.selected], renderChart, { deep: true, flush: 'post' })
+// 窗口状态可能在同组另一条曲线的按钮上被改，所以重画挂在状态上，不挂在本图的点击上
+watch(() => [zoom.state.back, zoom.state.span], renderChart, { flush: 'post' })
 onMounted(() => {
   renderChart()
   window.addEventListener('resize', onResize)

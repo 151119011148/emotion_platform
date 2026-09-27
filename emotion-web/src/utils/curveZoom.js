@@ -8,8 +8,11 @@ import { reactive } from 'vue'
  * 点击换算像素→下标各按各的口径），而切完之后轴类目、系列数据、标记、下标全是同一份数组，
  * 少一类「缩放了就点不动/标不出来」的隐性 bug。
  *
- * <p>窗口用「数据下标闭区间」而不是百分比表达：百分比换算要按轴长取整，缩到小数档位时
- * 会出现按了 + 却没变化、或多退一档就把窗口清空的问题。
+ * <p>窗口 = 「离最新一天还差几个点」(back) + 「窗口宽度」(span)，不是绝对下标闭区间。
+ * 因为两条联动曲线的条数不一样（生态分 390 天、连板高度 299 天，都到同一天为止），
+ * 按下标对齐会把两条曲线切到两段不同的日期上；按「离末尾多远」对齐才是同一个交易日窗口。
+ * 顺带一条：换数据长度（重新拉了更长/更短的区间）时窗口天然还锚在最新一天，
+ * 不需要再判一次「条数变了就重锚」。
  *
  * <p>只由按钮驱动，不接滚轮和拖拽：滚轮缩放会抢掉长页面本来就在要的上下滚动，
  * 拖拽平移会和「点图上任意一天＝切换日期」这条主交互抢同一次鼠标按下。
@@ -24,74 +27,70 @@ export const MIN_SPAN = 6
 /** 没动过按钮时默认可见的交易日数。留头寸，−/≪ 才不是永远点不动的死键 */
 export const DEFAULT_SPAN = 20
 
+/** groupId → 共享窗口。同一组曲线各自的 ±/≪≫ 按钮改的是同一份状态。 */
+const groups = new Map()
+function groupState(groupId) {
+  let s = groups.get(groupId)
+  if (!s) {
+    s = reactive({ back: 0, span: 0 })
+    groups.set(groupId, s)
+  }
+  return s
+}
+
 /**
  * @param {() => number} countOf 当前数据点总数（要写成函数，好跟着 props 变）
  * @param {number} initialSpan 未操作时的默认窗口宽度
+ * @param {string} groupId 联动组名；同名的曲线一起缩放。不传就是自己管自己。
  */
-export function useCurveZoom(countOf, initialSpan = DEFAULT_SPAN) {
-  // touched=false 表示还没人动过按钮：窗口恒锚在最新一天、只取最近 initialSpan 个。
-  // 不叫 full 是因为「默认」已不等于「全部」；换数据长度时（重新拉了更长/更短的区间）跟着重算，
-  // 而不是把旧下标钳成新数据的前若干天，那会让人以为缩放没生效。
-  const win = reactive({ touched: false, i0: 0, i1: -1, n: -1 })
+export function useCurveZoom(countOf, initialSpan = DEFAULT_SPAN, groupId = '') {
+  // span=0 表示还没人动过按钮：窗口恒锚在最新一天、只取最近 initialSpan 个。
+  // 窗口宽度上限是**这条曲线自己**的条数，不按组取最小值：生态分有 390 天、高度只有 299 天，
+  // 按最小值封顶会让分数曲线再也翻不到 2025-01 那段回补出来的历史。
+  const win = groupId ? groupState(groupId) : reactive({ back: 0, span: 0 })
 
   function total() {
     return Math.max(0, countOf() | 0)
   }
 
-  /** 默认窗口：最近 initialSpan 个点，数据本身不够长就全给 */
-  function defaultRange() {
-    const n = total()
-    if (!n) return [0, -1]
-    return [n - Math.min(initialSpan, n), n - 1]
+  function defaultSpan() {
+    return Math.min(initialSpan, total())
   }
 
-  /** 可见闭区间 [a,b]；无数据时为 [0,-1] */
+  /** 可见闭区间 [a,b]；无数据时为 [0,-1]。纯读换算，不在渲染期回写响应式状态。 */
   function range() {
     const n = total()
-    if (!win.touched) return defaultRange()
-    let [a, b] = [win.i0, win.i1]
-    // 数据条数变了（重新拉了不同区间）：保住窗口宽度、改锚在最新一天。
-    // 直接沿用旧下标会落到另一段日期上——缩放在 9 月，换完数据却变成看 7 月。
-    // 这里只做纯读换算，不在渲染期回写响应式状态。
-    if (win.n !== n && n > 0) {
-      const w = Math.max(1, Math.min(b - a + 1, n))
-      b = n - 1
-      a = b - w + 1
-    }
-    a = Math.min(Math.max(0, a), Math.max(0, n - 1))
-    b = Math.min(Math.max(b, a), Math.max(0, n - 1))
-    return [a, b]
+    if (!n) return [0, -1]
+    const s = Math.max(1, Math.min(win.span || defaultSpan(), n))
+    const b = n - 1 - Math.max(0, Math.min(win.back, n - s))
+    return [Math.max(0, b - s + 1), b]
   }
 
-  function apply(a, b) {
-    const n = total()
-    win.i0 = a
-    win.i1 = b
-    win.n = n
-    const [d0, d1] = defaultRange()
-    win.touched = !(a === d0 && b === d1)
+  function apply(back, s) {
+    const width = Math.max(1, s)
+    win.back = Math.max(0, Math.min(back, Math.max(0, total() - width)))
+    // 正好落回「锚最新 + 默认宽度」时清成未操作态，让下一次换数据长度还跟着重算宽度
+    win.span = win.back === 0 && width === defaultSpan() ? 0 : width
   }
 
-  /** 以窗口中点为锚放到 ns 宽，越界时整体往回收，保证宽度不变 */
-  function centerOn(ns) {
+  /** 以窗口中点为锚放到 ns 宽，越界时整体往回收 */
+  function setSpan(ns) {
     const n = total()
     const [a, b] = range()
     const width = Math.max(1, Math.min(ns, n))
-    let na = Math.round((a + b) / 2 - (width - 1) / 2)
-    na = Math.max(0, Math.min(na, n - width))
-    apply(na, na + width - 1)
+    apply(n - 1 - b + Math.round((b - a + 1 - width) / 2), width)
   }
 
   function zoomIn() {
     const [a, b] = range()
     const span = b - a + 1
-    centerOn(Math.max(MIN_SPAN, Math.min(span - 1, Math.floor(span * ZOOM_RATIO))))
+    setSpan(Math.max(MIN_SPAN, Math.min(span - 1, Math.floor(span * ZOOM_RATIO))))
   }
 
   function zoomOut() {
     const [a, b] = range()
     const span = b - a + 1
-    centerOn(Math.max(span + 1, Math.ceil(span / ZOOM_RATIO)))
+    setSpan(Math.max(span + 1, Math.ceil(span / ZOOM_RATIO)))
   }
 
   /** dir=-1 左移看更早的数据，dir=+1 右移看更新的 */
@@ -100,8 +99,7 @@ export function useCurveZoom(countOf, initialSpan = DEFAULT_SPAN) {
     const [a, b] = range()
     const span = b - a + 1
     const step = Math.max(1, Math.round(span * PAN_RATIO))
-    const na = Math.max(0, Math.min(a + dir * step, n - span))
-    apply(na, na + span - 1)
+    apply(n - 1 - b - dir * step, span)
   }
 
   function span() {
@@ -133,6 +131,7 @@ export function useCurveZoom(countOf, initialSpan = DEFAULT_SPAN) {
   }
 
   return {
+    state: win,
     range,
     span,
     zoomIn,
