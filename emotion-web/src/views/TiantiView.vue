@@ -641,14 +641,16 @@ function contribText(w, s) {
   if (w == null || s == null) return '—'
   return (Number(w) * Number(s)).toFixed(1)
 }
-/** 读数按 source_key 带单位：晋级率/溢价/封板率=%，大面=家数，空间板 H=板。 */
+/** 读数按 source_key 带单位：晋级率/溢价/封板率/大面率=%，大面家数与种子数=家，空间板 H=板。 */
 function rawText(sourceKey, raw) {
   if (raw == null || Number.isNaN(Number(raw))) return '—'
   const n = Number(raw)
   const key = sourceKey || ''
   const shown = Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)))
   if (key === 'max_height') return shown + ' 板'
-  if (key.startsWith('big_')) return shown + ' 家'
+  // big_low/mid/high 是家数、big_*_base 是该层种子家数；big_*_rate 是率（大面/昨种子），
+  // 同一个 big_ 前缀下两种量纲，按前缀一律贴「家」会把 15.38% 读成 15.38 家
+  if (key.startsWith('big_') && !key.endsWith('_rate')) return shown + ' 家'
   return shown + '%'
 }
 
