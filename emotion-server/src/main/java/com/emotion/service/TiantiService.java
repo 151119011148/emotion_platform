@@ -13,7 +13,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,6 +63,10 @@ public class TiantiService {
     private static final BigDecimal DUANDAO_TURNOVER_MAX = new BigDecimal("5");
     /** "锁死不给上车"= 一字或早盘秒板（首封≤93030）且全天 0 炸板。 */
     private static final int DUANDAO_FLASH_LINE_MAX = 93030;
+
+    /* 破壁判定 v11 的两个相位：线钉着倒计时等追平（阶梯往下降）↔ 龙在榜的周期态 */
+    private static final int PHASE_LINE = 0;
+    private static final int PHASE_CYCLE = 1;
 
     private final PrdMetricsService prdMetrics;
     private final MarketStockMapper marketStockMapper;
@@ -167,9 +170,16 @@ public class TiantiService {
                 p.setTradeDate(r.getTradeDate());
                 p.setMaxHeight(r.getMaxHeight());
                 p.setStocks(new ArrayList<>());
+                p.setLadder(new ArrayList<>());
                 byDate.put(r.getTradeDate(), p);
             }
             p.getStocks().add(new TiantiVO.HeightStock(r.getCode(), r.getName()));
+        }
+        for (MarketStockMapper.LadderRow r : marketStockMapper.listLadderRange(from, to)) {
+            TiantiVO.HeightPoint p = byDate.get(r.getTradeDate());
+            if (p != null) {
+                p.getLadder().add(new TiantiVO.LadderStock(r.getBoard(), r.getCode(), r.getName()));
+            }
         }
         List<TiantiVO.HeightPoint> out = new ArrayList<>(byDate.values());
         for (TiantiVO.HeightPoint p : out) {
@@ -177,7 +187,7 @@ public class TiantiService {
                     Comparator.nullsLast(String::compareTo)));
             p.setStockCount(p.getStocks().size());
         }
-        detectBreaks(out, buildRunStarts(marketStockMapper.listBoardSeries(from, to)));
+        detectBreaks(out);
         return out;
     }
 
@@ -190,81 +200,268 @@ public class TiantiService {
     }
 
     /**
-     * 高度曲线的两个独立事件轴：动态混沌<b>破壁</b> + 周期<b>换龙</b>。
+     * 高度曲线的破壁判定（v13）。一句话：<b>旧龙断板那天起，破壁线钉在它的高度 H 上 H−1 个交易日；
+     * 钉满就把线降到这段时间里市场够到过的最高板，再按新线钉 新线−1 天——一级一级往下走，
+     * 直到某只票追平并且次日续板，新龙诞生，周期归它。</b>
      *
-     * <p><b>破壁</b>：破壁线 = 混沌高 + 1，不焊死 5 板，也不用全窗口历史峰值。混沌期从旧龙断板
-     * 那天起算，混沌高初始取断板日当天的市场最高板（"混沌里出过 5 板活口，新龙就得 6 才破"）。
-     * 只有<b>启动日 ≥ 混沌起点的新龙</b>能抬高这条线或捅破它：伴生票反包踩出来的板高不算新天花板，
-     * 否则下一轮破壁会被顶到天上去。破壁之后进入周期态，在位龙继续加板（5→6→7）算同一次破壁。
+     * <p>"够到过的最高板"记的是<b>没越过这条线的那些天</b>，外加<b>追平失败的那次试探</b>（v13）：
+     * 市场既然有票站上来过又掉下来，这个高度就还在，阶梯不许降到它下面（华瓷股份 9.22 追平 6 板、
+     * 9.23 没续 → 9.24 下一级还是 6 板，新华文轩的 5 板够不着，不算试探）。失败高度只许"顶住"这一级，
+     * 不许把下一级抬得比这条线还高——阶梯仍然只降不升。代价是这一级会原地再钉一轮，
+     * 只要还有人反复追平又反复失败，线就停在那儿不降。
      *
-     * <p><b>换龙</b>：当天最高板股压过在册周期最高、且不是当前总龙头本人 → 周期归它。
-     * 这条<b>不看启动日</b>——深中华A(08-20 起板) 08-27 越过汉森的 5 板虽是伴生，周期确是它开的；
-     * 而海鸥 09-01 只到 7 板平深中华A 的高度，算反包不算换龙。换龙与破壁可以同一天同时成立。
+     * <p>8.28 深中华Ａ 7 板、8.31 断板 → 线钉在 7 板到 9.07（8.31、9.01、9.02、9.03、9.04、9.07 六个交易日；
+     * 9.01 海鸥住工 7 板追平、9.02 没续＝失败，它那个 7 也记账）→ 9.08 钉满仍记不到比 7 更低的高度，
+     * 原地再钉 6 个交易日（9.08~9.15 没人够到 7，最高只到 5 板）→ 9.16 降到 5 板。
      *
-     * <p>并列最高板时标签取代码最小那只（tooltip 已经给了完整名单，标签只负责指个代表）。
+     * <p>钉线期间<b>照常判试探</b>，两件事按他改的规则放宽了：
+     * <ul>
+     *   <li><b>试探对象看连板数，不看谁最高</b>——当天任意一只 {@code 板高 ≥ L} 的票都算追平，
+     *       并列时取板高最高、再取代码最小；</li>
+     *   <li><b>破壁成功比的是试探股自己的板高</b>——它次日续板（≥ 试探日 + 1 板）才算，
+     *       为此判定读的是 {@link TiantiVO.HeightPoint#getLadder() 当天 2 板以上的名单}。</li>
+     * </ul>
      *
-     * @param runStarts (日期, 代码) → 该轮连板启动日
+     * <p>v12 放宽的那格仍在：<b>定线票不过是个挂名，它自己爬到当天最高、越过这条线，照样算一次追平</b>——
+     * 8.27 阶梯降到 6 板时这条线挂到了深中华Ａ名下，8.28 它自己打到 7 板就是追平，8.31 掉榜就是没兑现。
+     * 只有一种越线不算试探：<b>这一级高度本来就是它自己打上去的</b>（首日的种子、它破壁成功接棒的那一级、
+     * 它断板钉住的那个 H），老龙回榜再创新高还是它自己的周期在延续（爱丽家居 8.03~8.05 停牌被按断板
+     * 钉在 9 板、8.06 回到 10 板就是这种）。
+     *
+     * <p>试探股的次日分两种收法：它<b>续板</b>=破壁成功，阶梯停住、周期归它、线跟它抬，它断板那天再起一轮；
+     * 它<b>没续板</b>（还在榜滞涨，或已经掉出名单）=破壁失败，这条线还钉着的日子只许<b>换票</b>再试——
+     * 同一只票在同一条线上不重复记试探；线<b>真的降到下一级</b>时这笔账才清零（原地再钉一级还是那面壁）。
+     * 线悬着而名单上已经没人站得上去时，定线票改由当天站在线上那只担任——线的高度不变，只是换个名字挂着。
+     *
+     * <p>取数窗口首日没有旧龙可断，按"当天板高即 H"起一级。
      */
-    static void detectBreaks(List<TiantiVO.HeightPoint> pts,
-                             Map<LocalDate, Map<String, LocalDate>> runStarts) {
+    static void detectBreaks(List<TiantiVO.HeightPoint> pts) {
         if (pts.isEmpty()) {
             return;
         }
-        TiantiVO.HeightPoint first = pts.get(0);
-        boolean inChaos = true;
-        LocalDate chaosStart = first.getTradeDate();
-        int line = nz(first.getMaxHeight());
+        int phase = PHASE_LINE;
+        /**
+         * 当前这一级破壁线还要钉<b>交易日</b>：钉满就降到记录到的最高板，再按新线重数。
+         * {@code isChaos}/{@code oldDragonHeight} 这两个字段也读它（页面已不再画色块，字段留着）。
+         */
+        int holdLeft = Math.max(nz(pts.get(0).getMaxHeight()) - 1, 1);
+        /** 挂账的旧龙高度 H：只用于展示（色块、卡片的"旧龙高度"），阶梯每降一级都不改它。 */
+        int chaosH = nz(pts.get(0).getMaxHeight());
+        /**
+         * 这一级钉线期间市场够到的最高板，以及定它的那只票：没越过这条线的那些天，
+         * 外加追平<b>又失败</b>的那次试探（v13）。
+         */
+        int recordMax = 0;
+        TiantiVO.HeightStock recordStock = null;
+        TiantiVO.HeightStock lineStock = topStock(pts.get(0));
+        int line = chaosH;
+        /**
+         * 这一级破壁线的高度是<b>谁自己打上去的</b>：首日种子、破壁成功接棒的那只、断板的那条龙。
+         * 只有越过别人筑的壁才算试探，它自己回榜再创新高还是那个周期在延续（爱丽家居 8.03~8.05 停牌
+         * 被按断板钉在 9 板、8.06 回到 10 板就是这种）。阶梯降到下一级就清空。
+         */
+        String lineOwner = lineStock == null ? null : lineStock.getCode();
         String dragon = null;
-        TiantiVO.HeightStock firstTop = topStock(first);
-        int cycleTop = nz(first.getMaxHeight());
-        String cycleLeader = firstTop == null ? null : firstTop.getCode();
-        String cycleLeaderName = firstTop == null ? null : firstTop.getName();
-        first.setCeiling(line);
-        first.setCycleTop(cycleTop);
-        first.setCycleLeader(cycleLeaderName);
+        String probeCode = null;
+        int probeBoard = 0;
+        /** 挂着待判的那次试探是<b>哪只票</b>：它失败时要把那天的高度记进降线记录，得留个名字。 */
+        TiantiVO.HeightStock probeStockRef = null;
+        /** 本轮这条线上已经试探失败的票：这条线还钉着的日子只许换票，不许同一只票天天追平刷标记。 */
+        Set<String> failedProbes = new HashSet<>();
 
-        for (int i = 1; i < pts.size(); i++) {
-            TiantiVO.HeightPoint p = pts.get(i);
+        for (TiantiVO.HeightPoint p : pts) {
             int h = nz(p.getMaxHeight());
-            TiantiVO.HeightStock top = topStock(p);
-            String topCode = top == null ? null : top.getCode();
 
-            if (top != null && h > cycleTop && !topCode.equals(cycleLeader)) {
-                p.setIsLeader(Boolean.TRUE);
-                p.setLeaderStock(top);
-                cycleTop = h;
-                cycleLeader = topCode;
-                cycleLeaderName = top.getName();
-            } else {
-                cycleTop = Math.max(cycleTop, h);
-            }
-
-            if (inChaos) {
-                boolean fresh = top != null
-                        && isFreshRun(runStarts, p.getTradeDate(), topCode, chaosStart);
-                if (fresh && h > line) {
-                    if (h >= minAbsBreak(line)) {
-                        p.setIsBreak(Boolean.TRUE);
-                        p.setPrevHigh(line);
-                        p.setBreakStock(top);
-                        inChaos = false;
-                        dragon = topCode;
-                    } else {
-                        line = h;
+            // 先结相位转移，再按新相位处理当天：旧龙断板那天就是这一级钉线的第 1 天
+            if (phase == PHASE_CYCLE && !containsCode(p, dragon)) {
+                // 在位龙断板：破壁线抬到它的高度钉住 H−1 个交易日，之后一级一级往下降
+                chaosH = line;
+                holdLeft = Math.max(chaosH - 1, 1);
+                lineOwner = dragon;
+                recordMax = 0;
+                recordStock = null;
+                failedProbes.clear();
+                dragon = null;
+                probeCode = null;
+                probeStockRef = null;
+                phase = PHASE_LINE;
+            } else if (probeCode != null) {
+                int nb = boardOf(p, probeCode);
+                if (nb > probeBoard) {
+                    // 试探股次日继续涨停 = 破壁成功：阶梯停住，周期归它，线跟它抬
+                    p.setIsBreak(Boolean.TRUE);
+                    p.setPrevHigh(line);
+                    p.setBreakStock(stockOf(p, probeCode));
+                    dragon = probeCode;
+                    lineStock = p.getBreakStock();
+                    line = Math.max(line, nb);
+                    lineOwner = probeCode;
+                    failedProbes.clear();
+                    phase = PHASE_CYCLE;
+                } else {
+                    // 没续板就是破壁失败——掉榜也一样：这条线还钉着，只许换票再试。
+                    // 但它那天<b>确实站上过这条线</b>，这个高度要算进降线记录：市场证明过能够到这里，
+                    // 阶梯就不能降到比它更低（华瓷 9.22 追平 6 板、9.23 没续 → 下一级还是 6，不降到 5）。
+                    failedProbes.add(probeCode);
+                    // 只许"顶住"这一级：越过这条线又失败的票（4 板线上出个 5 板）不许把下一级抬得比线还高，
+                    // 阶梯仍然只降不升。
+                    if (probeBoard <= line && probeBoard > recordMax) {
+                        recordMax = probeBoard;
+                        recordStock = probeStockRef;
                     }
                 }
-            } else if (containsCode(p, dragon)) {
-                // 在位龙还在最高板名单上：守顶或继续加板，都算同一次破壁
-                line = Math.max(line, h);
-            } else {
-                inChaos = true;
-                chaosStart = p.getTradeDate();
-                line = h;
+                probeCode = null;
+                probeStockRef = null;
             }
+
+            if (phase == PHASE_CYCLE) {
+                // 在位龙还在榜：守顶或继续加板都算同一次破壁的延续，线跟它一起抬，不再判试探
+                line = Math.max(line, h);
+                lineStock = stockOf(p, dragon);
+            } else {
+                // 钉线期间照常判试探；同时记下没追平这条线的那些天里市场自己爬到的最高板
+                if (h < line && h > recordMax) {
+                    recordMax = h;
+                    recordStock = topStock(p);
+                }
+                TiantiVO.HeightStock cand = probeCandidate(p, line, lineStock, failedProbes);
+                if (cand != null) {
+                    p.setIsProbe(Boolean.TRUE);
+                    p.setProbeStock(cand);
+                    probeCode = cand.getCode();
+                    probeStockRef = cand;
+                    probeBoard = boardOf(p, cand.getCode());
+                }
+                if (lineStock != null && boardOf(p, lineStock.getCode()) == h && h > line) {
+                    // 挂着这条线的票自己爬到当天最高、越过这条线。8.28 深中华Ａ：这条 6 板线是阶梯从爱丽家居
+                    // 那一轮降下来挂在它名下的，不是它自己筑的壁，所以这一越照样算追平，
+                    // 成败仍旧看它次日续不续板（它 8.31 掉榜 = 没兑现）。它自己筑的那一级不算（老龙回榜续板）。
+                    if (probeCode == null && !lineStock.getCode().equals(lineOwner)
+                            && !failedProbes.contains(lineStock.getCode())) {
+                        p.setIsProbe(Boolean.TRUE);
+                        p.setProbeStock(lineStock);
+                        probeCode = lineStock.getCode();
+                        probeStockRef = lineStock;
+                        probeBoard = h;
+                    }
+                    dragon = lineStock.getCode();
+                    line = h;
+                    lineOwner = lineStock.getCode();
+                    failedProbes.clear();
+                    phase = PHASE_CYCLE;
+                } else if (h >= line && topStock(p) != null
+                        && boardOf(p, lineStock == null ? null : lineStock.getCode()) < line) {
+                    // 名单上已经没人挂着这条线：定线票交给当天站在线上那只，线的高度不动
+                    lineStock = topStock(p);
+                }
+            }
+            boolean pinned = phase == PHASE_LINE;
             p.setCeiling(line);
-            p.setCycleTop(cycleTop);
-            p.setCycleLeader(cycleLeaderName);
+            p.setLineStock(lineStock);
+            p.setIsChaos(pinned ? Boolean.TRUE : null);
+            p.setOldDragonHeight(pinned ? chaosH : null);
+            if (pinned) {
+                if (holdLeft <= 1) {
+                    int prevLine = line;
+                    // 这一级钉满：线降到记录到的最高板，从明天起按新线再钉 新线−1 天。
+                    // 这几天全都追平或越过了这条线（没记下更低的高度）就原地再钉一级——线不许悬空。
+                    if (recordMax > 0) {
+                        line = recordMax;
+                        lineStock = recordStock;
+                        // 降下来的这一级是退潮期市场自己爬出来的高度，不算谁筑的壁：谁越过来都算试探
+                        lineOwner = null;
+                    }
+                    holdLeft = Math.max(line - 1, 1);
+                    recordMax = 0;
+                    recordStock = null;
+                    // 只有真的降了一级才清换票账。失败试探的高度现在会把下一级顶回原高度，
+                    // 原地再钉还是那面壁——账一清，同一只票就能反复追平同一级把线钉死。
+                    if (line < prevLine) {
+                        failedProbes.clear();
+                    }
+                } else {
+                    holdLeft--;
+                }
+            }
         }
+    }
+
+    /**
+     * 合规试探股：当天连板名单上有<b>板高 ≥ 破壁线</b>的票（不比谁最高，够线就算追平），
+     * 且既不是定线票本人（同票续板只是周期延续，不算换龙）、也不是这条线上已经试探失败的票
+     * （重试只许换票）。并列取板高最高的，再并列取代码最小那只。
+     */
+    private static TiantiVO.HeightStock probeCandidate(TiantiVO.HeightPoint p, int line,
+                                                       TiantiVO.HeightStock lineStock,
+                                                       Set<String> failedProbes) {
+        if (lineStock == null || nz(p.getMaxHeight()) < line) {
+            return null;
+        }
+        TiantiVO.HeightStock best = null;
+        int bestBoard = 0;
+        for (String code : codesOfDay(p)) {
+            int b = boardOf(p, code);
+            if (b < line || code.equals(lineStock.getCode()) || failedProbes.contains(code)) {
+                continue;
+            }
+            if (best == null || b > bestBoard || (b == bestBoard && code.compareTo(best.getCode()) < 0)) {
+                best = stockOf(p, code);
+                bestBoard = b;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * 当天要扫的连板名单：有 2 板以上的全名单就读它（试探对象只看板高够不够线，不看谁最高——
+     * 当天最高 6 板时，追平 5 板线的那只未必在最高板名单上），没名单时退回并列最高板那几只。
+     */
+    private static List<String> codesOfDay(TiantiVO.HeightPoint p) {
+        List<String> codes = new ArrayList<>();
+        if (p.getLadder() != null) {
+            for (TiantiVO.LadderStock s : p.getLadder()) {
+                codes.add(s.getCode());
+            }
+        } else if (p.getStocks() != null) {
+            for (TiantiVO.HeightStock s : p.getStocks()) {
+                codes.add(s.getCode());
+            }
+        }
+        return codes;
+    }
+
+    /** 这只票当天的连板数：读了 2 板以上名单就是它自己的板高，没名单时按"在最高板名单上＝当天最高板"退化。 */
+    private static int boardOf(TiantiVO.HeightPoint p, String code) {
+        if (code == null) {
+            return 0;
+        }
+        if (p.getLadder() != null) {
+            for (TiantiVO.LadderStock s : p.getLadder()) {
+                if (code.equals(s.getCode())) {
+                    return nz(s.getBoard());
+                }
+            }
+            return 0;
+        }
+        return containsCode(p, code) ? nz(p.getMaxHeight()) : 0;
+    }
+
+    private static TiantiVO.HeightStock stockOf(TiantiVO.HeightPoint p, String code) {
+        if (p.getStocks() != null) {
+            for (TiantiVO.HeightStock s : p.getStocks()) {
+                if (s.getCode().equals(code)) {
+                    return s;
+                }
+            }
+        }
+        if (p.getLadder() != null) {
+            for (TiantiVO.LadderStock s : p.getLadder()) {
+                if (code.equals(s.getCode())) {
+                    return new TiantiVO.HeightStock(s.getCode(), s.getName());
+                }
+            }
+        }
+        return null;
     }
 
     private static TiantiVO.HeightStock topStock(TiantiVO.HeightPoint p) {
@@ -282,56 +479,6 @@ public class TiantiService {
             }
         }
         return false;
-    }
-
-    private static boolean isFreshRun(Map<LocalDate, Map<String, LocalDate>> runStarts,
-                                      LocalDate date, String code, LocalDate chaosStart) {
-        Map<String, LocalDate> byCode = runStarts.get(date);
-        LocalDate start = byCode == null ? null : byCode.get(code);
-        // 窗口起点之前就在板的票，启动日查不到 → 一律当老面孔，宁可少报一次破壁
-        return start != null && !start.isBefore(chaosStart);
-    }
-
-    /**
-     * 逐票回走「连板数每天 +1 且交易日紧邻」的链条，反推每轮连板的启动日。
-     *
-     * <p>只用 {@code consecutive == 1} 那天当启动日不行：窗口 earliest 的那几天里，
-     * 已经在 3 板上的票永远等不到自己的 1 板记录，会被错认成新龙。
-     */
-    private static Map<LocalDate, Map<String, LocalDate>> buildRunStarts(
-            List<MarketStockMapper.BoardRow> rows) {
-        List<LocalDate> dates = new ArrayList<>();
-        Map<LocalDate, Integer> dateIdx = new HashMap<>();
-        Map<String, TreeMap<LocalDate, Integer>> byCode = new HashMap<>();
-        for (MarketStockMapper.BoardRow r : rows) {
-            if (!dateIdx.containsKey(r.getTradeDate())) {
-                dateIdx.put(r.getTradeDate(), dates.size());
-                dates.add(r.getTradeDate());
-            }
-            if (r.getConsecutive() == null) {
-                continue;
-            }
-            byCode.computeIfAbsent(r.getCode(), k -> new TreeMap<>())
-                    .put(r.getTradeDate(), r.getConsecutive());
-        }
-        Map<LocalDate, Map<String, LocalDate>> out = new HashMap<>();
-        for (Map.Entry<String, TreeMap<LocalDate, Integer>> e : byCode.entrySet()) {
-            LocalDate prevDate = null;
-            int prevBoard = 0;
-            LocalDate runStart = null;
-            for (Map.Entry<LocalDate, Integer> day : e.getValue().entrySet()) {
-                int board = day.getValue();
-                boolean chained = prevDate != null && board == prevBoard + 1
-                        && dateIdx.get(day.getKey()) == dateIdx.get(prevDate) + 1;
-                if (!chained) {
-                    runStart = day.getKey();
-                }
-                out.computeIfAbsent(day.getKey(), k -> new HashMap<>()).put(e.getKey(), runStart);
-                prevDate = day.getKey();
-                prevBoard = board;
-            }
-        }
-        return out;
     }
 
     private TiantiVO.Level level(int n, int h,

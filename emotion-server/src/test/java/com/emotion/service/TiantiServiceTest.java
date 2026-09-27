@@ -12,9 +12,7 @@ import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 import java.util.Collections;
 import java.util.List;
@@ -266,7 +264,12 @@ class TiantiServiceTest {
         verify(mapper, never()).prevDetailDate(any());
     }
 
-    // ---------------- 动态混沌破壁（detectBreaks） ----------------
+    // ---------------- 破壁判定 v11（detectBreaks） ----------------
+    // fixture 用真实曲线的日期与板高；codes[0] 即服务端名单首位（真实链路按代码升序，定线票取这一位）。
+    // v11：旧龙断板那天起，线抬到它的高度 H 钉住 H−1 个交易日；钉满降到"这期间没追平线的那些天"的最高板，
+    // 再按新线钉 新线−1 天——一级一级往下走，直到某只票追平并且次日续板。钉线期间照常判试探，
+    // 同一条线上失败过的票只许换票；没有 TTL，也没有 v9 那种"沿用被破的线"的重试探窗。
+    // 不带 lad() 的 fixture 走退化路径（没有连板名单，每只票的板高就取当天最高板，所以够线必有 ◆）。
 
     private static TiantiVO.HeightPoint pt(String date, int h, String... codes) {
         TiantiVO.HeightPoint p = new TiantiVO.HeightPoint();
@@ -274,146 +277,444 @@ class TiantiServiceTest {
         p.setMaxHeight(h);
         List<TiantiVO.HeightStock> stocks = new java.util.ArrayList<>();
         for (String c : codes) {
-            stocks.add(new TiantiVO.HeightStock(c, c + "科技"));
+            stocks.add(new TiantiVO.HeightStock(c, c));
         }
         p.setStocks(stocks);
         return p;
     }
 
-    /** (日期, 代码) → 启动日：只填每天最高板名单上用得到的组合。 */
-    private static Map<LocalDate, Map<String, LocalDate>> starts(Object... triples) {
-        Map<LocalDate, Map<String, LocalDate>> out = new HashMap<>();
-        for (int i = 0; i < triples.length; i += 3) {
-            LocalDate date = LocalDate.parse((String) triples[i]);
-            String code = (String) triples[i + 1];
-            LocalDate start = LocalDate.parse((String) triples[i + 2]);
-            out.computeIfAbsent(date, k -> new HashMap<>()).put(code, start);
+    /** 给某天补连板名单，形如 {@code "C=5", "W=7"}；名单上没有的票，判定按"已掉榜"处理。 */
+    private static TiantiVO.HeightPoint lad(TiantiVO.HeightPoint p, String... specs) {
+        List<TiantiVO.LadderStock> ladder = new java.util.ArrayList<>();
+        for (String spec : specs) {
+            int i = spec.indexOf('=');
+            String code = spec.substring(0, i);
+            ladder.add(new TiantiVO.LadderStock(Integer.valueOf(spec.substring(i + 1)), code, code));
+        }
+        p.setLadder(ladder);
+        return p;
+    }
+
+    private static TiantiVO.HeightPoint on(List<TiantiVO.HeightPoint> pts, String date) {
+        LocalDate d = LocalDate.parse(date);
+        for (TiantiVO.HeightPoint p : pts) {
+            if (d.equals(p.getTradeDate())) {
+                return p;
+            }
+        }
+        throw new AssertionError("fixture 缺 " + date);
+    }
+
+    private static void assertProbe(TiantiVO.HeightPoint p, String code) {
+        assertProbe(p, code, "应记试探破壁");
+    }
+
+    private static void assertProbe(TiantiVO.HeightPoint p, String code, String why) {
+        assertTrue(Boolean.TRUE.equals(p.getIsProbe()), p.getTradeDate() + " " + why);
+        assertEquals(code, p.getProbeStock().getCode());
+        assertNull(p.getIsBreak(), p.getTradeDate() + " 试探当天还不算破壁成功");
+    }
+
+    private static void assertBreak(TiantiVO.HeightPoint p, int prevHigh, String code) {
+        assertTrue(Boolean.TRUE.equals(p.getIsBreak()), p.getTradeDate() + " 应记破壁成功");
+        assertEquals(Integer.valueOf(prevHigh), p.getPrevHigh());
+        assertEquals(code, p.getBreakStock().getCode());
+    }
+
+    /** 既没试探也没破壁：窗口内、没追平线、或追平的正是定线票本人。 */
+    private static void assertQuiet(TiantiVO.HeightPoint p) {
+        assertQuiet(p, "不该有标记");
+    }
+
+    private static void assertQuiet(TiantiVO.HeightPoint p, String why) {
+        assertNull(p.getIsProbe(), p.getTradeDate() + " 不该有试探：" + why);
+        assertNull(p.getIsBreak(), p.getTradeDate() + " 不该有破壁：" + why);
+    }
+
+    @Test
+    void breaks_july_probeThenConfirmAndStaircaseDecay() {
+        // 同一段日子，但取数首日就是 7.01（真实曲线从 4 月跑过来，相位不一样，见 breaks_realCurve…）。
+        // 首日板高 3 → 没有旧龙可断，按"当天 3 板即 H"起一级，线钉在 3 板上 H−1=2 个交易日。
+        // 7.02 定线票海南海药自己爬到 4 板 → 它就是在位龙、线跟它抬；7.03 它掉榜才算断板 →
+        // 线抬回它的 4 板钉 4−1=3 个交易日，当天恒尚节能 4 板追平=试探，7.06 它 5 板=破壁成功（prev=4）。
+        // 恒尚一路加板到 7.09 的 8 板，7.10 掉榜 → 线抬到 8 板钉 8−1=7 个交易日（7.10~7.20）：
+        // 这七天市场最高只有 7.16 哈药股份的 5 板，没人够得着 8 板，所以整段没有 ◆（v10 的 7.15◆、7.17◆ 都没了）。
+        // 7.21 钉满降到记录到的 5 板，定线票换成还站在 5 板上的哈药股份 → 7.22 立新能源追平、7.23 它 6 板破壁。
+        List<TiantiVO.HeightPoint> pts = java.util.Arrays.asList(
+                pt("2026-07-01", 3, "海南海药", "多氟多"),
+                pt("2026-07-02", 4, "海南海药"),
+                pt("2026-07-03", 4, "恒尚节能"),
+                pt("2026-07-06", 5, "恒尚节能"),
+                pt("2026-07-07", 6, "恒尚节能"),
+                pt("2026-07-08", 7, "恒尚节能"),
+                pt("2026-07-09", 8, "恒尚节能"),
+                pt("2026-07-10", 2, "中鼎股份", "欢瑞世纪", "亚联机械"),
+                pt("2026-07-13", 3, "亚联机械", "立方制药", "贵绳股份"),
+                pt("2026-07-14", 3, "哈药股份"),
+                pt("2026-07-15", 4, "哈药股份"),
+                pt("2026-07-16", 5, "哈药股份"),
+                pt("2026-07-17", 4, "艾艾精工"),
+                pt("2026-07-20", 3, "立新能源"),
+                pt("2026-07-21", 4, "立新能源"),
+                pt("2026-07-22", 5, "立新能源"),
+                pt("2026-07-23", 6, "立新能源"));
+        TiantiService.detectBreaks(pts);
+
+        assertEquals(Integer.valueOf(3), on(pts, "2026-07-01").getCeiling());
+        assertProbe(on(pts, "2026-07-01"), "多氟多", "取数首日没有旧龙可断，当天板高就是第一级线");
+        assertEquals(Integer.valueOf(4), on(pts, "2026-07-02").getCeiling(),
+                "定线票海南海药自己爬到 4 板 → 线跟它抬，它就是在位龙");
+        assertNull(on(pts, "2026-07-02").getIsChaos(), "龙还在榜，不在降线阶梯上");
+        assertEquals("海南海药", on(pts, "2026-07-02").getLineStock().getCode());
+        assertQuiet(on(pts, "2026-07-02"), "在位龙在册期间不判试探");
+        assertEquals(Integer.valueOf(4), on(pts, "2026-07-03").getCeiling(), "海南海药 7.03 掉榜=断板，线钉回它的 4 板");
+        assertEquals(Boolean.TRUE, on(pts, "2026-07-03").getIsChaos(), "断板当天就是这一级的第 1 天");
+        assertProbe(on(pts, "2026-07-03"), "恒尚节能");
+        assertBreak(on(pts, "2026-07-06"), 4, "恒尚节能");
+        for (String d : new String[] { "2026-07-07", "2026-07-08", "2026-07-09" }) {
+            assertQuiet(on(pts, d), "在位龙还在榜，加板只是同一次周期的延续");
+        }
+        assertEquals(Integer.valueOf(6), on(pts, "2026-07-07").getCeiling());
+        assertEquals("恒尚节能", on(pts, "2026-07-07").getLineStock().getCode());
+        assertEquals(Integer.valueOf(8), on(pts, "2026-07-09").getCeiling());
+
+        assertQuiet(on(pts, "2026-07-10"), "恒尚断板，线抬到它的 8 板钉着");
+        for (String d : new String[] { "2026-07-13", "2026-07-14", "2026-07-15", "2026-07-16",
+                "2026-07-17", "2026-07-20" }) {
+            assertEquals(Integer.valueOf(8), on(pts, d).getCeiling(), d + " 还在 8 板这一级，市场最高 5 板追不上");
+            assertQuiet(on(pts, d), "够不着线就没有试探对象");
+        }
+        assertEquals(Integer.valueOf(5), on(pts, "2026-07-21").getCeiling(),
+                "8−1=7 个交易日钉满，降到没追平的那些天里最高的 7.16 的 5 板");
+        assertEquals("哈药股份", on(pts, "2026-07-21").getLineStock().getCode());
+        assertProbe(on(pts, "2026-07-22"), "立新能源");
+        assertBreak(on(pts, "2026-07-23"), 5, "立新能源");
+        assertNull(on(pts, "2026-07-23").getIsProbe(), "在位龙继续加板不再另起一次试探");
+        assertEquals(Integer.valueOf(6), on(pts, "2026-07-23").getCeiling());
+    }
+
+    @Test
+    void breaks_september_pinnedLineTriesOtherStocksThenStepsDown() {
+        // 取数首日 9.08 没有旧龙可断，按"当天 4 板即 H"起一级：线钉在 4 板上 4−1=3 个交易日。
+        // 钉线期间照常判试探，只是同一条线上失败过的票不许再来：9.08 亚盛集团、9.09 百大集团（9.09 市场
+        // 自己爬到 5 板，但那是"追平线的那一天"，不进降线记录）、9.10 桂林旅游、9.11 瑞尔特、9.14 闽东电力；
+        // 这几天没人续板，也没有"低于线、又没人追平"的日子可记 → 钉满就原地再钉一级，线不许悬空。
+        // 9.15 闽东电力 5 板追平、9.16 它 6 板=破壁成功。9.17 闽东断板：一律把线抬到它的 6 板重钉
+        // 6−1=5 个交易日（9.17、9.18、9.21、9.22、9.23）——澳弘电子的 5 板和华瓷股份 9.18/9.21 的 4、5 板
+        // 都追不上，所以 v10 的 ◆9.17、◆9.21 在这一版都不成立了；9.22 华瓷 6 板才追平，9.23 掉榜=破壁失败。
+        // v13：华瓷追平过 6 板，这个高度也进降线记录 → 9.23 钉满，下一级还是 6，不降到 5；
+        // 9.24 新华文轩 5 板够不着线，所以它不再算试探（换票重试的账因为没真降一级而留着）。
+        List<TiantiVO.HeightPoint> pts = java.util.Arrays.asList(
+                pt("2026-09-08", 4, "爱仕达", "亚盛集团", "百大集团"),
+                pt("2026-09-09", 5, "百大集团"),
+                pt("2026-09-10", 4, "桂林旅游"),
+                pt("2026-09-11", 4, "瑞尔特"),
+                pt("2026-09-14", 4, "闽东电力"),
+                pt("2026-09-15", 5, "闽东电力"),
+                pt("2026-09-16", 6, "闽东电力"),
+                pt("2026-09-17", 5, "澳弘电子"),
+                pt("2026-09-18", 4, "华瓷股份", "锡华科技"),
+                pt("2026-09-21", 5, "华瓷股份"),
+                pt("2026-09-22", 6, "华瓷股份"),
+                pt("2026-09-23", 4, "大亚圣象", "新华文轩"),
+                pt("2026-09-24", 5, "新华文轩"));
+        TiantiService.detectBreaks(pts);
+
+        assertProbe(on(pts, "2026-09-08"), "亚盛集团", "4 板这一级的第 1 天就有并列 4 板追平");
+        assertEquals("爱仕达", on(pts, "2026-09-08").getLineStock().getCode());
+        assertEquals(Integer.valueOf(4), on(pts, "2026-09-09").getCeiling(),
+                "还钉在 4 板上：百大集团的 5 板算追平这一级，不算降线的记录");
+        assertProbe(on(pts, "2026-09-09"), "百大集团");
+        assertProbe(on(pts, "2026-09-10"), "桂林旅游", "百大没续板=破壁失败，同一条线上只许换票再试");
+        assertProbe(on(pts, "2026-09-11"), "瑞尔特");
+        assertEquals(Integer.valueOf(4), on(pts, "2026-09-11").getCeiling(),
+                "这一级钉满了，可这几天全是追平或越过 4 板的日子，记不到更低的高度 → 原地再钉一级");
+        assertProbe(on(pts, "2026-09-14"), "闽东电力");
+        assertBreak(on(pts, "2026-09-15"), 4, "闽东电力");
+        assertEquals(Integer.valueOf(6), on(pts, "2026-09-16").getCeiling(), "在位龙 6 板，线跟它抬");
+
+        assertEquals(Integer.valueOf(6), on(pts, "2026-09-17").getCeiling(), "闽东 6 板断板 → 线抬到 6 板重钉");
+        for (String d : new String[] { "2026-09-17", "2026-09-18", "2026-09-21" }) {
+            assertQuiet(on(pts, d), "5 板追不平 6 板线，v10 在这里是给 ◆ 的");
+        }
+        assertProbe(on(pts, "2026-09-22"), "华瓷股份");
+        assertQuiet(on(pts, "2026-09-23"), "华瓷没续板=破壁失败，线还钉在 6 板上");
+        // v13：华瓷那次失败的 6 板也记进降线高度 → 9.23 钉满，下一级仍顶在 6，不降到 5。
+        assertEquals(Integer.valueOf(6), on(pts, "2026-09-24").getCeiling(), "第 5 个交易日钉满，仍然原地钉 6 板");
+        assertEquals("华瓷股份", on(pts, "2026-09-24").getLineStock().getCode(), "定线票留在记下这个高度的华瓷名下");
+        assertQuiet(on(pts, "2026-09-24"), "新华文轩 5 板够不着 6 板线：他点名要撤掉的那个误标");
+    }
+
+    @Test
+    void breaks_probeStockOwnBoardDecidesNotTheDaysHigh() {
+        // 带连板名单的主路：首日 9.01 X 的 5 板起一级，线钉在 5 板上 5−1=4 个交易日（9.01~9.04）。
+        // 钉线期间照常判试探，所以 9.04 C 追平 5 板是有 ◆ 的（v10 那句"只算记录"已经作废）。
+        // 9.05 钉满降到没追平线的那些天（9.02、9.03 的 3 板）里最高的 3 板：市场最高跳到 W 的 7 板，
+        // 试探记在 W 头上（同一天 C 也够线，并列取板高最高的）。
+        // 9.06 比的是试探股自己的板高——W 自己还是 7 板没续上，这次算失败；同一级上刚判失败的票不再重复记试探，
+        // 而它正是定线票、还在榜再创新高 → 它接棒成龙头，线跟它抬到 7（它自己爬的这一级不算它破的壁）。
+        List<TiantiVO.HeightPoint> pts = java.util.Arrays.asList(
+                lad(pt("2026-09-01", 5, "X"), "X=5"),
+                lad(pt("2026-09-02", 3, "A"), "A=3"),
+                lad(pt("2026-09-03", 3, "B"), "B=3"),
+                lad(pt("2026-09-04", 5, "C"), "C=5"),
+                lad(pt("2026-09-05", 7, "W"), "W=7", "C=5"),
+                lad(pt("2026-09-06", 7, "W"), "W=7"),
+                lad(pt("2026-09-07", 8, "W"), "W=8"));
+        TiantiService.detectBreaks(pts);
+
+        assertProbe(on(pts, "2026-09-04"), "C", "钉线的第 4 个交易日上 C 追平 5 板，照记试探");
+        assertEquals(Integer.valueOf(5), on(pts, "2026-09-04").getCeiling());
+        assertEquals(Integer.valueOf(3), on(pts, "2026-09-05").getCeiling(),
+                "钉满降到没追平的那些天里最高的 3 板；C 的 5 板是追平，不进记录");
+        assertNull(on(pts, "2026-09-05").getIsBreak(), "C 自己没续板，W 的 7 板不是 C 的破壁");
+        assertProbe(on(pts, "2026-09-05"), "W");
+        assertQuiet(on(pts, "2026-09-06"), "W 9.05 那次试探当天刚判失败，同一级上不重复记试探");
+        assertEquals(Integer.valueOf(7), on(pts, "2026-09-06").getCeiling());
+    }
+
+    @Test
+    void breaks_dragonLiftsItsOwnLineAndItsDepartureIsTheBreak() {
+        // 9.01 X 的 4 板起一级，钉 4−1=3 个交易日（9.01~9.03），期间只记到 9.02/9.03 的 3 板；
+        // 9.04 降到 3 板、定线票换成记下这个高度的 A → 老龙头 X 这天回榜 4 板，在这一版算"别的票追平 3 板线"
+        // =试探，9.07 它续到 5 板就是破壁成功（prev=3），此后它是龙、线跟它抬到 5。
+        // 9.08 X 掉榜：它这次破壁的断板日就是下一级的第 1 天，线抬回它的 5 板钉 5−1=4 个交易日，
+        // Y 的 5 板算追平、9.09 它 6 板破壁（真实版=爱丽家居 7.30→8.06 那种在高位一路续板的龙）。
+        List<TiantiVO.HeightPoint> pts = java.util.Arrays.asList(
+                pt("2026-09-01", 4, "X"),
+                pt("2026-09-02", 3, "A"),
+                pt("2026-09-03", 3, "B"),
+                pt("2026-09-04", 4, "X"),
+                pt("2026-09-07", 5, "X"),
+                pt("2026-09-08", 5, "Y"),
+                pt("2026-09-09", 6, "Y"));
+        TiantiService.detectBreaks(pts);
+
+        assertEquals(Integer.valueOf(4), on(pts, "2026-09-03").getCeiling(), "这一级还钉在 X 的 4 板上");
+        assertEquals(Integer.valueOf(3), on(pts, "2026-09-04").getCeiling(),
+                "钉满降到记录到的 3 板，定线票换成记下 3 板的 A");
+        assertProbe(on(pts, "2026-09-04"), "X", "X 已经不是这一级的定线票，它回榜加板就是追平 3 板线");
+        assertBreak(on(pts, "2026-09-07"), 3, "X");
+        assertEquals(Integer.valueOf(5), on(pts, "2026-09-07").getCeiling(), "破壁成功当天 X 已经 5 板，线跟它抬");
+        assertNull(on(pts, "2026-09-07").getIsChaos(), "X 还在榜，这一轮归它");
+        assertNull(on(pts, "2026-09-07").getIsProbe(), "破壁当天不再另起一次试探");
+        assertEquals(Integer.valueOf(5), on(pts, "2026-09-08").getCeiling(), "X 掉榜=断板，线抬回它的 5 板钉着");
+        assertEquals(Boolean.TRUE, on(pts, "2026-09-08").getIsChaos(), "断板当天就是新的一级的第 1 天");
+        assertProbe(on(pts, "2026-09-08"), "Y");
+        assertBreak(on(pts, "2026-09-09"), 5, "Y");
+    }
+
+    @Test
+    void breaks_retrySwitchesStockOnTheSameLine() {
+        // 9.04 降到记录到的 3 板，C 这天 4 板追平=试探，并顺手当上这一级的定线票；
+        // 9.05 C 还在榜且把线抬走（定线票再创新高=直接接棒成龙头，所以那天没有 ◆）；
+        // 9.06 C 掉榜 → 线抬回它的 4 板重钉，换 E 追平才再记试探、9.07 E 续板成功
+        List<TiantiVO.HeightPoint> pts = java.util.Arrays.asList(
+                pt("2026-09-01", 4, "X"),
+                pt("2026-09-02", 3, "A"),
+                pt("2026-09-03", 3, "B"),
+                pt("2026-09-04", 4, "C"),
+                pt("2026-09-05", 4, "C"),
+                pt("2026-09-06", 4, "E"),
+                pt("2026-09-07", 5, "E"));
+        TiantiService.detectBreaks(pts);
+
+        assertProbe(on(pts, "2026-09-04"), "C");
+        assertQuiet(on(pts, "2026-09-05"), "C 接棒成在位龙，在册期间不判试探");
+        assertProbe(on(pts, "2026-09-06"), "E");
+        assertBreak(on(pts, "2026-09-07"), 4, "E");
+    }
+
+    @Test
+    void breaks_lineStepsDownInsteadOfHangingOnAnUnreachableHigh() {
+        // v6 的利仁科技 8 板线能从 6 月一直悬到 7.10，当时靠 25 个自然日的 TTL 兜底；v11 不需要 TTL：
+        // 9.01 X 的 4 板起一级只钉 4−1=3 个交易日，钉满就降到这期间没追平线的那些天里的最高板 3 板。
+        // 之后每天最高恰好 3 板＝正好追平这条线，于是既记不到更低的高度、也掉不下去——原地一级级重钉。
+        List<TiantiVO.HeightPoint> pts = new java.util.ArrayList<>(java.util.Arrays.asList(
+                pt("2026-09-01", 4, "X"),
+                pt("2026-09-02", 3, "A"),
+                pt("2026-09-03", 3, "B")));
+        for (LocalDate d = LocalDate.parse("2026-09-04"); !d.isAfter(LocalDate.parse("2026-10-09"));
+                d = d.plusDays(1)) {
+            if (d.getDayOfWeek().getValue() <= 5) {
+                pts.add(pt(d.toString(), 3, "L"));
+            }
+        }
+        TiantiService.detectBreaks(pts);
+
+        assertEquals(Integer.valueOf(4), on(pts, "2026-09-03").getCeiling(), "第 3 个交易日还钉在 X 的 4 板上");
+        assertEquals(Integer.valueOf(3), on(pts, "2026-09-04").getCeiling(),
+                "钉满就降到记录到的 3 板，不会悬在没人够得着的 4 板上等 TTL");
+        assertProbe(on(pts, "2026-09-04"), "L", "L 3 板追平降下来的 3 板线");
+        for (String d : new String[] { "2026-09-07", "2026-09-28", "2026-10-09" }) {
+            assertEquals(Integer.valueOf(3), on(pts, d).getCeiling(), d + " 天天 3 板追平，原地重钉这一级");
+            assertEquals("L", on(pts, d).getLineStock().getCode(), "L 就是这一级的定线票");
+            assertQuiet(on(pts, d), "定线票自己守线不算新的试探");
+            assertEquals(Integer.valueOf(4), on(pts, d).getOldDragonHeight(), "色块报的旧龙高度还是 X 的 4 板");
+        }
+        assertEquals(Boolean.TRUE, on(pts, "2026-10-09").getIsChaos(), "没人破壁成功，阶梯就一直挂着");
+    }
+
+    /**
+     * 真实曲线整段回放。{@code /market/break_curve_2026.json} 是从 height-range 端点导出的
+     * 2026-04-01~09-30：每天最高板 + 并列最高板名单 + 4 板以上的连板名单。
+     *
+     * <p>从 4 月起头而不是从 7 月起头：阶梯是从取数首日一路走过来的，起点太晚相位就不对（试过 5.20 起头，
+     * 7 月的标记整体错位）。名单裁到 4 板以上是为了压文件体积，整段回放下来 7~9 月的标记与全名单逐笔一致。
+     *
+     * <p>钉死他手算核对的那几个日子：恒尚节能 7.06◆/7.07★、立新能源 7.22◆/7.23★（追平哈药股份 7.16 记下的
+     * 5 板线）、爱丽家居 7.28◆/7.29★、深中华Ａ 8.28◆、华瓷股份 9.22★；闽东电力 9.16◆ 但没兑现，
+     * 9.24 新华文轩<b>不给</b>标记（v13 起失败试探的高度也记账，那天线还钉在 6 板上）。
+     */
+    @Test
+    void breaks_realCurve_datedAnchors() throws Exception {
+        List<TiantiVO.HeightPoint> pts = loadCurve("/market/break_curve_2026.json");
+        TiantiService.detectBreaks(pts);
+
+        assertProbe(on(pts, "2026-07-06"), "603137"); // 恒尚节能追平降到的 4 板线
+        assertBreak(on(pts, "2026-07-07"), 4, "603137");
+        // 恒尚 7.09 打完 8 板、7.10 掉榜 → 线抬到 8 板钉 8−1=7 个交易日（7.10~7.20），7.21 才降一级
+        assertEquals(Integer.valueOf(8), on(pts, "2026-07-10").getCeiling(), "断板当天就把线抬到恒尚的 8 板");
+        assertQuiet(on(pts, "2026-07-16"), "哈药股份的 5 板追不上 8 板线，只进降线记录");
+        assertEquals(Integer.valueOf(8), on(pts, "2026-07-20").getCeiling(), "第 7 个交易日还钉着");
+        assertEquals(Integer.valueOf(5), on(pts, "2026-07-21").getCeiling(), "钉满降到记录到的 5 板");
+        assertEquals("600664", on(pts, "2026-07-21").getLineStock().getCode()); // 哈药股份
+        assertProbe(on(pts, "2026-07-22"), "001258"); // 立新能源
+        assertBreak(on(pts, "2026-07-23"), 5, "001258");
+        assertQuiet(on(pts, "2026-07-27"), "立新 7.24 断板 → 线钉在 6 板，长缆的 5 板追不上");
+        assertProbe(on(pts, "2026-07-28"), "603221"); // 爱丽家居 6 板追平
+        assertBreak(on(pts, "2026-07-29"), 6, "603221");
+
+        // 他手算的那条阶梯：深中华Ａ 8.28 打满 7 板、8.31 掉榜 → 7−1=6 个交易日钉在 7 板
+        assertProbe(on(pts, "2026-08-28"), "000017",
+                "深中华Ａ 7 板越过来到它名下的 6 板线——这级是阶梯从爱丽家居那轮降下来的，不是它筑的壁，算试探");
+        assertNull(on(pts, "2026-08-31").getIsBreak(), "8.31 它掉榜 = 这次试探没兑现，不补 ★");
+        assertEquals(Integer.valueOf(7), on(pts, "2026-08-28").getCeiling(), "试探之后周期归它，线跟它抬到 7 板");
+        assertNull(on(pts, "2026-08-28").getIsChaos());
+        for (String d : new String[] { "2026-08-31", "2026-09-02", "2026-09-04", "2026-09-07" }) {
+            assertEquals(Integer.valueOf(7), on(pts, d).getCeiling(), d + " 还钉在深中华Ａ的 7 板上");
+            assertEquals(Integer.valueOf(7), on(pts, d).getOldDragonHeight());
+            assertEquals(Boolean.TRUE, on(pts, d).getIsChaos());
+        }
+        assertProbe(on(pts, "2026-09-01"), "002084"); // 海鸥住工 7 板追平这条线
+        assertQuiet(on(pts, "2026-09-02"), "海鸥没续板=破壁失败，只许换票");
+        // v13：海鸥那次失败的 7 板也记进降线高度 → 9.08 这一级钉满仍然顶在 7 上，不许降到 6。
+        // 他 9.27 手算的「9.8 开始降到 9.7 的 6」就是被这条改掉的。
+        assertEquals(Integer.valueOf(7), on(pts, "2026-09-08").getCeiling(),
+                "记不到比 7 更低的高度（海鸥追平过），原地再钉一级");
+        assertEquals(Integer.valueOf(7), on(pts, "2026-09-15").getCeiling(), "再钉的 7−1=6 个交易日没人够到 7");
+        assertQuiet(on(pts, "2026-09-15"), "5 板够不着 7 板线（v12 在这里给闽东电力 ◆）");
+        // 这 6 天没人追平，记到的最高只有 5 板 → 阶梯从 7 直接跳到 5，中间那级 6 被抹掉
+        assertEquals(Integer.valueOf(5), on(pts, "2026-09-16").getCeiling(), "钉满降到记录到的 5 板");
+        assertProbe(on(pts, "2026-09-16"), "000993"); // 闽东电力 6 板越过 5 板线才算试探
+        assertNull(on(pts, "2026-09-17").getIsBreak(), "闽东 9.17 掉榜=没兑现，这一版它没有 ★（v12 是 ★9.16）");
+        assertProbe(on(pts, "2026-09-17"), "605058"); // 澳弘电子 5 板追平（v12 里这天没标记）
+        assertProbe(on(pts, "2026-09-21"), "001216"); // 华瓷股份 5 板追平
+        assertBreak(on(pts, "2026-09-22"), 5, "001216"); // 9.22 续上 6 板=破壁成功（v11 删掉的那颗 ★ 回来了）
+        // 华瓷成了在位龙，9.23 掉榜 → 按它的 6 板重钉 6−1=5 个交易日
+        assertEquals(Integer.valueOf(6), on(pts, "2026-09-24").getCeiling(), "他要的就是这个：破壁线还钉在 6");
+        assertQuiet(on(pts, "2026-09-24"), "新华文轩只有 5 板，够不着 6 板线——v12 在这里给它的 ◆ 就是要撤掉的");
+
+        // 色块 = 整条阶梯：只要没有票破壁成功、线还在钉或在降，就一直在色块里
+        assertEquals(Boolean.TRUE, on(pts, "2026-07-21").getIsChaos(), "降一级之后还在同一轮阶梯上");
+        assertEquals(Boolean.TRUE, on(pts, "2026-07-22").getIsChaos());
+        assertEquals(Integer.valueOf(8), on(pts, "2026-07-22").getOldDragonHeight(),
+                "ceiling 已经降到 5，色块报的旧龙高度还是恒尚的 8 板");
+        assertEquals(Integer.valueOf(7), on(pts, "2026-09-18").getOldDragonHeight(),
+                "线已经跳到 5 板，挂账的旧龙高度还是深中华Ａ的 7 板");
+        assertNull(on(pts, "2026-09-22").getIsChaos(), "华瓷这天破壁成功，阶梯停住");
+
+        int probes = 0;
+        int breaks = 0;
+        for (TiantiVO.HeightPoint p : pts) {
+            if (p.getTradeDate().toString().compareTo("2026-07-01") < 0) {
+                continue;
+            }
+            if (p.getIsProbe() != null) {
+                probes++;
+            }
+            if (p.getIsBreak() != null) {
+                breaks++;
+            }
+        }
+        // 数量级也钉住：规则一改就把标记刷成一片、或一个都不给，这里都会先红。
+        // 阶梯把线在高处多钉几天，够得着线的日子少了，所以 v11 比 v10 明显稀疏（21/10 → 7/4）；
+        // v12 补回挂着线的票自己爬过这条线（8.28 深中华Ａ）→ 7 → 8。
+        // v13 总数没动（还是 8/4），动的是分布：闽东的 ★9.16 换成 ★9.22 华瓷，澳弘 9.17 的 ◆ 回来了。
+        assertEquals(8, probes);
+        assertEquals(4, breaks);
+    }
+
+    /** 读 break_curve_2026.json：{@code [日期, 最高板, [[代码,名称]…], [[板高,代码,名称]…]]}。 */
+    private static List<TiantiVO.HeightPoint> loadCurve(String path) throws Exception {
+        List<TiantiVO.HeightPoint> out = new java.util.ArrayList<>();
+        try (java.io.InputStream in = TiantiServiceTest.class.getResourceAsStream(path)) {
+            com.fasterxml.jackson.databind.JsonNode root =
+                    new com.fasterxml.jackson.databind.ObjectMapper().readTree(in);
+            for (com.fasterxml.jackson.databind.JsonNode row : root) {
+                TiantiVO.HeightPoint p = new TiantiVO.HeightPoint();
+                p.setTradeDate(LocalDate.parse(row.get(0).asText()));
+                p.setMaxHeight(row.get(1).asInt());
+                List<TiantiVO.HeightStock> stocks = new java.util.ArrayList<>();
+                for (com.fasterxml.jackson.databind.JsonNode s : row.get(2)) {
+                    stocks.add(new TiantiVO.HeightStock(s.get(0).asText(), s.get(1).asText()));
+                }
+                stocks.sort(java.util.Comparator.comparing(TiantiVO.HeightStock::getCode));
+                p.setStocks(stocks);
+                p.setStockCount(stocks.size());
+                List<TiantiVO.LadderStock> ladder = new java.util.ArrayList<>();
+                for (com.fasterxml.jackson.databind.JsonNode r : row.get(3)) {
+                    ladder.add(new TiantiVO.LadderStock(r.get(0).asInt(), r.get(1).asText(),
+                            r.get(2).asText()));
+                }
+                p.setLadder(ladder);
+                out.add(p);
+            }
         }
         return out;
     }
 
     @Test
-    void breaks_lineFollowsChaosHigh_notWeldedToFiveBoard() {
-        // 混沌里最高只到 4 → 新龙 5 板即破壁；混沌里出过 6 板活口 → 必须 7 才破
-        List<TiantiVO.HeightPoint> weak = java.util.Arrays.asList(
-                pt("2026-09-01", 4, "OLD"),
-                pt("2026-09-02", 5, "NEW1"));
-        TiantiService.detectBreaks(weak, starts("2026-09-01", "OLD", "2026-08-20",
-                "2026-09-02", "NEW1", "2026-09-02"));
-        assertTrue(weak.get(1).getIsBreak() != null && weak.get(1).getIsBreak());
-        assertEquals(Integer.valueOf(4), weak.get(1).getPrevHigh());
+    void chaos_notifiesOldDragonHeightForMinusOneTradeDays() {
+        // X 爬到 5 板接棒成在位龙，9.04 掉榜：断板当天就是这一级的第 1 天，共 H−1=4 个交易日
+        // （9.04、9.07、9.08、9.09）都报"旧龙 5 板"，且这四天破壁线就钉在 5 板上不动。
+        // 9.10 钉满降到这期间没追平线的那些天里最高的 4 板——色块不在此收尾：只要没人破壁成功，
+        // 整条阶梯都在"旧龙的高度还没被收复"这件事里（v10 是降一级就算周期走完）。
+        List<TiantiVO.HeightPoint> pts = java.util.Arrays.asList(
+                pt("2026-09-01", 3, "X"),
+                pt("2026-09-02", 4, "X"),
+                pt("2026-09-03", 5, "X"),
+                pt("2026-09-04", 4, "A"),
+                pt("2026-09-07", 4, "B"),
+                pt("2026-09-08", 4, "C"),
+                pt("2026-09-09", 4, "D"),
+                pt("2026-09-10", 4, "E"),
+                pt("2026-09-11", 4, "F"),
+                pt("2026-09-14", 4, "G"));
+        TiantiService.detectBreaks(pts);
 
-        List<TiantiVO.HeightPoint> hot = java.util.Arrays.asList(
-                pt("2026-09-01", 4, "OLD"),
-                pt("2026-09-02", 6, "NEW1"),
-                pt("2026-09-03", 6, "NEW2"),
-                pt("2026-09-04", 7, "NEW3"));
-        TiantiService.detectBreaks(hot, starts("2026-09-01", "OLD", "2026-08-20",
-                "2026-09-02", "NEW1", "2026-09-02",
-                "2026-09-03", "NEW2", "2026-09-03",
-                "2026-09-04", "NEW3", "2026-09-04"));
-        // NEW1 6 板破 4→... 达 minAbs(4)=5 → 先破一次并把线抬到周期态
-        assertEquals(Integer.valueOf(6), hot.get(2).getCeiling());
-        assertNull(hot.get(2).getIsBreak());
-        // NEW3 只有超过 6 才算了结，7 板成立
-        assertEquals(Integer.valueOf(6), hot.get(3).getPrevHigh());
+        assertEquals(Boolean.TRUE, on(pts, "2026-09-01").getIsChaos(), "取数首日前没有旧龙，也算在阶梯的第一级上");
+        assertNull(on(pts, "2026-09-03").getIsChaos(), "X 还在加板把线抬走，这一轮归它");
+        assertEquals(Boolean.TRUE, on(pts, "2026-09-04").getIsChaos(), "断板当天就是这一级的第 1 天");
+        for (String d : new String[] { "2026-09-07", "2026-09-08", "2026-09-09" }) {
+            assertEquals(Boolean.TRUE, on(pts, d).getIsChaos(), d + " 还在 X 的 5 板上钉着");
+            assertEquals(Integer.valueOf(5), on(pts, d).getOldDragonHeight());
+            assertEquals(Integer.valueOf(5), on(pts, d).getCeiling(), d + " 破壁线钉在旧龙 5 板上，不跟着市场走");
+            assertQuiet(on(pts, d), "市场最高只有 4 板，够不着这条线");
+        }
+        assertEquals(Integer.valueOf(4), on(pts, "2026-09-10").getCeiling(), "钉满降到记录到的 4 板");
+        assertEquals(Integer.valueOf(5), on(pts, "2026-09-10").getOldDragonHeight(),
+                "H 不跟着降：还没收复的是 X 的 5 板，不是这条 4 板线");
+        assertEquals(Boolean.TRUE, on(pts, "2026-09-10").getIsChaos(), "降一级还在同一轮阶梯上，色块不中断");
+        assertProbe(on(pts, "2026-09-10"), "E", "线降到 4 板当天 E 就追平了");
     }
 
     @Test
-    void breaks_companionReboundNeitherBreaksNorRaisesCeiling() {
-        // 复刻 08-31→09-01：旧龙断板后，上一周期就在场的伴生票接棒创新高
-        List<TiantiVO.HeightPoint> pts = java.util.Arrays.asList(
-                pt("2026-08-29", 6, "TAIL"),
-                pt("2026-08-30", 7, "TAIL"),
-                pt("2026-08-31", 4, "FRESH0"),
-                pt("2026-09-01", 7, "FRESH1"));
-        TiantiService.detectBreaks(pts, starts("2026-08-29", "TAIL", "2026-08-24",
-                "2026-08-30", "TAIL", "2026-08-24",
-                "2026-08-31", "FRESH0", "2026-08-31",
-                "2026-09-01", "FRESH1", "2026-08-31"));
-
-        assertNull(pts.get(1).getIsBreak(), "伴生票反包创新高不算破壁");
-        assertEquals(Integer.valueOf(6), pts.get(1).getCeiling(), "伴生的 7 板不能变成新天花板");
-        assertTrue(Boolean.TRUE.equals(pts.get(3).getIsBreak()), "新龙按混沌高+1 破壁");
-        assertEquals(Integer.valueOf(6), pts.get(3).getPrevHigh());
-    }
-
-    @Test
-    void breaks_sittingDragonAddingBoardsIsSameBreak() {
-        List<TiantiVO.HeightPoint> pts = java.util.Arrays.asList(
-                pt("2026-09-01", 4, "X"),
-                pt("2026-09-02", 5, "D"),
-                pt("2026-09-03", 6, "D"),
-                pt("2026-09-04", 7, "D"),
-                pt("2026-09-05", 5, "E"),
-                pt("2026-09-08", 6, "E2"));
-        TiantiService.detectBreaks(pts, starts("2026-09-01", "X", "2026-09-01",
-                "2026-09-02", "D", "2026-09-02",
-                "2026-09-03", "D", "2026-09-02",
-                "2026-09-04", "D", "2026-09-02",
-                "2026-09-05", "E", "2026-09-01",
-                "2026-09-08", "E2", "2026-09-05"));
-
-        assertTrue(Boolean.TRUE.equals(pts.get(1).getIsBreak()));
-        assertNull(pts.get(2).getIsBreak(), "5→6 是同一次破壁的延续");
-        assertNull(pts.get(3).getIsBreak(), "5→6→7 仍然只算一次");
-        assertEquals(Integer.valueOf(7), pts.get(3).getCeiling());
-        assertTrue(Boolean.TRUE.equals(pts.get(5).getIsBreak()), "在位龙掉出名单后重新开混沌，新龙再破");
-    }
-
-    @Test
-    void breaks_minAbsFloorBlocksIceAgeThreeBoard() {
-        List<TiantiVO.HeightPoint> pts = java.util.Arrays.asList(
-                pt("2026-09-01", 2, "X"),
-                pt("2026-09-02", 3, "A"),
-                pt("2026-09-03", 4, "A"),
-                pt("2026-09-04", 5, "B"));
-        TiantiService.detectBreaks(pts, starts("2026-09-01", "X", "2026-09-01",
-                "2026-09-02", "A", "2026-09-02",
-                "2026-09-03", "A", "2026-09-02",
-                "2026-09-04", "B", "2026-09-04"));
-
-        // 混沌高跟着市场实际最高板走，兜底线取的是「抬高之后」那一档：
-        // 线 2→3 要 5 板、3→4 要 5 板，所以冰点期 3、4 板都不算破壁
-        assertNull(pts.get(1).getIsBreak(), "3 板未达 minAbs(2)=4，只把线抬到 3");
-        assertEquals(Integer.valueOf(3), pts.get(1).getCeiling());
-        assertNull(pts.get(2).getIsBreak(), "4 板未达 minAbs(3)=5");
-        assertEquals(Integer.valueOf(4), pts.get(2).getCeiling());
-        assertTrue(Boolean.TRUE.equals(pts.get(3).getIsBreak()), "5 板才破壁");
-        assertEquals(Integer.valueOf(4), pts.get(3).getPrevHigh());
+    void minAbsBreak_iceAgeFloors() {
+        // v6 的门槛已改成"另一只票追平冻结线"，这条绝对高度兜底目前没接进判定，先留作调参口径：
+        // 冰点期市场最高 2 板时，2 板并列也会算试探，要不要压回 4 板等他定
         assertEquals(Integer.valueOf(4), TiantiService.minAbsBreak(2));
         assertEquals(Integer.valueOf(5), TiantiService.minAbsBreak(4));
         assertEquals(Integer.valueOf(6), TiantiService.minAbsBreak(5));
-    }
-
-    @Test
-    void leader_companionOutclimbsSittingDragonEstablishesCycle() {
-        // 复刻 08-25 汉森首次破壁 → 08-27 深中华A 越过汉森高度确立自己的周期
-        List<TiantiVO.HeightPoint> pts = java.util.Arrays.asList(
-                pt("2026-08-18", 4, "OLD1"),
-                pt("2026-08-19", 5, "HAN"),
-                pt("2026-08-20", 6, "SHEN"),
-                pt("2026-08-21", 7, "SHEN"),
-                pt("2026-08-24", 7, "GULL"));
-        TiantiService.detectBreaks(pts, starts("2026-08-18", "OLD1", "2026-08-15",
-                "2026-08-19", "HAN", "2026-08-19",
-                "2026-08-20", "SHEN", "2026-08-16",
-                "2026-08-21", "SHEN", "2026-08-16",
-                "2026-08-24", "GULL", "2026-08-17"));
-
-        assertTrue(Boolean.TRUE.equals(pts.get(1).getIsBreak()), "新龙 5 板破混沌 4 板线");
-        assertTrue(Boolean.TRUE.equals(pts.get(1).getIsLeader()), "破壁当天同时开周期");
-        assertEquals("HAN", pts.get(1).getLeaderStock().getCode());
-
-        assertNull(pts.get(2).getIsBreak(), "伴生票超高度不算破壁");
-        assertTrue(Boolean.TRUE.equals(pts.get(2).getIsLeader()), "越过在册龙头高度即换龙");
-        assertEquals("SHEN", pts.get(2).getLeaderStock().getCode());
-
-        assertNull(pts.get(3).getIsLeader(), "在册龙头自己加板是同一次周期延续");
-        assertEquals(Integer.valueOf(7), pts.get(3).getCycleTop());
-        assertEquals("SHEN科技", pts.get(3).getCycleLeader());
-
-        assertNull(pts.get(4).getIsLeader(), "只到平高度算反包不算换龙");
-        assertNull(pts.get(4).getIsBreak());
     }
 }

@@ -77,33 +77,33 @@ public interface MarketStockMapper extends BaseMapper<MarketStock> {
             + "ORDER BY t.trade_date")
     List<MaxBoardRow> listMaxBoardRange(@Param("from") LocalDate from, @Param("to") LocalDate to);
 
-    /**
-     * 区间内<b>每一只</b>涨停个股的逐日连板数，用于反推「启动日」判伴生。
-     *
-     * <p>破壁要求新龙 {@code 启动日 > 旧龙断板日}，只看每日最高板的那份名单判不出来：
-     * 断板次日接棒创新高的往往是上一周期里就在场的伴生票（反包尾巴），不算破壁。
-     *
-     * <p>一天三个池 100~200 只、这里只取 ZT 池，90 日窗口约万行，调用方别传开区间。
-     */
-    @Select("SELECT trade_date AS tradeDate, code AS code, name AS name, consecutive AS consecutive "
-            + "FROM t_market_stock WHERE pool='ZT' AND trade_date BETWEEN #{from} AND #{to} "
-            + "ORDER BY trade_date, code")
-    List<BoardRow> listBoardSeries(@Param("from") LocalDate from, @Param("to") LocalDate to);
-
-    /** 逐票连板轨迹行：日期 / 代码 / 名称 / 当日连板数。 */
-    @lombok.Data
-    class BoardRow {
-        LocalDate tradeDate;
-        String code;
-        String name;
-        Integer consecutive;
-    }
-
     /** 每日最高板行：日期 / 板高 / 代码 / 名称。 */
     @lombok.Data
     class MaxBoardRow {
         LocalDate tradeDate;
         Integer maxHeight;
+        String code;
+        String name;
+    }
+
+    /**
+     * [from,to] 区间内每天 <b>2 板及以上</b>的个股名单及其自身板高（涨停池）。供连板高度曲线的破壁判定用。
+     *
+     * <p>试探对象放宽到"当天任意一只连板数 ≥ 破壁线"之后，光看并列最高板那几只不够：判定还要查试探股
+     * <b>次日自己的板高</b>有没有续上去（追平线的那只当天 5 板、次日 6 板才算破壁成功），
+     * 而它次日未必还在最高板名单上。
+     */
+    @Select("SELECT trade_date AS tradeDate, consecutive AS board, code AS code, name AS name "
+            + "FROM t_market_stock WHERE pool='ZT' AND consecutive >= 2 "
+            + "AND trade_date BETWEEN #{from} AND #{to} "
+            + "ORDER BY trade_date, board DESC, code")
+    List<LadderRow> listLadderRange(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /** 连板名单一行：日期 / 该股连板数 / 代码 / 名称。 */
+    @lombok.Data
+    class LadderRow {
+        LocalDate tradeDate;
+        Integer board;
         String code;
         String name;
     }

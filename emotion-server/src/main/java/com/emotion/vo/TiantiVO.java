@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 /**
@@ -108,27 +109,54 @@ public class TiantiVO {
         /** 并列最高板的完整家数，等于 stocks.size()。 */
         private Integer stockCount;
         private List<HeightStock> stocks;
-        /** 当天要捅破的那条线：混沌期=混沌高，周期内=在位龙板数。破壁线 = ceiling + 1。 */
+        /**
+         * 当天要追平的那条破壁线。旧龙断板后<b>钉在它的板高 H 上 H−1 个交易日</b>，钉满就降到
+         * "这段时间里没追平线的那些天的最高板"，再按新线钉 新线−1 天——一级一级往下降，直到有人破壁；
+         * 在位龙在册期间跟它的板高走。
+         */
         private Integer ceiling;
-        /** 当天是否首次捅破混沌天花板。 */
+        /** 挂着这条线的定线票：降一级时换成记下这个高度的那只；它自己再追平只算周期延续，不算试探。 */
+        private HeightStock lineStock;
+        /** 试探破壁：另一只票追平当前这条线，还要等它次日续板才算成功。 */
+        private Boolean isProbe;
+        /** 试探股，仅试探日有值。 */
+        private HeightStock probeStock;
+        /** 破壁成功：前一天的试探股次日继续涨停。 */
         private Boolean isBreak;
-        /** 被捅破的那个 chaosHigh，仅破壁日有值。 */
+        /** 被追平的那条线，仅破壁成功日有值。 */
         private Integer prevHigh;
-        /** 破壁股（新龙），仅破壁日有值。 */
+        /** 破壁股（新龙），仅破壁成功日有值。 */
         private HeightStock breakStock;
-        /** 当天换龙：某票把市场最高板抬过在册总龙头的高度，周期归它（伴生票超高度也算）。 */
-        private Boolean isLeader;
-        /** 登龙的个股，仅换龙日有值。 */
-        private HeightStock leaderStock;
-        /** 截至当天的周期最高板。 */
-        private Integer cycleTop;
-        /** 截至当天的周期总龙头名字。 */
-        private String cycleLeader;
+        /**
+         * 混沌期（通知周期）：破壁线正钉着倒计时——旧龙断板<b>当天</b>算第 1 天，共 H−1 个交易日，
+         * 之后每降一级再数 新线−1 天。整个阶梯期间市场都没重回旧龙的高度，所以这段一直着色；
+         * 破壁成功那天新龙在册，不算在内。
+         */
+        private Boolean isChaos;
+        /**
+         * 这轮挂账的旧龙板高 H（深中华Ａ 7 板那条的 7），仅混沌期有值。
+         * 与 {@link #ceiling} 是两回事：阶梯每降一级 {@code ceiling} 都在变，H 不变——它才是"还没收复的高度"。
+         */
+        private Integer oldDragonHeight;
+        /**
+         * 当天 2 板及以上的完整连板名单（含各自板高），只喂给破壁判定，不进 JSON。
+         * 为 null 时判定退回用 {@link #stocks}（并列最高板即当天最高板）。
+         */
+        @JsonIgnore
+        private List<LadderStock> ladder;
     }
 
     /** 高度曲线 tooltip 里的一只个股。 */
     @Data
     public static class HeightStock {
+        private final String code;
+        private final String name;
+    }
+
+    /** 某天连板名单上的一只个股：板高 / 代码 / 名称。 */
+    @Data
+    public static class LadderStock {
+        private final Integer board;
         private final String code;
         private final String name;
     }
