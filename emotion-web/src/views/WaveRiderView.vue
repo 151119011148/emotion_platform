@@ -55,7 +55,7 @@
         </div>
       </template>
 
-      <el-table :data="candidates" size="small" stripe :row-class-name="rowClass" style="width: 100%">
+      <el-table :data="candidates" row-key="code" size="small" stripe :row-class-name="rowClass" style="width: 100%">
         <el-table-column prop="rankNo" label="#" width="52" />
         <el-table-column label="名称" min-width="200">
           <template #default="{ row }">
@@ -73,7 +73,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="连板" width="64">
+        <el-table-column label="连板" prop="board" width="86" sortable>
           <template #default="{ row }">
             <span class="board">{{ row.board }}</span>
           </template>
@@ -90,14 +90,45 @@
               title="这只票在通达信题材索引里没有记录，退回引擎分组用的行业">{{ row.topic || '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="封单强度" width="120">
+        <el-table-column label="封单强度" width="142" sortable :sort-method="compareSeal">
           <template #default="{ row }">
             <span v-if="sealRatio(row) != null" class="num">{{ sealRatio(row).toFixed(2) }}%</span>
             <span v-else class="mut">—</span>
             <el-tag v-if="needQueue(row)" size="small" type="warning" effect="plain" class="qtag">排队</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="得分" width="70">
+        <el-table-column prop="score" label="得分" width="122" sortable>
+          <template #header>
+            <span class="th-score">
+              得分
+              <el-tooltip placement="bottom" effect="dark" :disabled="!cfg">
+                <template #content>
+                  <div class="sr">
+                    <b class="sr-title">得分 = 四项相加 − 风险扣分（满分 {{ scoreRule.ceiling }}）</b>
+                    <div v-for="t in scoreRule.terms" :key="t.key" class="sr-term">
+                      <span class="sr-w">{{ t.weight }} ×</span>
+                      <span class="sr-body">
+                        <span class="sr-n">{{ t.name }}</span>
+                        <span class="sr-d">{{ t.desc }}</span>
+                      </span>
+                    </div>
+                    <div class="sr-term">
+                      <span class="sr-w">−{{ scoreRule.risk }} ×</span>
+                      <span class="sr-body">
+                        <span class="sr-n">风险</span>
+                        <span class="sr-d">缩量一字（换手&lt;2% 且成交额低于 {{ scoreRule.minAmount }} 亿）或换手&gt;30%；命中任一条即满扣，扣分上限 1</span>
+                      </span>
+                    </div>
+                    <div class="sr-note">
+                      得分不是默认排序依据（# 列走服务端封单强度降序），点本列表头可按得分升/降序。
+                      它决定建议仓位＝{{ scoreRule.maxPos }} × 得分 ÷ 当日最高分，带风险标记的再折半。
+                    </div>
+                  </div>
+                </template>
+                <span class="rule-mark">?</span>
+              </el-tooltip>
+            </span>
+          </template>
           <template #default="{ row }">
             <span class="num">{{ row.score == null ? '—' : Number(row.score).toFixed(2) }}</span>
           </template>
@@ -154,6 +185,8 @@
       <p class="fn">
         标签怎么看：名称后面 <b>节点票 / 锚定龙头 / D0候选</b>＝它出现在「节点追踪」的某条节点里，
         悬浮看是哪一段周期、什么状态（鼠标停在名称上显示代码）；
+        其中 <b>D0候选</b> 只在该节点 D0 的<b>次一交易日</b>挂标（那份名单本来就是 D0 当天的高板池），
+        节点票与锚定龙头是身份标，不看日子；
         蓝底的 <b>题材</b>＝通达信概念板块，按当日该题材的涨停家数降序，只铺前 3 个，
         多的折成 <b>+N</b>（悬浮看全部与家数）。
         <b>警示</b>列里红底的 <b>一字断魂刀</b>＝今日与昨日连续锁死、小盘、封成比高、换手低，
@@ -305,6 +338,8 @@ const funnel = ref([])
 const review = ref(null)
 const running = ref(false)
 const runMeta = ref(null)
+/** 当前策略的生效配置。得分规则的说明要引用真实权重，不能写死。 */
+const cfg = ref(null)
 
 const hasT1 = computed(() => t1Rows.value.length > 0)
 
@@ -462,6 +497,16 @@ function sealRatio(row) {
 }
 
 /**
+ * 「封单强度」是从 filterDetailJson 里 parse 出来的，没有能直接交给表格的 prop，
+ * 所以排序给它一个比较函数。缺值按 -1 垫底（比值恒 ≥0），降序时落在最后，与服务端一致。
+ */
+function compareSeal(a, b) {
+  const x = sealRatio(a)
+  const y = sealRatio(b)
+  return (x == null ? -1 : x) - (y == null ? -1 : y)
+}
+
+/**
  * 「需排队」标记：封单 ≥150% 的样本实测 97.5% 在 T 日开盘即封，
  * 盘中挂单基本排不到，只能集合竞价挂涨停价。这只影响「买不买得到」，不影响排序。
  */
@@ -486,6 +531,35 @@ function riskText(flag) {
   return flag
 }
 
+/**
+ * 「得分怎么算」的文案。权重一律取当前策略的生效配置：
+ * 他在配置页改了 score_weights，这里的数字必须跟着动，不能写成死文字。
+ */
+const SCORE_TERMS = [
+  { key: 'board', name: '身位', desc: '连板数 ÷ 当日入选候选的最高板（所以是相对身位，跨日不可比）' },
+  { key: 'position', name: '卡位', desc: '是否所属题材内的最高板，并列最高都算；题材取通达信行业，不是「题材」列那些概念标签' },
+  { key: 'node', name: '节点', desc: '节点票权重：选拔未实现，服务端当前恒按 0 计，这一项权重是空转的' },
+  { key: 'timing', name: '时间', desc: '是否 10:00 前首封' }
+]
+
+function w2(v) {
+  return v == null ? '—' : Number(v).toFixed(2)
+}
+
+const scoreRule = computed(() => {
+  const c = cfg.value || {}
+  const w = c.score_weights || {}
+  return {
+    terms: SCORE_TERMS.map((t) => ({ ...t, weight: w2(w[t.key]) })),
+    risk: w2(w.risk),
+    minAmount: c.filter_min_amount == null ? '—' : Number(c.filter_min_amount).toFixed(1),
+    // 满分只加正项：节点项恒为 0，把它的权重算进天花板会让人以为还有分没拿到
+    ceiling: w2((Number(w.board) || 0) + (Number(w.position) || 0) + (Number(w.timing) || 0)),
+    maxPos: c.max_position_per_stock == null ? '—'
+      : (Number(c.max_position_per_stock) * 100).toFixed(0) + '%'
+  }
+})
+
 async function loadStrategies() {
   try {
     const res = await waveriderApi.strategies()
@@ -495,6 +569,17 @@ async function loadStrategies() {
     }
   } catch (e) {
     strategies.value = []
+  }
+}
+
+/** 配置只喂给「得分」列的说明悬浮，拉不到就把 tooltip 空着，绝不该拦住候选表出来。 */
+async function loadConfig() {
+  if (!strategyId.value) return
+  try {
+    const res = await waveriderApi.strategyDetail(strategyId.value)
+    cfg.value = ((res && res.data) || {}).currentConfig || null
+  } catch (e) {
+    cfg.value = null
   }
 }
 
@@ -544,6 +629,7 @@ function shiftDays(iso, days) {
 async function loadAll() {
   if (!strategyId.value) return
   await loadCandidates()
+  await loadConfig()
   await loadReview()
 }
 
@@ -561,7 +647,8 @@ async function runNow() {
     })
     const d = (res && res.data) || {}
     runMeta.value = { date: d.tradeDate, status: d.status, cost: null }
-    ElMessage.success('运行完成：产出 ' + (d.candidateCount || 0) + ' 只候选')
+    ElMessage.success('运行完成：产出 ' + (d.candidateCount || 0) + ' 只候选'
+      + (d.t1Backfill === 'scheduled' ? '；T+1 表现后台补写中，稍后点刷新可见' : ''))
     await loadAll()
   } finally {
     running.value = false
@@ -833,6 +920,80 @@ onMounted(async () => {
 }
 .mb12 {
   margin-bottom: 12px;
+}
+
+/* 表头「得分」的说明悬浮。
+   el-tooltip 的 popper 会传送到 body，宽度不受这一列 104px 的约束，
+   所以换行必须靠 .sr 自己的定宽来定，不能让内容去撑列宽。
+   作用域样式仍然生效：slot 里的节点带着本组件的 data-v 属性。 */
+.th-score {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+.rule-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #22303f;
+  border: 1px solid #3a4d63;
+  color: #9fb2c6;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  vertical-align: middle;
+  transition: color 0.18s, border-color 0.18s, background 0.18s;
+}
+.rule-mark:hover {
+  color: #ffd166;
+  border-color: #ffd166;
+  background: #2b3d52;
+}
+.sr {
+  width: 380px;
+  line-height: 1.6;
+  text-align: left;
+}
+.sr-title {
+  display: block;
+  color: #e1e8ed;
+  font-size: 12.5px;
+  margin-bottom: 7px;
+}
+/* 权重那一列固定宽度，四条公式项的说明文字才能左对齐成一栏。 */
+.sr-term {
+  display: grid;
+  grid-template-columns: 46px 1fr;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+.sr-w {
+  color: #fbbf24;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.sr-body {
+  display: block;
+}
+.sr-n {
+  color: #cbd5e0;
+}
+.sr-d {
+  display: block;
+  color: #8899a6;
+  font-size: 11.5px;
+}
+.sr-note {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid #3a4d63;
+  color: #8899a6;
+  font-size: 11.5px;
 }
 
 /* ===== 本页独有的几处 Element 浅色兜底 =====
