@@ -4,8 +4,8 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -46,7 +46,6 @@ public class NodeService {
     private final MarketDailyMapper marketDailyMapper;
     private final SurveillanceMapper surveillanceMapper;
     private final NodeSuggestService nodeSuggestService;
-    private final ObjectMapper objectMapper;
 
     public NodeService(NodeEventMapper nodeEventMapper,
                        AnchorMapper anchorMapper,
@@ -54,8 +53,7 @@ public class NodeService {
                        MarketStockMapper marketStockMapper,
                        MarketDailyMapper marketDailyMapper,
                        SurveillanceMapper surveillanceMapper,
-                       NodeSuggestService nodeSuggestService,
-                       ObjectMapper objectMapper) {
+                       NodeSuggestService nodeSuggestService) {
         this.nodeEventMapper = nodeEventMapper;
         this.anchorMapper = anchorMapper;
         this.dailyRecordMapper = dailyRecordMapper;
@@ -63,7 +61,6 @@ public class NodeService {
         this.marketDailyMapper = marketDailyMapper;
         this.surveillanceMapper = surveillanceMapper;
         this.nodeSuggestService = nodeSuggestService;
-        this.objectMapper = objectMapper;
     }
 
     /**
@@ -198,7 +195,11 @@ public class NodeService {
     }
 
     /**
-     * 节点类型 → 中文展示名（类型轴只认这 5 个具体值）。
+     * 节点类型 → 中文展示名（类型轴的闭集）。
+     *
+     * <p>高低切一族（接位/补位/转切）看的是老龙断板之后资金去了哪儿：接位是方向未定的临时态；
+     * 补位与转切判据完全相同，只按接位票与老龙的题材同不同属性分流——同属性借的是老龙的题材余温，
+     * 异属性借的是老龙「死」这件事腾出来的势。周期一族（启动/分歧/切换）与空间一族（破局）各走各的。
      *
      * <p>查不到一律返回 null，由前端显示「未识别」：<strong>绝不回落成「普通节点」</strong>——
      * 反义定义只说明它不是什么，而且每加一个 node_type 这个词的所指就要变一次（PRD §2 命名约定）。
@@ -208,6 +209,12 @@ public class NodeService {
             return null;
         }
         switch (nodeType) {
+            case "SPLIT_PENDING":
+                return "接位 · 待定";
+            case "FILL_SAME":
+                return "补位节点";
+            case "SWITCH_CROSS":
+                return "转切节点";
             case "SPACE_BREAK":
                 return "破局日 · 观察";
             case "SPACE_BREAK_NEXT":
@@ -357,21 +364,25 @@ public class NodeService {
     /**
      * 给候选行打「来自节点追踪」的标，写进 {@link CandidateStock#setNodeTags}（瞬态，不落库）。
      *
-     * <p>三种角色都算：节点票（{@code node_stock}，带代码、可精确匹配）、锚定龙头
-     * （{@code anchor_stock}，只有名称）、D0 候选（{@code d0_candidates}，名称数组）。
+     * <p>三种角色：节点票（{@code node_stock}，带代码）、锚定龙头（{@code anchor_stock}，只有名称）、
+     * D0 候选。前两种是身份标，不限日期：一只票是不是某节点的节点票/锚定龙头，跟它哪天涨停无关。
      *
-     * <p>前两种是身份标，不限日期：一只票是不是某节点的节点票/锚定龙头，跟它哪天涨停无关。
-     * D0 候选不一样——那份名单是「D0 当天的高板池」，它只描述 D0 → 次一交易日这一跳，
-     * 隔几天再撞同名一次，打的是过期标（09-23 的名单不该在 11 月还标着「D0 候选」）。
-     * 所以 D0 候选只在候选行的上一个有明细的交易日 {@code == } 事件的 {@code d0_date} 时才挂；
-     * {@code d0_date} 为空的事件没有 D0 锚点，不再产出 D0 候选标。
+     * <p><b>D0 候选按明细复算「D0 当天全部二板」，不吃 {@code d0_candidates} 字段。</b>那份名单是
+     * 他盘中的判断，存量还是老版本的「当日全部 ≥2 板」；而 §三 定的 D0 候选池是二板，判据侧
+     * {@code NodeSuggestService.readCandidates} 一直是按明细复算的。两边共用一条筛法，否则就是
+     * 屏幕上 12 只带标、判定却按 3 只算的那种双口径。手打名单原样留在事件里，节点追踪页照旧显示，
+     * 只是不再拿来给候选打标。
      *
-     * <p>「上一个交易日」用 {@code prevDetailDate}（上一个有涨停池明细的日子），不用日历：
-     * 名单本来就是从这份明细里拉的，两者必须同一口径，否则明细缺失的那天会既当不上 D0、
-     * 又把次日的标一起弄没——那是数据缺口的真实反映，不是匹配写错。
+     * <p>日期闸门不变：复算出来的池子仍只描述 D0 → 次一交易日这一跳，所以只在候选行的
+     * 上一个有明细的交易日 {@code == } 事件的 {@code d0_date} 时才挂；{@code d0_date} 为空的事件
+     * 没有 D0 锚点。{@code prevDetailDate} 用的是明细而不是日历，池子本来就从这份明细里拉——
+     * 明细缺的那天既当不上 D0、也不出标，那是数据缺口的真实反映，不是匹配写错。
      *
-     * <p>匹配口径与 {@link #stockCodeOf}、名称去空白保持一致：明细里的名字是「罗 牛 山」，
-     * 而 d0_candidates 里写的是「罗牛山」，直接 equals 会漏掉。
+     * <p>系统B 的池子是「板块内 D0 首板」，要按老龙行业再切一刀；B 已下线（生产库 0 条），
+     * 这里就不为它复算，避免把 A 的二板池错挂到 B 事件上。
+     *
+     * <p>复算之后按<b>代码</b>撞，不再按名称去空白：那一步是为了对上只有名称的手打名单才存在的，
+     * 现在两边都是明细行，代码是唯一的。
      */
     public void tagCandidates(List<CandidateStock> rows, Long userId) {
         if (rows == null || rows.isEmpty()) {
@@ -385,8 +396,8 @@ public class NodeService {
         // 先按「代码 / 去空白名称」把事件建成索引，再拿候选去撞，免得每行都重解析一遍事件
         Map<String, List<NodeEvent>> byNodeCode = new HashMap<String, List<NodeEvent>>();
         Map<String, List<NodeEvent>> byAnchor = new HashMap<String, List<NodeEvent>>();
-        // D0 名单按 D0 日期分桶，只有撞对日子的候选才去查这一桶
-        Map<LocalDate, Map<String, List<NodeEvent>>> byD0 = new HashMap<LocalDate, Map<String, List<NodeEvent>>>();
+        // D0 事件按日子分桶；池子是整日复算一次，不按事件重复查库
+        Map<LocalDate, List<NodeEvent>> byD0 = new HashMap<LocalDate, List<NodeEvent>>();
         for (NodeEvent e : events) {
             String code = stockCodeOf(e.getNodeStock());
             if (code != null) {
@@ -396,31 +407,53 @@ public class NodeService {
             if (anchor != null) {
                 index(byAnchor, anchor, e);
             }
-            if (e.getD0Date() == null) {
-                continue;
-            }
-            Map<String, List<NodeEvent>> names = byD0.get(e.getD0Date());
-            if (names == null) {
-                names = new HashMap<String, List<NodeEvent>>();
-                byD0.put(e.getD0Date(), names);
-            }
-            for (String name : parseD0(e.getD0Candidates())) {
-                String key = norm(name);
-                if (key != null) {
-                    index(names, key, e);
-                }
+            if (e.getD0Date() != null && !NodeSuggestService.SYSTEM_B.equals(e.getSystemType())) {
+                index(byD0, e.getD0Date(), e);
             }
         }
+        Map<LocalDate, Set<String>> pools = d0CandidatePools(byD0.keySet());
         Map<LocalDate, LocalDate> prevDates = new HashMap<LocalDate, LocalDate>();
         for (CandidateStock c : rows) {
             List<NodeTagVO> tags = new ArrayList<NodeTagVO>();
             collect(tags, byNodeCode.get(c.getCode()), NodeTagVO.KIND_NODE_STOCK, c);
             collect(tags, byAnchor.get(norm(c.getName())), NodeTagVO.KIND_ANCHOR, c);
             LocalDate d0 = prevDetailDate(c.getTradeDate(), prevDates);
-            Map<String, List<NodeEvent>> names = d0 == null ? null : byD0.get(d0);
-            collect(tags, names == null ? null : names.get(norm(c.getName())), NodeTagVO.KIND_D0_CAND, c);
+            List<NodeEvent> eventsOfD0 = d0 == null ? null : byD0.get(d0);
+            Set<String> pool = d0 == null ? null : pools.get(d0);
+            if (eventsOfD0 != null && pool != null && pool.contains(c.getCode())) {
+                collect(tags, eventsOfD0, NodeTagVO.KIND_D0_CAND, c);
+            }
             c.setNodeTags(tags);
         }
+    }
+
+    /**
+     * 按明细复算这些 D0 各自的候选池：当天涨停池里恰好二板的票（§三 系统A，
+     * 板数与 {@code NodeSuggestService.readCandidates} 共用 {@link NodeSuggestService#A_CANDIDATE_BOARD}）。
+     *
+     * @return D0 → 当天二板的代码集合；那天没有二板就没有这个键
+     */
+    private Map<LocalDate, Set<String>> d0CandidatePools(Set<LocalDate> dates) {
+        Map<LocalDate, Set<String>> out = new HashMap<LocalDate, Set<String>>();
+        if (dates.isEmpty()) {
+            return out;
+        }
+        List<MarketStock> pool = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
+                .in(MarketStock::getTradeDate, dates)
+                .eq(MarketStock::getPool, MarketStock.POOL_LIMIT_UP)
+                .eq(MarketStock::getConsecutive, NodeSuggestService.A_CANDIDATE_BOARD));
+        for (MarketStock row : pool) {
+            if (row.getTradeDate() == null || row.getCode() == null) {
+                continue;
+            }
+            Set<String> codes = out.get(row.getTradeDate());
+            if (codes == null) {
+                codes = new HashSet<String>();
+                out.put(row.getTradeDate(), codes);
+            }
+            codes.add(row.getCode());
+        }
+        return out;
     }
 
     /** 候选行的上一个有明细的交易日；同一天只查一次，缺失也记账免得反复打库。 */
@@ -494,7 +527,7 @@ public class NodeService {
         return dates;
     }
 
-    private static void index(Map<String, List<NodeEvent>> m, String key, NodeEvent e) {
+    private static <K> void index(Map<K, List<NodeEvent>> m, K key, NodeEvent e) {
         List<NodeEvent> list = m.get(key);
         if (list == null) {
             list = new ArrayList<NodeEvent>();
@@ -520,19 +553,6 @@ public class NodeService {
             t.setNodeStock(e.getNodeStock());
             t.setNodeStockMaxBoard(e.getNodeStockMaxBoard());
             out.add(t);
-        }
-    }
-
-    /** d0_candidates 是名称的 JSON 数组；解析不出来就当空集，不让一条脏数据把整页的标打没了。 */
-    @SuppressWarnings("unchecked")
-    private List<String> parseD0(String json) {
-        if (json == null || json.trim().isEmpty()) {
-            return Collections.emptyList();
-        }
-        try {
-            return objectMapper.readValue(json, List.class);
-        } catch (Exception e) {
-            return Collections.emptyList();
         }
     }
 

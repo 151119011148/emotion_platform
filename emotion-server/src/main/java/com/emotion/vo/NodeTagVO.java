@@ -22,7 +22,7 @@ public class NodeTagVO {
     public static final String KIND_NODE_STOCK = "NODE_STOCK";
     /** 它是这条节点的「锚定龙头」（anchor_stock）。 */
     public static final String KIND_ANCHOR = "ANCHOR";
-    /** 它在 D0 候选名单里（d0_candidates）。 */
+    /** 它是这条节点 D0 当天的二板（按明细复算，与晋级判据数的是同一批票，不再吃手打名单）。 */
     public static final String KIND_D0_CAND = "D0_CAND";
 
     /** 命中方式：NODE_STOCK / ANCHOR / D0_CAND。 */

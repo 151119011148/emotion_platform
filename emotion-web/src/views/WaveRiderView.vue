@@ -185,7 +185,8 @@
       <p class="fn">
         标签怎么看：名称后面 <b>节点票 / 锚定龙头 / D0候选</b>＝它出现在「节点追踪」的某条节点里，
         悬浮看是哪一段周期、什么状态（鼠标停在名称上显示代码）；
-        其中 <b>D0候选</b> 只在该节点 D0 的<b>次一交易日</b>挂标（那份名单本来就是 D0 当天的高板池），
+        其中 <b>D0候选</b> 只在该节点 D0 的<b>次一交易日</b>挂标，且按当日明细复算＝<b>D0 当天的全部二板</b>
+        （与节点判定数晋级率用的是同一批票，不再读节点上那份手打名单），
         节点票与锚定龙头是身份标，不看日子；
         蓝底的 <b>题材</b>＝通达信概念板块，按当日该题材的涨停家数降序，只铺前 3 个，
         多的折成 <b>+N</b>（悬浮看全部与家数）。
@@ -374,8 +375,9 @@ function nodeTagsOf(row) {
     const items = byKind[kind]
     const text = NODE_KIND_TEXT[kind] || kind
     const title = items.map((x) => {
-      const parts = ['D0 ' + (x.d0Date || '—')]
+      const parts = ['#' + (x.eventId || '—'), 'D0 ' + (x.d0Date || '—')]
       if (x.status) parts.push(x.status)
+      if (x.nodeStock && kind !== 'NODE_STOCK') parts.push('节点票 ' + x.nodeStock)
       if (x.anchorStock) parts.push('锚龙 ' + x.anchorStock)
       if (x.theme) parts.push(x.theme)
       return text + '：' + parts.join(' · ')
