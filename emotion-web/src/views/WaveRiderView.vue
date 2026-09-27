@@ -538,8 +538,8 @@ function riskText(flag) {
  * 他在配置页改了 score_weights，这里的数字必须跟着动，不能写成死文字。
  */
 const SCORE_TERMS = [
-  { key: 'board', name: '身位', desc: '连板数 ÷ 当日入选候选的最高板（所以是相对身位，跨日不可比）' },
-  { key: 'position', name: '卡位', desc: '是否所属题材内的最高板，并列最高都算；题材取通达信行业，不是「题材」列那些概念标签' },
+  { key: 'board', name: '全场高度', desc: '连板数 ÷ 当日入选候选的最高板（所以是相对高度，跨日不可比）' },
+  { key: 'position', name: '身位板', desc: '是否所属题材内的最高板，并列最高都算；题材取东财行业板块，不是「题材」列那些概念标签' },
   { key: 'node', name: '节点', desc: '' },
   { key: 'timing', name: '时间', desc: '是否 10:00 前首封' }
 ]
