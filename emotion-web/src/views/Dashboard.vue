@@ -60,12 +60,6 @@
     <!-- 曲线：紧贴页头温度下方；点可以点——点了切到那天的仪表盘 -->
     <div class="chart-section">
       <div class="chart-controls">
-        <el-radio-group v-model="days" size="small" @change="loadCurve">
-          <el-radio-button :value="20">近20日</el-radio-button>
-          <el-radio-button :value="60">近60日</el-radio-button>
-          <el-radio-button :value="120">近120日</el-radio-button>
-          <el-radio-button :value="500">全部</el-radio-button>
-        </el-radio-group>
         <el-button v-if="selectedDate" size="small" link type="primary" @click="backToToday">
           回到当日
         </el-button>
@@ -96,8 +90,9 @@ import StageAdvice from '../components/StageAdvice.vue'
 
 // 本地日期，不能用 toISOString()：那是 UTC，00:00–07:59 会算成前一天
 const todayStr = new Date().toLocaleDateString('en-CA')
-// 取 60 天但默认只展示最近 20 天：拉多少＝可移范围，只拉 20 的话窗口＝整个数据集，−/≪ 又变成死键
-const days = ref(60)
+// 拉全量：范围开关已去掉，「拉多少」就是 ≪/− 能翻多远。默认仍只显示最近 20 个交易日
+// （curveZoom 的 DEFAULT_SPAN），要看更早的按 ≪ 或连按 − 放大范围。
+const CURVE_DAYS = 500
 const headRecord = ref(null)
 /** 点击曲线点选中的日期；null=默认跟随当日（回落最近记录）。 */
 const selectedDate = ref(null)
@@ -206,7 +201,7 @@ async function loadHead() {
 
 async function loadCurve() {
   try {
-    const res = await recordApi.getCurve(days.value)
+    const res = await recordApi.getCurve(CURVE_DAYS)
     curveData.value = res.data
   } catch (e) { /* ignore */ }
 }
@@ -412,6 +407,9 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  /* 占位：不撑高的话，选中某天冒出「回到当日」会把整张图往下顶 18px，
+     而这次点击的落点就在图上——图一动，下一天的点就点不准了 */
+  min-height: 18px;
   margin-bottom: 12px;
 }
 .bottom-row {

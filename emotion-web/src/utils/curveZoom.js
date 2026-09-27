@@ -30,7 +30,7 @@ export const DEFAULT_SPAN = 20
  */
 export function useCurveZoom(countOf, initialSpan = DEFAULT_SPAN) {
   // touched=false 表示还没人动过按钮：窗口恒锚在最新一天、只取最近 initialSpan 个。
-  // 不叫 full 是因为「默认」已不等于「全部」；换数据长度时（近20日→全部）跟着重算，
+  // 不叫 full 是因为「默认」已不等于「全部」；换数据长度时（重新拉了更长/更短的区间）跟着重算，
   // 而不是把旧下标钳成新数据的前若干天，那会让人以为缩放没生效。
   const win = reactive({ touched: false, i0: 0, i1: -1, n: -1 })
 
@@ -50,8 +50,8 @@ export function useCurveZoom(countOf, initialSpan = DEFAULT_SPAN) {
     const n = total()
     if (!win.touched) return defaultRange()
     let [a, b] = [win.i0, win.i1]
-    // 数据条数变了（仪表盘切近20日/近60日/全部）：保住窗口宽度、改锚在最新一天。
-    // 直接沿用旧下标会落到另一段日期上——缩放在 9 月，换完范围却变成看 7 月。
+    // 数据条数变了（重新拉了不同区间）：保住窗口宽度、改锚在最新一天。
+    // 直接沿用旧下标会落到另一段日期上——缩放在 9 月，换完数据却变成看 7 月。
     // 这里只做纯读换算，不在渲染期回写响应式状态。
     if (win.n !== n && n > 0) {
       const w = Math.max(1, Math.min(b - a + 1, n))
