@@ -515,6 +515,33 @@ public class WaveRiderEngine {
     // ------------------------------------------------------------------ T+1 补写
 
     /**
+     * 围绕 {@code tradeDate} 把能补的 T+1 都补一遍，返回补写的行数。
+     *
+     * <p>补两笔：{@code tradeDate} 的前一交易日（它的 T+1 就是这一天），
+     * 以及 {@code tradeDate} 自己（只有它的 T+1 已经入库才补得动——重跑历史日期时才是事实）。
+     * 手动运行不经定时任务，没有那个「先补昨日账」的前置步骤，这个方法是给它补上同款语义。
+     *
+     * <p>单只票的行情请求在这台机器上会偶发超时，所以这里<strong>故意不开事务</strong>：
+     * 一笔补挂了就记一笔日志继续往下，既不把运行本身带下水，
+     * 也不让第 14 只票的超时把前 13 只已经写好的行回滚掉——留着的缺口下次运行或 {@code /backfill} 会再补。
+     */
+    public int backfillAround(Long strategyId, LocalDate tradeDate) {
+        int n = 0;
+        LocalDate prev = marketStockMapper.prevDetailDate(tradeDate);
+        for (LocalDate d : new LocalDate[]{prev, tradeDate}) {
+            if (d == null) {
+                continue;
+            }
+            try {
+                n += backfillT1(strategyId, d);
+            } catch (RuntimeException e) {
+                log.warn("策略[{}]补写 {} 的 T+1 失败：{}", strategyId, d, e.toString());
+            }
+        }
+        return n;
+    }
+
+    /**
      * 补写候选票在 D+1 的实际表现。
      *
      * <p>做成「跑当日选股前的前置步骤」而不是独立任务：漏跑一天的时候，

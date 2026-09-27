@@ -26,6 +26,7 @@ import com.emotion.vo.ThemeTagVO;
 import com.emotion.waverider.WaveRiderConfig;
 import com.emotion.waverider.WaveRiderEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -43,6 +44,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
 
 /**
  * WaveRider 的对外接口（PRD §11.1）。
@@ -69,6 +71,7 @@ public class WaveRiderController {
     private final TopicHeatService topicHeatService;
     private final TiantiService tiantiService;
     private final ObjectMapper objectMapper;
+    private final ExecutorService marketExecutor;
 
     public WaveRiderController(WaveRiderConfigService configService,
                                WaveRiderEngine engine,
@@ -80,7 +83,8 @@ public class WaveRiderController {
                                NodeService nodeService,
                                TopicHeatService topicHeatService,
                                TiantiService tiantiService,
-                               ObjectMapper objectMapper) {
+                               ObjectMapper objectMapper,
+                               @Qualifier("marketExecutor") ExecutorService marketExecutor) {
         this.configService = configService;
         this.engine = engine;
         this.reviewService = reviewService;
@@ -92,6 +96,7 @@ public class WaveRiderController {
         this.topicHeatService = topicHeatService;
         this.tiantiService = tiantiService;
         this.objectMapper = objectMapper;
+        this.marketExecutor = marketExecutor;
     }
 
     // ------------------------------------------------------------------ 策略
@@ -208,13 +213,23 @@ public class WaveRiderController {
         }
         owned(auth, req.getStrategyId());
         LocalDate date = parse(req.getTradeDate(), LocalDate.now());
-        WaveRiderEngine.Outcome o = engine.run(req.getStrategyId(), date, StrategyRun.TRIGGER_MANUAL,
-                Boolean.TRUE.equals(req.getDryRun()));
+        boolean dryRun = Boolean.TRUE.equals(req.getDryRun());
+        WaveRiderEngine.Outcome o = engine.run(req.getStrategyId(), date, StrategyRun.TRIGGER_MANUAL, dryRun);
+        // 手动运行不经定时任务，没人替它补账，所以在这里挂上。放在 run() 之后：
+        // 当日候选得先落库才补得到它自己的 T+1，而 run() 的事务到这里已经提交完。
+        //
+        // 丢线程池而不是原地补：回补要逐只票拉日 K，弱网下一只几秒、十几只起步就超了前端
+        // 10 秒的超时——那会让人看到「请求失败」的红色提示，而实际上候选已经跑好了。
+        // 补账跟本次结果的展示无关，晚几秒落库不改变任何结论。
+        if (!dryRun) {
+            marketExecutor.submit(() -> engine.backfillAround(req.getStrategyId(), date));
+        }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("runId", o.getRunId());
         out.put("status", o.getStatus());
         out.put("tradeDate", date);
         out.put("candidateCount", o.getCandidates().size());
+        out.put("t1Backfill", dryRun ? "skipped" : "scheduled");
         out.put("funnel", o.getFunnel());
         out.put("warnings", o.getWarnings());
         nodeService.tagCandidates(o.getCandidates(), userId(auth));
