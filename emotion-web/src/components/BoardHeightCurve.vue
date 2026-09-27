@@ -1,7 +1,7 @@
 <template>
   <section class="height-curve">
     <div class="curve-head">
-      <h3>{{ name }} <span class="sub">近 {{ visibleCount }} 个交易日 · 共 {{ rows.length }} 天可回看 · 点任意一天切日期 · <i class="lk break">★</i>破壁 <i class="lk leader">◆</i>总龙头 <i class="lk line">- -</i>破壁线</span></h3>
+      <h3>{{ name }} <span class="sub">近 {{ visibleCount }} 个交易日 · 共 {{ rows.length }} 天可回看 · 点任意一天切日期 · <i class="lk probe">☆</i>试探 <i class="lk break">★</i>破壁成功 <i class="lk line">- -</i>破壁线</span></h3>
     </div>
     <el-empty v-if="!rows.length" description="暂无连板高度数据" :image-size="60" />
     <div v-else ref="chartRef" class="canvas"></div>
@@ -26,16 +26,16 @@ import AxisZoomBar from './AxisZoomBar.vue'
 import { useCurveZoom, MIN_SPAN } from '../utils/curveZoom'
 
 /**
- * 连板高度曲线：X 轴日期，Y 轴最高板高度，灰虚线阶梯 = 当天要捅破的动态破壁线（混沌高+1）。
+ * 连板高度曲线：X 轴日期，Y 轴最高板高度，灰虚线阶梯 = 当天要追平的破壁线
+ * （旧龙断板那天起钉在它的高度上 H−1 个交易日，之后一级一级往下降）。
  * hover 列出当日并列打到这个高度的全部个股。
- * 两种标记：红星「破壁」= 新龙捅破混沌线（同一次破壁只标首次）；紫菱「总龙头」= 有票越过在册
- * 龙头高度、周期确立。判定全在后端（要逐票启动日），组件只读。
+ * ☆ 试探破壁 = 另一只票追平这条线（空心红星）；★ 破壁成功 = 这只试探股次日继续涨停（实心红，同一次破壁只标首次）。
+ * 判定全在后端（要逐票名单与破壁线），组件只读。
  */
 const props = defineProps({
   /**
    * [{date, maxHeight, stockCount, stocks:[{code,name}],
-   *   ceiling, isBreak, prevHigh, breakStock,
-   *   isLeader, leaderStock, cycleTop, cycleLeader}]
+   *   ceiling, lineStock, isProbe, probeStock, isBreak, prevHigh, breakStock}]
    * 按日期升序、一天一个点。
    */
   rows: { type: Array, default: () => [] },
@@ -48,6 +48,15 @@ const emit = defineEmits(['select'])
 
 const chartRef = ref(null)
 let chart = null
+
+/**
+ * ECharts 内置符号没有 star（只到 circle/rect/diamond/pin/arrow/triangle），
+ * 写 'star' 不报错、静默画成方块 —— 五角星只能自己给 path。
+ * 外接圆半径 50、内角半径 20，左上角起算的 100×100 视框。
+ */
+const STAR_PATH =
+  'path://M50,0 L61.76,33.82 L97.55,34.55 L69.02,56.18 L79.39,90.45 ' +
+  'L50,70 L20.61,90.45 L30.98,56.18 L2.45,34.55 L38.24,33.82 Z'
 
 const zoom = useCurveZoom(() => (props.rows || []).length)
 const zoomable = computed(() => (props.rows || []).length > MIN_SPAN)
@@ -78,15 +87,16 @@ function readBreaks(rows) {
   return out
 }
 
-/**
- * 换龙日：某票把市场最高板抬过在册总龙头的高度，周期从这天起归它。
- * @returns [{index, board, stock}]
- */
-function readLeaders(rows) {
+/** 试探破壁：追平了当天的破壁线但还没等到次日续板，成败要看后一天。 */
+function readProbes(rows) {
   const out = []
   for (let i = 0; i < rows.length; i++) {
-    if (rows[i].isLeader) {
-      out.push({ index: i, board: rows[i].maxHeight, stock: rows[i].leaderStock || null })
+    if (rows[i].isProbe) {
+      out.push({
+        index: i,
+        line: rows[i].ceiling,
+        stock: rows[i].probeStock || null
+      })
     }
   }
   return out
@@ -101,48 +111,55 @@ function buildOption() {
   const heights = rows.map((r) => r.maxHeight)
   const ceilings = rows.map((r) => (r.ceiling == null ? null : r.ceiling))
   const breaks = readBreaks(rows)
-  const leaders = readLeaders(rows)
   const breakByIndex = new Map(breaks.map((b) => [b.index, b]))
-  const leaderByIndex = new Map(leaders.map((l) => [l.index, l]))
+  const probes = readProbes(rows)
+  const probeByIndex = new Map(probes.map((q) => [q.index, q]))
 
   // Y 轴按可见窗口算：只收窄横轴、纵轴还按全量，放大就只是把线压扁，等于没放大。
   // 破壁线（ceiling）也计入上界——它是从更早的高点继承来的，可能高于当天最高板。
   const yMin = 2
   const yMax = Math.max(...heights, ...ceilings.filter((v) => v != null), 5) + 1
 
-  // 首次破壁的点用红色星标标记
+  // 试探 = 同款空心红星（不填红），次日续板兑现才填成实心★
+  // 内填按画布底色而不是 transparent：压在下面的那颗琥珀圆点会从星形中间露出来，空心就读成了糊
+  // 试探在点下方、成功在点上方：这两天天然相邻，都朝上就会互相压住。
+  // 但退潮期线可以低到 2 板 = Y 轴底，标签朝下就压进日期刻度行，这时翻上去。
+  const probePoints = probes.map((q) => ({
+    coord: [dates[q.index], heights[q.index]],
+    value: heights[q.index],
+    symbol: STAR_PATH,
+    symbolSize: 16,
+    symbolKeepAspect: true,
+    itemStyle: { color: '#1a2332', borderColor: '#ef4444', borderWidth: 2 },
+    label: {
+      show: true,
+      formatter: `试探 ${q.line}板${q.stock ? '\n' + q.stock.name : ''}`,
+      lineHeight: 12,
+      position: heights[q.index] <= yMin ? 'top' : 'bottom',
+      color: '#ef4444',
+      fontSize: 10
+    }
+  }))
+
+  // 破壁成功：把试探那颗空心星填成实心红
   const breakPoints = breaks.map((b) => ({
     coord: [dates[b.index], heights[b.index]],
     value: heights[b.index],
-    symbol: 'star',
+    symbol: STAR_PATH,
     symbolSize: 18,
+    symbolKeepAspect: true,
     itemStyle: { color: '#ef4444' },
     label: {
       show: true,
-      formatter: `破壁 ${b.prevHigh}→${b.board}`,
+      formatter: `破壁 ${b.prevHigh}→${b.board}${b.stock ? '\n' + b.stock.name : ''}`,
+      lineHeight: 12,
       position: 'top',
       color: '#ef4444',
       fontSize: 10,
       fontWeight: 'bold'
     }
   }))
-
-  // 换龙日标紫菱（点在下方，与上方红星分居两侧）；破壁当天通常同时开周期，同坐标两枚符号会互盖，只留红星
-  const leaderPoints = leaders.filter((l) => !breakByIndex.has(l.index)).map((l) => ({
-    coord: [dates[l.index], heights[l.index]],
-    value: heights[l.index],
-    symbol: 'diamond',
-    symbolSize: 13,
-    itemStyle: { color: '#a78bfa' },
-    label: {
-      show: true,
-      formatter: `总龙头 ${l.stock ? l.stock.name : ''}`,
-      position: 'bottom',
-      color: '#a78bfa',
-      fontSize: 10,
-      fontWeight: 'bold'
-    }
-  }))
+  const marks = probePoints.concat(breakPoints)
 
   // 选中日期竖线：必须两点式。单点 {xAxis} 的端点贴着网格底，标签会被钳进 X 轴刻度行
   // （选最左一天时实测 y182-194，与首个刻度标签正面重叠）；锚到 yMax 后恒在 y157-167。
@@ -186,22 +203,22 @@ function buildOption() {
         const r = rows[i]
         if (!r) return ''
         const brk = breakByIndex.get(i)
-        const led = leaderByIndex.get(i)
+        const prb = probeByIndex.get(i)
         const heads = []
-        if (brk) {
-          heads.push(`<span style="color:#ef4444;font-weight:bold">★ 首次破壁 ${brk.prevHigh}→${brk.board}</span>`)
+        if (prb) {
+          heads.push(`<span style="color:#ef4444;font-weight:bold">☆ 试探追平 ${prb.line} 板线</span>`)
         }
-        if (led) {
-          heads.push(`<span style="color:#a78bfa;font-weight:bold">◆ 周期换龙</span>`)
+        if (brk) {
+          heads.push(`<span style="color:#ef4444;font-weight:bold">★ 破壁成功 ${brk.prevHigh}→${brk.board}</span>`)
         }
         const lines = [heads.length ? `${r.date} ${heads.join(' ')}` : `${r.date}`]
         lines.push(`最高连板: <b>${r.maxHeight} 板</b> · ${r.stockCount} 只并列`)
-        lines.push(brk
-          ? `破壁股: <b>${brk.stock ? brk.stock.name : '—'}</b>（捅破 ${brk.prevHigh} 板线）`
-          : `破壁线: <b>${r.ceiling} 板</b>（需 ≥ ${r.ceiling + 1} 板且新龙）`)
-        lines.push(led
-          ? `总龙头: <b>${led.stock ? led.stock.name : '—'}</b>（本日越过在册高度，周期确立）`
-          : `总龙头: <b>${r.cycleLeader || '—'}</b>（在册 ${r.cycleTop} 板）`)
+        lines.push(`破壁线: <b>${r.ceiling} 板</b>（定线票 ${r.lineStock ? r.lineStock.name : '—'}，另一只票追平才算试探）`)
+        if (brk) {
+          lines.push(`破壁股: <b>${brk.stock ? brk.stock.name : '—'}</b>（捅破 ${brk.prevHigh} 板线）`)
+        } else if (prb) {
+          lines.push(`试探股: <b>${prb.stock ? prb.stock.name : '—'}</b>（明天继续涨停才算破壁）`)
+        }
         const stocks = r.stocks || []
         for (let k = 0; k < stocks.length; k += 4) {
           const cells = stocks.slice(k, k + 4)
@@ -249,9 +266,7 @@ function buildOption() {
             { offset: 1, color: 'rgba(251,191,36,0.02)' }
           ])
         },
-        markPoint: (breakPoints.length || leaderPoints.length)
-          ? { data: breakPoints.concat(leaderPoints) }
-          : undefined,
+        markPoint: marks.length ? { data: marks } : undefined,
         markLine: selectedLine.length ? {
           silent: true,
           symbol: 'none',
@@ -347,11 +362,11 @@ onUnmounted(() => {
   font-size: 11px;
   letter-spacing: 0;
 }
-.lk.break {
+.lk.probe {
   color: #ef4444;
 }
-.lk.leader {
-  color: #a78bfa;
+.lk.break {
+  color: #ef4444;
 }
 .lk.line {
   color: #6b7f95;

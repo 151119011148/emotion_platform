@@ -128,9 +128,9 @@
 
     <div class="stat-grid" v-loading="loading">
       <div class="stat">
-        <span class="stat-label">最高连板 H</span>
-        <span class="stat-value">{{ nz(vo?.maxBoard) }}</span>
-        <span class="stat-sub">全市场</span>
+        <span class="stat-label">旧龙高度 / 当前最高连板</span>
+        <span class="stat-value">{{ refHeight }} / {{ nz(vo?.maxBoard) }} 板</span>
+        <span class="stat-sub">{{ lineSubText }}</span>
       </div>
       <div class="stat">
         <span class="stat-label">涨停数 / 连板数</span>
@@ -185,6 +185,10 @@
               <div v-for="r in lvl.rows" :key="r.code" class="chip" :class="[roleChipClass(r.role), { 'chip-highlight': r.code === highlightCode }]" :data-code="r.code">
                 <span class="chip-name">{{ r.name }}</span>
                 <el-tag v-if="r.role" size="small" :type="ROLE_TYPE[r.role] || 'info'" effect="dark">{{ r.role }}</el-tag>
+                <el-tag v-if="breakTagOf(r.code)" size="small" :type="breakTagOf(r.code).type" effect="dark"
+                  :title="`破壁判定（${date}）：${breakTagOf(r.code).text}`">
+                  {{ breakTagOf(r.code).text }}
+                </el-tag>
                 <el-tag v-if="r.manualLeader" size="small" type="warning" effect="dark">总龙头</el-tag>
                 <span v-if="r.sealForm" class="chip-sealform"
                   :title="`封板形态：${r.sealForm}（首封 ${fmtSeal(r.firstSealTime)}；炸板 ${r.breakCount ?? 0} 次）`">
@@ -319,8 +323,8 @@ const vo = ref(null)
 /** 曲线取数窗口：往前留够两年，回补出来的历史一路都能用 −/≪ 翻回来。 */
 const LOOKBACK_DAYS = 760
 const curveRows = ref([])
-// 连板高度曲线数据
-const heightCurveRows = ref([])
+// 连板高度曲线数据：全量按日升序，右端按所选日期截给曲线画
+const heightCurveAll = ref([])
 /**
  * 曲线全量只取一次：records/range 一行带近百列、全量 700KB+，height-range 服务端要 1.8s，
  * 而这两份数据只跟「看到哪一天」有关、跟当前选中日期无关——每换一天重拉一遍不值当。
@@ -337,6 +341,73 @@ async function loadCurveBase() {
     curveBase = { rec: (rec && rec.data) || [], height: (height && height.data) || [] }
   }
   return curveBase
+}
+
+/** 后端 height-range 的一行 → 曲线与天梯共用的判定点（判定全在 TiantiService.detectBreaks，页面只读）。 */
+function mapHeightRow(r) {
+  return {
+    date: r.tradeDate,
+    maxHeight: r.maxHeight,
+    stockCount: r.stockCount,
+    stocks: r.stocks || [],
+    ceiling: r.ceiling,
+    lineStock: r.lineStock || null,
+    isProbe: !!r.isProbe,
+    probeStock: r.probeStock || null,
+    isBreak: !!r.isBreak,
+    prevHigh: r.prevHigh,
+    breakStock: r.breakStock || null,
+    oldDragonHeight: r.oldDragonHeight != null ? r.oldDragonHeight : null
+  }
+}
+
+const heightCurveRows = computed(() => heightCurveAll.value.filter((r) => r.date <= date.value))
+
+/**
+ * 所选日期的判定点 + 它的次日。
+ * 次日用全量数组取：曲线只看 ≤ 所选日期，但「试探有没有兑现」恰好只有往后一天能回答，
+ * 看历史某天时它就摆在数组里，标签当场降级；只有最新一天还没有次日，保持待验证。
+ */
+function breakAt(day) {
+  const i = heightCurveAll.value.findIndex((r) => r.date === day)
+  if (i < 0) return { row: null, next: null }
+  return { row: heightCurveAll.value[i], next: heightCurveAll.value[i + 1] || null }
+}
+
+/** 所选日期的判定点：核心数据卡与天梯标签同读这一份，两处不会各算一套口径 */
+const dayPoint = computed(() => breakAt(date.value).row)
+
+const lineSubText = computed(() => {
+  const p = dayPoint.value
+  if (!p) return '曲线未覆盖该日'
+  return `追平 ${p.ceiling} 板线（定线票 ${p.lineStock ? p.lineStock.name : '—'}），另一只票追平、次日续板才算破壁`
+})
+
+/** 卡上的「旧龙高度」：断板旧龙自己的板高 H；没有旧龙在计时时，站得住的那条破壁线就是参照 */
+const refHeight = computed(() => {
+  const p = dayPoint.value
+  if (!p) return '—'
+  return `${p.oldDragonHeight != null ? p.oldDragonHeight : p.ceiling} 板`
+})
+
+/**
+ * 天梯 chip 上的破壁标签。后端只标"当天谁追平了线"，成败要等它自己的次日续板才算，
+ * 所以这里读次日：看历史某天时次日已在数组里，标签当场兑现或降级；
+ * 看的正是最新一天时还没有次日，只能说"待验证"，不能替市场先下结论。
+ */
+function breakTagOf(code) {
+  const { row, next } = breakAt(date.value)
+  if (!row || !code) return null
+  if (row.isBreak && row.breakStock && row.breakStock.code === code) {
+    return { text: `★破壁 ${row.prevHigh}→${row.maxHeight}板`, type: 'danger' }
+  }
+  if (row.isProbe && row.probeStock && row.probeStock.code === code) {
+    const confirmed = !!(next && next.isBreak && next.breakStock && next.breakStock.code === code)
+    if (confirmed) return { text: `☆试探 ${row.ceiling}板·已兑现`, type: 'warning' }
+    if (next) return { text: `☆试探 ${row.ceiling}板·未兑现`, type: 'info' }
+    return { text: `☆试探 ${row.ceiling}板·待次日`, type: 'primary' }
+  }
+  return null
 }
 // 连板生态分走势曲线默认折叠
 const curveOpen = ref(false)
@@ -669,20 +740,7 @@ async function load() {
       score: r.scoreBoard
     }))
     // 连板高度曲线：同一时间窗口，取每日最高板及对应个股
-    heightCurveRows.value = base.height.filter((r) => r.tradeDate <= date.value).map((r) => ({
-      date: r.tradeDate,
-      maxHeight: r.maxHeight,
-      stockCount: r.stockCount,
-      stocks: r.stocks || [],
-      ceiling: r.ceiling,
-      isBreak: !!r.isBreak,
-      prevHigh: r.prevHigh,
-      breakStock: r.breakStock || null,
-      isLeader: !!r.isLeader,
-      leaderStock: r.leaderStock || null,
-      cycleTop: r.cycleTop,
-      cycleLeader: r.cycleLeader
-    }))
+    heightCurveAll.value = base.height.map(mapHeightRow)
   } finally {
     loading.value = false
   }
