@@ -250,6 +250,8 @@ class ReviewDocFormatterTest {
         p.setCostPrice(new BigDecimal("12.30"));
         p.setCurrentPrice(new BigDecimal("13.400"));
         p.setFloatPct(new BigDecimal("8.94"));
+        p.setSellPrice(new BigDecimal("13.20"));
+        p.setSellQty(1000);
         p.setAction("持有");
         p.setPlannedAction("冲高减半");
         p.setDiscipline("应做未做");
@@ -264,7 +266,9 @@ class ReviewDocFormatterTest {
 
         String md = ReviewDocFormatter.render(m);
 
-        assertTrue(md.contains("| 集泰股份 002909 | 12.30 | 13.40 | +8.94% | 持有 | 冲高减半 | 应做未做 |"), md);
+        // 卖价与现价并排：13.20 才是真成交的价，13.40 是收盘，两者不等就是要看出来的差价。
+        assertTrue(md.contains("| 集泰股份 002909 | 12.30 | 13.40 | 13.20 | 1000 | +8.94% | 持有 | 冲高减半 | 应做未做 |"), md);
+        assertTrue(md.contains("| 标的 | 成本 | 现价 | 卖价 | 卖出量 | 浮动 | 动作 | 应做 | 纪律 |"), md);
         assertTrue(md.contains("| 路径二 | 落空 | 跌停扩至 17 家 |"), md);
         assertTrue(md.contains("- **退潮延续**：概率 55% ｜触发 竞业达低开低走+跌停≥20"), md);
         assertTrue(md.contains("- **竞业达（002712）** · 周期阵眼 · 8/28 起在位：连续三天跌停板未破"), md);

@@ -76,6 +76,8 @@ public class PositionStore {
             h.setCostPrice(p.getCostPrice());
             h.setCurrentPrice(p.getCurrentPrice());
             h.setQuantity(p.getQuantity());
+            h.setSellPrice(p.getSellPrice());
+            h.setSellQty(p.getSellQty());
             h.setFloatPct(p.getFloatPct());
             h.setAction(p.getAction());
             h.setPlannedAction(p.getPlannedAction());
@@ -142,6 +144,23 @@ public class PositionStore {
             qw.ge(Position::getTradeDate, LocalDate.now().minusDays(days));
         }
         return mapper.selectList(qw);
+    }
+
+    /**
+     * 同标的在该日<b>之前</b>最近一条填了成本的快照——清仓行没重填成本时拿它当已实现的基准。
+     * 只要一行，所以 LIMIT 1 按日期倒序；没有（这票第一天就清了）返回 null，派生字段继续留空。
+     */
+    public Position lastWithCostBefore(Long userId, String code, LocalDate date) {
+        if (code == null || code.isEmpty() || date == null) {
+            return null;
+        }
+        return mapper.selectOne(new LambdaQueryWrapper<Position>()
+                .eq(Position::getUserId, userId)
+                .eq(Position::getStockCode, code)
+                .lt(Position::getTradeDate, date)
+                .isNotNull(Position::getCostPrice)
+                .orderByDesc(Position::getTradeDate)
+                .last("LIMIT 1"));
     }
 
     /** 标记某持仓已执行：回填真实动作，并把 executed 置 1，闭环完成。 */

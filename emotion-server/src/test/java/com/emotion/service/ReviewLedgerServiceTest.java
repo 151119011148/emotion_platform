@@ -127,6 +127,102 @@ class ReviewLedgerServiceTest {
         assertNull(rows.get(1).getFloatPct());
     }
 
+    /**
+     * 卖价/卖量落库：清仓行上「以 9.05 出掉 800 股」是这笔买卖的唯一凭据，
+     * 现价那列是收盘价，代替不了它。
+     */
+    @Test
+    void sellPriceAndSellQtyAreStoredAsWritten() {
+        RecordingPositionStore store = new RecordingPositionStore();
+        PositionRequest r = position("002909", "8.29", "9.48", null, "遵守");
+        r.setStatus("今日清仓");
+        r.setQuantity(800);
+        r.setSellPrice(new BigDecimal("9.05"));
+        r.setSellQty(800);
+
+        service(store, new RecordingPredictionStore()).savePositions(USER, DATE, Arrays.asList(r));
+
+        Position p = only(store.rows);
+        assertEquals(new BigDecimal("9.05"), p.getSellPrice());
+        assertEquals(Integer.valueOf(800), p.getSellQty());
+    }
+
+    /** 减仓：状态还是持仓中，但当天确实走了一半——这一笔以前只能糊在自由文本里。 */
+    @Test
+    void partialExitKeepsHoldingStatus() {
+        RecordingPositionStore store = new RecordingPositionStore();
+        PositionRequest r = position("002909", "8.29", "9.48", null, "遵守");
+        r.setStatus("持仓中");
+        r.setQuantity(800);
+        r.setSellPrice(new BigDecimal("9.05"));
+        r.setSellQty(400);
+
+        service(store, new RecordingPredictionStore()).savePositions(USER, DATE, Arrays.asList(r));
+
+        Position p = only(store.rows);
+        assertEquals("持仓中", p.getStatus());
+        assertEquals(Integer.valueOf(400), p.getSellQty());
+    }
+
+    /** 卖量比持仓还多 = 填错了：整批保存被拒，一行都不落库（不是静默按没填处理）。 */
+    @Test
+    void sellQtyBeyondPositionSizeIsRejected() {
+        RecordingPositionStore store = new RecordingPositionStore();
+        ReviewLedgerService svc = service(store, new RecordingPredictionStore());
+        PositionRequest r = position("002909", "8.29", "9.48", null, "遵守");
+        r.setQuantity(800);
+        r.setSellPrice(new BigDecimal("9.05"));
+        r.setSellQty(900);
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> svc.savePositions(USER, DATE, Arrays.asList(r)));
+        assertTrue(e.getMessage().contains("卖出股数"), e.getMessage());
+        assertEquals(0, store.calls);
+    }
+
+    /** 已实现%只在两边都有数时才算：缺成本基准就是「不知道赚了多少」，不猜。 */
+    @Test
+    void realizedPctNeedsBothSides() {
+        assertEquals(new BigDecimal("20.00"),
+                ReviewLedgerService.realizedPctOf(new BigDecimal("10.00"), new BigDecimal("12.00")));
+        assertNull(ReviewLedgerService.realizedPctOf(null, new BigDecimal("9.95")), "没成本就没已实现");
+        assertNull(ReviewLedgerService.realizedPctOf(new BigDecimal("10.00"), null), "没卖价就没已实现");
+        assertNull(ReviewLedgerService.realizedPctOf(BigDecimal.ZERO, new BigDecimal("9.95")));
+    }
+
+    /**
+     * 清仓行没重填成本（成本留在上一天的持仓中行上）时，读取期按标的回补计算基准，
+     * <b>库里那格仍然空着</b>——这是派生，不是替你录数据。
+     */
+    @Test
+    void basisCostComesFromTheEarlierSnapshotOfTheSameStock() {
+        RecordingPositionStore store = new RecordingPositionStore();
+        ReviewLedgerService svc = service(store, new RecordingPredictionStore());
+        List<Position> rows = Arrays.asList(
+                snapshot("600630", DATE.minusDays(1), "8.29", null),
+                snapshot("600630", DATE, null, "9.05"),
+                snapshot("600613", DATE, null, "9.20"));
+
+        svc.deriveRealized(USER, new ArrayList<>(rows));
+
+        assertEquals(new BigDecimal("8.29"), rows.get(1).getBasisCost());
+        assertEquals(new BigDecimal("9.17"), rows.get(1).getRealizedPct());
+        assertNull(rows.get(1).getCostPrice(), "回填只在读取期，别把没录的成本写进库");
+        assertNull(rows.get(2).getBasisCost(), "这只票从来没有过成本：已实现留空");
+        assertNull(rows.get(2).getRealizedPct());
+        assertNull(rows.get(0).getRealizedPct(), "没卖价就不该有已实现");
+    }
+
+    private static Position snapshot(String code, LocalDate date, String cost, String sellPrice) {
+        Position p = new Position();
+        p.setUserId(USER);
+        p.setStockCode(code);
+        p.setTradeDate(date);
+        p.setCostPrice(cost == null ? null : new BigDecimal(cost));
+        p.setSellPrice(sellPrice == null ? null : new BigDecimal(sellPrice));
+        return p;
+    }
+
     /** 空数组 = "这天清仓了"，必须真的落到 store 变成一次整日删除。 */
     @Test
     void emptyListClearsTheWholeDay() {
@@ -368,6 +464,11 @@ class ReviewLedgerServiceTest {
             calls++;
             this.rows.add(new ArrayList<>(rows));
             return rows.size();
+        }
+
+        @Override
+        public Position lastWithCostBefore(Long userId, String code, LocalDate date) {
+            return null;
         }
     }
 

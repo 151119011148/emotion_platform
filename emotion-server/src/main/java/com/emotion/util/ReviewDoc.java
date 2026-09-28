@@ -56,7 +56,12 @@ public class ReviewDoc {
         }
     }
 
-    /** `持仓: 002229 鸿博股份 成本11.17 现价12.12 数量1000 浮动+8.5 动作未动 应做竞价清仓 纪律违约` */
+    /**
+     * `持仓: 002229 鸿博股份 成本11.17 现价12.12 数量1000 卖价13.2 卖量1000 浮动+8.5 动作未动 应做竞价清仓 纪律违约`
+     *
+     * <p>卖价/卖量是「当日了结」：真卖出的成交价与股数，不是收盘价。清仓时卖量=持仓，
+     * 减仓时卖量是一部分（那天状态仍是持仓中）。没写就是不知道，服务端不会拿收盘价顶上。
+     */
     @Getter
     public static class PositionRow {
         private final int line;
@@ -66,20 +71,26 @@ public class ReviewDoc {
         private final BigDecimal current;
         /** 持仓股数；null = md 里没写「数量」。 */
         private final Integer quantity;
+        /** 当日成交均价；null = md 里没写「卖价」。 */
+        private final BigDecimal sellPrice;
+        /** 当日卖出股数；null = md 里没写「卖量」。 */
+        private final Integer sellQty;
         private final BigDecimal floatPct;
         private final String action;
         private final String plannedAction;
         private final String discipline;
 
         public PositionRow(int line, String code, String name, BigDecimal cost, BigDecimal current,
-                           Integer quantity, BigDecimal floatPct, String action, String plannedAction,
-                           String discipline) {
+                           Integer quantity, BigDecimal sellPrice, Integer sellQty, BigDecimal floatPct,
+                           String action, String plannedAction, String discipline) {
             this.line = line;
             this.code = code;
             this.name = name;
             this.cost = cost;
             this.current = current;
             this.quantity = quantity;
+            this.sellPrice = sellPrice;
+            this.sellQty = sellQty;
             this.floatPct = floatPct;
             this.action = action;
             this.plannedAction = plannedAction;

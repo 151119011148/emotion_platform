@@ -1,6 +1,7 @@
 package com.emotion.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -42,6 +43,17 @@ public class Position {
      * 0 是「一股没买」，和「不知道买了多少」是两回事。
      */
     private Integer quantity;
+    /**
+     * 当日了结的成交均价（手记）。它和 {@code currentPrice} 是两回事：后者是当日<b>收盘</b>价
+     * （还会被行情表自动回填），前者是你真卖出那一笔的价——冲高卖了又回落的票，拿收盘价当卖价
+     * 会把已实现盈亏算少。NULL = 没填，这行<b>不进</b>已实现口径；<b>不要用 0 冒充</b>。
+     */
+    private BigDecimal sellPrice;
+    /**
+     * 当日卖出股数。清仓时它等于持仓股数；<b>减仓</b>时它只是一部分，而 {@code status} 仍是「持仓中」——
+     * 这正是「竞价走了半仓、炸板走了半仓」以前只能糊在 action 自由文本里的原因。
+     */
+    private Integer sellQty;
     /** 手记的浮动盈亏%，原样存；不由成本/现价反推——你记的可能是含费后的数。 */
     private BigDecimal floatPct;
     private String action;
@@ -71,5 +83,19 @@ public class Position {
     private Integer executed;
     /** 标记执行时回填的真实动作。 */
     private String actualAction;
+    // ---- 下面两个是读取期派生，不落库（insertBatch 的列清单里没有它们）----
+    /**
+     * 算已实现盈亏用的成本基准：本行 {@code costPrice} 有值就是它；没有（清仓行常常只填股数、
+     * 成本留在上一天的持仓中行上）就回填<b>同标的最近一条</b>有成本的快照。见
+     * {@link com.emotion.service.ReviewLedgerService#deriveRealized}。
+     */
+    @TableField(exist = false)
+    private BigDecimal basisCost;
+    /**
+     * 已实现盈亏% = (sellPrice - basisCost) / basisCost。缺卖价或缺成本基准时为 NULL——
+     * 它和手记的 {@code floatPct} 分开存不着：那个可能是含费后的浮动，这个只认真填的成交价。
+     */
+    @TableField(exist = false)
+    private BigDecimal realizedPct;
     private LocalDateTime createdAt;
 }

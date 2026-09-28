@@ -46,6 +46,10 @@ public class ReviewDetailVO {
         private BigDecimal currentPrice;
         /** 持仓股数；null = 没填。 */
         private Integer quantity;
+        /** 当日成交均价（真卖出的价，不是收盘价）；null = 没填，不进已实现口径。 */
+        private BigDecimal sellPrice;
+        /** 当日卖出股数；减仓时只是一部分。null = 没填。 */
+        private Integer sellQty;
         /** 你手记的浮动盈亏%，原样存，不由成本/现价反推。 */
         private BigDecimal floatPct;
         private String action;

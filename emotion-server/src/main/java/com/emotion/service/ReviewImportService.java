@@ -159,6 +159,8 @@ public class ReviewImportService {
             item.setCostPrice(p.getCostPrice());
             item.setCurrentPrice(p.getCurrentPrice());
             item.setQuantity(p.getQuantity());
+            item.setSellPrice(p.getSellPrice());
+            item.setSellQty(p.getSellQty());
             item.setFloatPct(p.getFloatPct());
             item.setAction(p.getAction());
             item.setPlannedAction(p.getPlannedAction());
