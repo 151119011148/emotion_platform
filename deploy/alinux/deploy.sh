@@ -120,9 +120,11 @@ resolve_mysql_pass() {
   # 初次环境已经按约定把 MySQL root 密码存到 /root/mysql_pass.txt（MYSQL_ROOT_PASS=xxx）
   if [ -z "$MYSQL_PASS" ]; then
     local got
-    got="$(remote_capture "grep -o 'PASS=[a-f0-9]*' /root/mysql_pass.txt 2>/dev/null | head -n1")"
-    # expect 的 stdout 带前导换行等噪声，不能用 ${got#PASS=} 剥前缀（会连噪声一起当密码）
-    MYSQL_PASS="$(printf '%s\n' "$got" | grep -o 'PASS=[a-f0-9]*' | head -n1 | cut -d= -f2)"
+    got="$(remote_capture "grep -o 'MYSQL_ROOT_PASS=.*' /root/mysql_pass.txt 2>/dev/null | head -n1")"
+    # expect 的 stdout 带 \r 等噪声，不能用 ${got#PASS=} 剥前缀（会连噪声一起当密码）
+    MYSQL_PASS="$(printf '%s\n' "$got" | tr -d '\r' \
+                  | grep -o 'MYSQL_ROOT_PASS=.*' | head -n1 \
+                  | cut -d= -f2- | sed 's/[[:space:]]*$//')"
   fi
   [ -n "$MYSQL_PASS" ] || die "无法取得服务器 MySQL root 密码，请用 ALINUX_MYSQL_PASS 传入"
 }
