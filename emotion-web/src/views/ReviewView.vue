@@ -320,7 +320,11 @@
                     class="pend-tier">{{ p.nextDayPlan }}</span>
             </span>
             <span class="pend-act">
-              <el-input v-model="pendingAct[p.id]" size="small" placeholder="今日实际动作" style="width: 150px" />
+              <el-select v-model="pendingAct[p.id].action" size="small" placeholder="今日实际动作" style="width: 118px">
+                <el-option v-for="a in PEND_ACTIONS" :key="a" :label="a" :value="a" />
+              </el-select>
+              <el-input-number v-if="pendNeedsPrice(pendingAct[p.id].action)" v-model="pendingAct[p.id].price"
+                size="small" :min="0" :precision="2" :controls="false" placeholder="成交价" style="width: 88px" />
               <el-button size="small" type="primary" plain :loading="markingPend" @click="markExecuted(p)">标记执行</el-button>
             </span>
           </div>
@@ -726,6 +730,11 @@ const pendingCarry = ref([])
 const pendingCarryDate = ref('')
 const pendingAct = ref({})
 const markingPend = ref(false)
+/* 遗留决策的实际动作走下拉：涉及成交的三档要记成交价，持有不动没有价 */
+const PEND_ACTIONS = ['清仓', '减仓', '加仓', '持有不动']
+function pendNeedsPrice(action) {
+  return !!action && action !== '持有不动'
+}
 
 async function loadRecord(date) {
   formReady.value = false
@@ -1041,15 +1050,19 @@ async function loadPendingCarry(date) {
   pendingCarry.value = list
   pendingCarryDate.value = list.length ? (list[0].tradeDate || '').slice(0, 10) : ''
   const acts = {}
-  for (const p of list) acts[p.id] = p.actualAction || ''
+  for (const p of list) acts[p.id] = { action: '', price: null }
   pendingAct.value = acts
 }
 
 /* 外溢闭环：标记执行，回填实际动作，关闭裁决 */
 async function markExecuted(p) {
+  const pick = pendingAct.value[p.id] || { action: '', price: null }
+  if (!pick.action) { ElMessage.warning('请先选择今日实际动作'); return }
+  const action = pendNeedsPrice(pick.action) && pick.price != null
+    ? `${pick.action} @ ${pick.price}` : pick.action
   markingPend.value = true
   try {
-    await recordApi.markPositionExecuted(p.id, pendingAct.value[p.id] || '')
+    await recordApi.markPositionExecuted(p.id, action)
     ElMessage.success(`${p.stockName} 今日处理已记录，裁决关闭`)
     await loadPendingCarry(form.tradeDate)
     loadPositions(form.tradeDate).catch(() => {})
