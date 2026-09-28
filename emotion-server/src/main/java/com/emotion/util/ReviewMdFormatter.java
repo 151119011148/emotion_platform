@@ -113,7 +113,7 @@ public final class ReviewMdFormatter {
         }
         for (ReviewDoc.PositionRow r : doc.getPositions()) {
             addRow(doc, lines, positionLine(r), "持仓 " + safe(r.getCode()) + "："
-                    + "库里缺代码或名称，或者某个值里撞上了 成本/现价/浮动/动作/应做/纪律 这些标签词");
+                    + "库里缺代码或名称，或者某个值里撞上了 成本/现价/数量/卖价/卖量/浮动/动作/应做/纪律 这些标签词");
         }
         for (ReviewDoc.ThemeRow r : doc.getThemes()) {
             addRow(doc, lines, themeLine(r), "题材 " + safe(r.getTheme()) + "：缺题材名，"
@@ -148,6 +148,8 @@ public final class ReviewMdFormatter {
         num(sb, "成本", r.getCost(), false);
         num(sb, "现价", r.getCurrent(), false);
         intNum(sb, "数量", r.getQuantity());
+        num(sb, "卖价", r.getSellPrice(), false);
+        intNum(sb, "卖量", r.getSellQty());
         num(sb, "浮动", r.getFloatPct(), true);
         text(sb, "动作", r.getAction());
         text(sb, "应做", r.getPlannedAction());

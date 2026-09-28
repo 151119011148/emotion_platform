@@ -327,9 +327,10 @@
           <div class="pend-done">✅ 执行后点「标记执行」，自动回填实际动作并关闭该裁决。</div>
         </div>
 
-        <!-- 汇总两条口径并存，各吃自己吃得下的行：
+        <!-- 汇总三条口径并存，各吃自己吃得下的行：
              ① 金额口径（市值/盈亏额/占比）——只收填了股数、且成本现价都在的行；
-             ② 等权口径（平均浮动%/盈亏家数）——只看浮动%，缺股数的行仍在这里。
+             ② 等权口径（平均浮动%/盈亏家数）——只看浮动%，缺股数的行仍在这里；
+             ③ 已实现口径——只收真填了卖价的行，卖价是成交价、不是现价那列的收盘价。
              缺股数时绝不把股价相加当成本：10 元的票 + 100 元的票 = 110，那不是成本合计。 -->
         <div v-if="posRows.length" class="ledger-summary">
           <span>持仓 <b>{{ holdingRows.length }}</b> 只<template v-if="clearedRows.length"> · 清仓 <b>{{ clearedRows.length }}</b> 只</template></span>
@@ -344,6 +345,11 @@
           <span v-if="ledgerSummary.avgFloat !== null">
             平均浮动 <b :class="pctClass(ledgerSummary.avgFloat)">{{ signed(ledgerSummary.avgFloat) }}%</b>
             <span class="dim-muted">等权 · {{ ledgerSummary.priced }}/{{ posRows.length }} 有价</span>
+          </span>
+          <!-- ③ 已实现口径：只算真填了卖价的那几笔。缺成本/缺卖量的分开说明，不混进金额。 -->
+          <span v-if="ledgerSummary.realizedCount">
+            已实现 <b :class="pctClass(ledgerSummary.realizedAmount)">{{ yuan(ledgerSummary.realizedAmount) }}</b>
+            <span class="dim-muted">{{ ledgerSummary.realizedCount }} 笔了结<template v-if="ledgerSummary.realizedNoQty"> · {{ ledgerSummary.realizedNoQty }} 笔缺卖出量</template><template v-if="ledgerSummary.realizedNoCost"> · {{ ledgerSummary.realizedNoCost }} 笔缺成本</template></span>
           </span>
           <span>盈 <b class="up">{{ ledgerSummary.winCount }}</b> · 亏 <b class="down">{{ ledgerSummary.loseCount }}</b></span>
           <span>次日预案 <b>{{ ledgerSummary.planCount }}/{{ posRows.length }}</b></span>
@@ -422,6 +428,24 @@
               <template #default="{ row }">
                 <el-input-number v-model="row.quantity" size="small" :min="1" :step="100" :controls="false"
                   style="width: 100%" placeholder="股数" />
+              </template>
+            </el-table-column>
+            <!-- 当日了结：卖价是你真卖出的那一笔，不是收盘价（现价那列是行情自动补的）。
+                 减仓也记在这里——状态仍是持仓中，卖量填走掉的那部分。没卖就别填，空着是「没卖」。 -->
+            <el-table-column label="卖价" width="82">
+              <template #default="{ row }">
+                <el-input-number v-model="row.sellPrice" size="small" :min="0" :precision="2" :controls="false"
+                  style="width: 100%" :placeholder="row.currentPrice ? String(row.currentPrice) : '成交'" />
+                <div v-if="realizedOf(row)" class="exit-mini" :class="pctClass(realizedOf(row).pct)">
+                  已实现 {{ signed(realizedOf(row).pct) }}%
+                  <template v-if="realizedOf(row).amount !== null"> · {{ yuan(realizedOf(row).amount) }}</template>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="卖出量" width="80">
+              <template #default="{ row }">
+                <el-input-number v-model="row.sellQty" size="small" :min="1" :step="100" :controls="false"
+                  style="width: 100%" :placeholder="row.status === '今日清仓' && row.quantity ? String(row.quantity) : '减仓'" />
               </template>
             </el-table-column>
             <el-table-column label="浮动%" width="78">
@@ -541,7 +565,7 @@ import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { recordApi, importApi, reviewApi, prdApi, d5Api, marketApi, anchorsApi } from '../api/modules'
 import { useTradingCalendar } from '../utils/tradingCalendar'
-import { pnlOf, yuan } from '../utils/money'
+import { pnlOf, yuan, realizedOf } from '../utils/money'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import EditableStatCard from '../components/EditableStatCard.vue'
 
@@ -870,13 +894,14 @@ function saveFile(name, text) {
  * 落库字段白名单：脏检查与提交都按它走，两边必须一致。
  * _results/_loading/id 是纯前端态，不参与指纹，否则「搜索了一下」就会被判成脏。
  */
-const POS_KEYS = ['stockCode', 'stockName', 'costPrice', 'currentPrice', 'quantity', 'floatPct', 'action',
+const POS_KEYS = ['stockCode', 'stockName', 'costPrice', 'currentPrice', 'quantity', 'sellPrice', 'sellQty', 'floatPct', 'action',
   'plannedAction', 'discipline', 'industry', 'boardNum', 'status', 'delayDays', 'disciplineScore',
   'nextDayPlan', 'planOpen', 'planBreak', 'planLow', 'planFall', 'executed', 'actualAction']
 
 function blankRow(status = '持仓中') {
   return {
     id: null, stockCode: '', stockName: '', costPrice: null, currentPrice: null, quantity: null,
+    sellPrice: null, sellQty: null,
     floatPct: null,
     action: '', plannedAction: '', discipline: '', industry: '', boardNum: null, status,
     delayDays: null, disciplineScore: null, nextDayPlan: '',
@@ -990,6 +1015,8 @@ async function loadPositions(date) {
   posRows.value = (res?.data || []).map((r) => {
     const row = blankRow(r.status || '持仓中')
     POS_KEYS.forEach(k => { row[k] = r[k] === undefined || r[k] === null ? row[k] : r[k] })
+    // 服务端读取期派生的成本基准：只用来算「已实现」显示，不进 POS_KEYS（不发回服务端，也不参与脏检查）
+    row.basisCost = r.basisCost == null ? null : r.basisCost
     row.id = r.id || null
     return row
   })
@@ -1170,9 +1197,10 @@ function applyImport() {
 }
 
 /**
- * 汇总：两条口径并存，各吃自己吃得下的行——
+ * 汇总：三条口径并存，各吃自己吃得下的行——
  * ① 金额口径（成本额/市值/盈亏额）：只收填了股数、成本现价都在的行；
- * ② 等权口径（平均浮动%/盈亏家数）：只看浮动%，与股数无关，缺股数的行仍在这里。
+ * ② 等权口径（平均浮动%/盈亏家数）：只看浮动%，与股数无关，缺股数的行仍在这里；
+ * ③ 已实现口径：只收真填了卖价的行（清仓与减仓都算），缺成本基准或缺卖量的分开计数说明。
  * 所以「有股数 N/M」要一并显示出来，否则会以为盈亏额已经把全部持仓算进去了。
  */
 const ledgerSummary = computed(() => {
@@ -1191,6 +1219,20 @@ const ledgerSummary = computed(() => {
     qtyCount++
   }
   const pnlAmount = qtyCount ? marketValue - costValue : null
+  // 已实现另算一遍：只收真填了卖价的行。缺成本基准或缺卖量的各自计数说明，不并进金额里。
+  let realizedCount = 0
+  let realizedNoCost = 0
+  let realizedNoQty = 0
+  let realizedAmount = 0
+  for (const r of list) {
+    const sp = Number(r.sellPrice)
+    if (!Number.isFinite(sp) || sp <= 0) continue
+    realizedCount++
+    const x = realizedOf(r)
+    if (!x) { realizedNoCost++; continue }
+    if (x.amount === null) { realizedNoQty++; continue }
+    realizedAmount += x.amount
+  }
   return {
     avgFloat: floats.length ? floats.reduce((a, b) => a + b, 0) / floats.length : null,
     priced: floats.length,
@@ -1201,6 +1243,10 @@ const ledgerSummary = computed(() => {
     costValue: qtyCount ? costValue : null,
     marketValue: qtyCount ? marketValue : null,
     pnlAmount,
+    realizedCount,
+    realizedNoCost,
+    realizedNoQty,
+    realizedAmount: realizedCount ? realizedAmount : null,
     pnlPct: pnlAmount !== null && costValue > 0 ? (pnlAmount / costValue) * 100 : null
   }
 })
@@ -1340,6 +1386,8 @@ onUnmounted(() => window.removeEventListener('beforeunload', onBeforeUnload))
 .ix-pct { font-size: 13px; }
 .up { color: #f87171; }
 .down { color: #34d399; }
+/* 卖价格下面的「已实现」小字：金额口径由 realizedOf 统一算，缺卖价就整行不出现 */
+.exit-mini { font-size: 11px; line-height: 1.4; color: #8899a6; white-space: nowrap; }
 
 .stat-line { display: flex; flex-wrap: wrap; gap: 10px 18px; }
 .stat-item { display: flex; flex-direction: column; gap: 2px; }

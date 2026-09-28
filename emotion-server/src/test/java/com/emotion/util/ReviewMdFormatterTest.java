@@ -59,6 +59,26 @@ class ReviewMdFormatterTest {
         assertEquals(first, second);
     }
 
+    /**
+     * 卖价/卖量必须能往返：{@code replaceForDate} 是删除重建，重导一天时 md 带不出这两个值，
+     * 页面上录的成交价就跟着一起没了。这条断言拦的就是那个事故。
+     */
+    @Test
+    void sellPriceAndSellQtySurviveTheRoundTrip() {
+        ReviewDoc source = ReviewImportParser.parse("```meta\ndate: 2026-09-04\n"
+                + "持仓: 600630 龙头股份 成本8.29 现价9.48 数量800 卖价9.05 卖量400 浮动+10.01 "
+                + "动作减半 应做清仓 纪律遵守\n```", TODAY);
+        assertFalse(source.hasErrors(), source.errorsText());
+        assertEquals(new BigDecimal("9.05"), source.getPositions().get(0).getSellPrice());
+        assertEquals(Integer.valueOf(400), source.getPositions().get(0).getSellQty());
+
+        String md = ReviewMdFormatter.render(source, Collections.<String>emptyList(), "正文");
+        assertTrue(md.contains("卖价9.05 卖量400"), "生成的文件里没带上卖价/卖量：\n" + md);
+        ReviewDoc back = ReviewImportParser.parse(md, TODAY);
+        assertFalse(back.hasErrors(), back.errorsText());
+        assertSameContent(source, back);
+    }
+
     @Test
     void bareDocStillGeneratesAnImportableFile() {
         ReviewDoc doc = new ReviewDoc();
@@ -111,8 +131,8 @@ class ReviewMdFormatterTest {
     void labelWordInsideAValueDegradesThatRow() {
         ReviewDoc doc = new ReviewDoc();
         doc.setDate(LocalDate.of(2026, 9, 4));
-        doc.getPositions().add(new ReviewDoc.PositionRow(0, "002229", "鸿博股份", null, null, null, null,
-                "打板买入", "止损位 成本 之上出", "遵守"));
+        doc.getPositions().add(new ReviewDoc.PositionRow(0, "002229", "鸿博股份", null, null, null,
+                null, null, null, "打板买入", "止损位 成本 之上出", "遵守"));
 
         String md = ReviewMdFormatter.render(doc, null, null);
         ReviewDoc back = ReviewImportParser.parse(md, TODAY);
@@ -289,6 +309,8 @@ class ReviewMdFormatterTest {
             assertEquals(x.getName(), y.getName(), "持仓名称 第" + i + "行");
             same(x.getCost(), y.getCost(), "成本");
             same(x.getCurrent(), y.getCurrent(), "现价");
+            same(x.getSellPrice(), y.getSellPrice(), "卖价");
+            assertEquals(x.getSellQty(), y.getSellQty(), "卖量");
             same(x.getFloatPct(), y.getFloatPct(), "浮动");
             assertEquals(x.getAction(), y.getAction(), "动作");
             assertEquals(x.getPlannedAction(), y.getPlannedAction(), "应做");

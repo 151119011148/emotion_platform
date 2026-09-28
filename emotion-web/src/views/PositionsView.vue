@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>持仓与台账</h2>
-        <div class="page-sub">主入口=每日复盘页 · 本页=标的维度全生命周期 · 快照日 {{ latestDate || '—' }}</div>
+        <div class="page-sub">主入口=每日复盘页（卖价/卖出量在持仓台账里填）· 本页=标的维度全生命周期 · 快照日 {{ latestDate || '—' }}</div>
       </div>
       <el-button :loading="loading" @click="loadAll">刷新</el-button>
     </div>
@@ -28,7 +28,7 @@
       <div class="card">
         <div class="k">近7日已实现</div>
         <div class="v" :class="pctClass(weekRealizedAvg)">{{ fmtPct(weekRealizedAvg) }}</div>
-        <div class="x">{{ weekClosed.length }} 笔清仓</div>
+        <div class="x">{{ weekExits.length }} 笔了结 · {{ weekExitsReal.length }} 笔有成交价</div>
       </div>
       <div class="card">
         <div class="k">平均纪律分</div>
@@ -38,7 +38,7 @@
       <div class="card">
         <div class="k">近7日胜率</div>
         <div class="v">{{ weekWinRate == null ? '—' : weekWinRate + '%' }}</div>
-        <div class="x">{{ weekClosed.length }} 笔：{{ weekWins }} 盈 {{ weekClosed.length - weekWins }} 亏</div>
+        <div class="x">{{ weekExits.length }} 笔：{{ weekWins }} 盈 {{ weekExits.length - weekWins }} 亏</div>
       </div>
     </div>
 
@@ -93,6 +93,18 @@
           <el-table-column label="股数" width="82">
             <template #default="{ row }">{{ qtyText(row.quantity) }}</template>
           </el-table-column>
+          <!-- 当日了结：减仓就长这样——状态还是持仓中，但今天走掉的量与成交价必须看得见 -->
+          <el-table-column label="今日了结" width="110">
+            <template #default="{ row }">
+              <template v-if="realizedOf(row) || row.sellPrice">
+                <div><span class="n">{{ row.sellPrice ?? '—' }}</span><span class="mini"> × {{ qtyText(row.sellQty) }}</span></div>
+                <div v-if="realizedOf(row)" class="mini" :class="pctClass(realizedOf(row).pct)">
+                  已实现 {{ fmtPct(realizedOf(row).pct) }}<template v-if="realizedOf(row).amount !== null"> · {{ yuan(realizedOf(row).amount) }}</template>
+                </div>
+              </template>
+              <span v-else class="mini">—</span>
+            </template>
+          </el-table-column>
           <el-table-column label="浮动" width="86">
             <template #default="{ row }">
               <span :class="pctClass(row.floatPct)">{{ fmtPct(row.floatPct) }}</span>
@@ -118,7 +130,7 @@
 
     <!-- ② 今日清仓 / 交易流水 -->
     <div class="sec" v-if="tab === 'closed' || tab === 'all'">
-      <div class="sec-hd"><h2>📋 今日清仓 / 交易流水</h2><div class="note">{{ latestDate || '—' }}</div></div>
+      <div class="sec-hd"><h2>📋 今日清仓 / 交易流水</h2><div class="note">{{ latestDate || '—' }} · 盈亏列有成交价按已实现算，没有则退回手记浮动%</div></div>
       <div class="sec-bd">
         <el-table :data="closedRows" style="width: 100%" empty-text="快照日无清仓记录">
           <el-table-column label="名称" min-width="100">
@@ -133,10 +145,26 @@
           <el-table-column label="股数" width="82">
             <template #default="{ row }">{{ qtyText(row.quantity) }}</template>
           </el-table-column>
-          <el-table-column label="盈亏" width="86">
+          <el-table-column label="卖价 × 量" width="112">
             <template #default="{ row }">
-              <span :class="pctClass(row.floatPct)">{{ fmtPct(row.floatPct) }}</span>
-              <div v-if="pnlOf(row)" class="mini" :class="pctClass(pnlOf(row).amount)">{{ yuan(pnlOf(row).amount) }}</div>
+              <span v-if="row.sellPrice" class="n">{{ row.sellPrice }}</span>
+              <span v-if="row.sellPrice" class="mini"> × {{ qtyText(row.sellQty) }}</span>
+              <!-- 没填成交价就是没填：不拿收盘价（现价那列）冒充，只在旁边说明缺的是什么 -->
+              <div v-else class="mini">未填<template v-if="row.currentPrice">（收盘 {{ row.currentPrice }}）</template></div>
+            </template>
+          </el-table-column>
+          <el-table-column label="盈亏" width="96">
+            <template #default="{ row }">
+              <template v-if="realizedOf(row)">
+                <span :class="pctClass(realizedOf(row).pct)">{{ fmtPct(realizedOf(row).pct) }}</span>
+                <div v-if="realizedOf(row).amount !== null" class="mini" :class="pctClass(realizedOf(row).amount)">{{ yuan(realizedOf(row).amount) }}</div>
+                <div v-else class="mini">缺卖出量</div>
+              </template>
+              <template v-else>
+                <span :class="pctClass(row.floatPct)">{{ fmtPct(row.floatPct) }}</span>
+                <div v-if="pnlOf(row)" class="mini" :class="pctClass(pnlOf(row).amount)">{{ yuan(pnlOf(row).amount) }}</div>
+                <div v-else class="mini">手记浮动 · 无成交价</div>
+              </template>
             </template>
           </el-table-column>
           <el-table-column prop="plannedAction" label="预案" min-width="130" show-overflow-tooltip>
@@ -204,9 +232,10 @@
                     <div class="p">{{ lifeNote(t) }}</div>
                   </div>
                 </div>
-                <div class="dec-cards" style="margin-top: 10px">
+                <div class="dec-cards" style="margin-top: 10px; grid-template-columns: repeat(5, 1fr)">
                   <div class="dec-i"><div class="c">快照数</div><div class="a">{{ row.timeline.length }}</div></div>
                   <div class="dec-i"><div class="c">最新浮动</div><div class="a" :class="pctClass(row.lastFloat)">{{ fmtPct(row.lastFloat) }}</div></div>
+                  <div class="dec-i"><div class="c">已实现</div><div class="a" :class="pctClass(row.realizedAmount)">{{ row.realizedAmount === null ? (row.exitCount ? '缺成本/量' : '—') : yuan(row.realizedAmount) }}</div></div>
                   <div class="dec-i"><div class="c">纪律评价</div><div class="a">{{ row.lastRow.discipline || '—' }}</div></div>
                   <div class="dec-i"><div class="c">最新纪律分</div><div class="a" :class="scoreClass(row.lastScore)">{{ row.lastScore ?? '—' }}</div></div>
                 </div>
@@ -224,14 +253,28 @@
             <template #default="{ row }">{{ row.industry || '—' }}</template>
           </el-table-column>
           <el-table-column prop="buyDate" label="买入日" width="96" />
-          <el-table-column label="卖出日" width="96">
-            <template #default="{ row }">{{ row.sellDate || '—' }}</template>
+          <el-table-column label="卖出日" width="108">
+            <template #default="{ row }">{{ sellDateText(row) }}</template>
+          </el-table-column>
+          <el-table-column label="卖价" width="96">
+            <template #default="{ row }">
+              <span v-if="row.lastExit" class="n">{{ row.lastExit.sellPrice }}</span>
+              <span v-if="row.lastExit" class="mini"> × {{ qtyText(row.lastExit.sellQty) }}</span>
+              <div v-if="row.exitCount" class="mini">{{ row.exitCount }} 笔了结</div>
+              <span v-else class="mini">—</span>
+            </template>
           </el-table-column>
           <el-table-column label="板数" width="70">
             <template #default="{ row }">{{ row.boardNum ? (row.boardNum > 1 ? row.boardNum + '板' : '首板') : '—' }}</template>
           </el-table-column>
-          <el-table-column label="盈亏" width="90">
-            <template #default="{ row }"><span :class="pctClass(row.lastFloat)">{{ fmtPct(row.lastFloat) }}</span></template>
+          <el-table-column label="盈亏" width="96">
+            <template #default="{ row }">
+              <span :class="pctClass(row.lastFloat)">{{ fmtPct(row.lastFloat) }}</span>
+              <div v-if="row.realizedAmount !== null" class="mini" :class="pctClass(row.realizedAmount)">
+                已实现 {{ yuan(row.realizedAmount) }}
+              </div>
+              <div v-else-if="row.exitCount" class="mini">成交价缺量/缺成本</div>
+            </template>
           </el-table-column>
           <el-table-column label="持有" width="76">
             <template #default="{ row }">{{ row.holdDays }}天</template>
@@ -250,7 +293,58 @@
       </div>
     </div>
 
-    <!-- ⑤ 纪律统计与认知沉淀 -->
+    <!-- ⑤ 卖出流水：一笔「了结」一行，减仓也算。这是「哪天卖的、卖多少钱」唯一的凭据。 -->
+    <div class="sec" v-if="tab !== 'stats' && exitRows.length">
+      <div class="sec-hd">
+        <h2>💸 卖出流水（{{ exitRows.length }} 笔）</h2>
+        <div class="note">近 {{ STAT_DAYS }} 日内 {{ exitPriced }} 笔有成交价 · 其余只知清仓不知价格</div>
+      </div>
+      <div class="sec-bd">
+        <el-table :data="exitRows" style="width: 100%" size="small" empty-text="没有卖出记录；在每日复盘页的持仓台账里填「卖价」后这里自动长出来">
+          <el-table-column prop="tradeDate" label="卖出日" width="100" />
+          <el-table-column label="标的" min-width="120">
+            <template #default="{ row }">
+              <div class="sn"><b>{{ row.stockName }}</b></div>
+              <div class="mini">{{ row.stockCode }} · 买入 {{ row.buyDate }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column label="性质" width="76">
+            <template #default="{ row }">
+              <el-tag :type="row.kind === '清仓' ? 'success' : 'warning'" size="small">{{ row.kind }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="成本基准" width="88">
+            <template #default="{ row }">{{ row.basis ?? '—' }}</template>
+          </el-table-column>
+          <el-table-column label="卖价 × 量" width="112">
+            <template #default="{ row }">
+              <span v-if="row.sellPrice" class="n">{{ row.sellPrice }}</span>
+              <span v-if="row.sellPrice" class="mini"> × {{ qtyText(row.sellQty) }}</span>
+              <span v-else class="mini red">未填</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="已实现" width="128">
+            <template #default="{ row }">
+              <template v-if="row.real">
+                <span :class="pctClass(row.real.pct)">{{ fmtPct(row.real.pct) }}</span>
+                <div v-if="row.real.amount !== null" class="mini" :class="pctClass(row.real.amount)">{{ yuan(row.real.amount) }}</div>
+                <div v-else class="mini">缺卖出量</div>
+              </template>
+              <div v-else class="mini">{{ row.sellPrice ? '缺成本' : '只知清仓' }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column label="持有" width="70">
+            <template #default="{ row }">{{ row.holdDays }}天</template>
+          </el-table-column>
+          <el-table-column label="当天动作" min-width="130" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.action || row.actualAction || '—' }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <div class="foot">口径：已实现 =（卖价 − 成本基准）× 卖出量。成本基准先用本行成本，没填则取同标的最近一条有成本的快照（清仓行常常只填股数）。缺成交价一律留空——现价是收盘价，不是成交价。</div>
+    </div>
+
+    <!-- ⑥ 纪律统计与认知沉淀 -->
     <div class="sec" v-if="tab === 'stats' || tab === 'all'">
       <div class="sec-hd"><h2>📊 纪律统计与认知沉淀</h2><div class="note">近 {{ STAT_DAYS }} 个自然日 {{ statRows.length }} 行快照</div></div>
       <div class="sec-bd">
@@ -282,7 +376,7 @@
           </div>
         </div>
       </div>
-      <div class="foot">口径说明：纪律分为每行快照的自评分均值；违约=该做没做（discipline=违约）；延迟=清仓距应做时点的天数。编辑回每日复盘页。</div>
+      <div class="foot">口径说明：纪律分为每行快照的自评分均值；违约=该做没做（discipline=违约）；延迟=清仓距应做时点的天数；已实现只在填了<b>成交价</b>的行上计算，收盘价不算。编辑回每日复盘页。</div>
     </div>
   </div>
 </template>
@@ -292,7 +386,7 @@ import { ref, computed, onMounted } from 'vue'
 import { recordApi } from '../api/modules'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useTradingCalendar } from '../utils/tradingCalendar'
-import { pnlOf, yuan, qtyText } from '../utils/money'
+import { pnlOf, yuan, qtyText, realizedOf } from '../utils/money'
 
 const { loadTradingDays } = useTradingCalendar()
 
@@ -336,12 +430,79 @@ function withinDays(list, days) {
   const cutoffStr = cutoff.toISOString().slice(0, 10)
   return list.filter(r => r.tradeDate >= cutoffStr)
 }
+/**
+ * 一笔了结的收益率：填了成交价就按 (卖价 − 成本基准) 算；没填就退回手记的浮动%，
+ * 并标出它是退回来的（两个口径不一样，混在一起不吭声等于把「不知道」写成「知道」）。
+ */
+function exitPctOf(row) {
+  const r = realizedOf(row)
+  if (r) return { pct: r.pct, real: true }
+  if (row.floatPct !== null && row.floatPct !== undefined && row.floatPct !== '') {
+    return { pct: Number(row.floatPct), real: false }
+  }
+  return null
+}
+
+/** 近7日「了结」= 清仓行 ∪ 填了卖价的行（减仓也算），按 id 去重、按日期倒序。 */
 const weekRows = computed(() => withinDays(rows.value, WEEK_DAYS))
-const weekClosed = computed(() => withinDays(rows.value.filter(r => r.status === '今日清仓'), WEEK_DAYS))
-const weekRealizedAvg = computed(() => avgOf(weekClosed.value.map(r => r.floatPct)))
-const weekWins = computed(() => weekClosed.value.filter(r => r.floatPct != null && r.floatPct > 0).length)
-const weekWinRate = computed(() => (weekClosed.value.length ? Math.round((weekWins.value / weekClosed.value.length) * 100) : null))
+const weekExits = computed(() => {
+  const out = []
+  const seen = new Set()
+  for (const r of withinDays(rows.value, WEEK_DAYS)) {
+    const priced = r.sellPrice !== null && r.sellPrice !== undefined && Number(r.sellPrice) > 0
+    if (r.status !== '今日清仓' && !priced) continue
+    if (seen.has(r.id)) continue
+    seen.add(r.id)
+    out.push(r)
+  }
+  return out.reverse()
+})
+const weekExitsReal = computed(() => weekExits.value.filter(r => realizedOf(r)))
+const weekRealizedAvg = computed(() => avgOf(weekExits.value.map(r => exitPctOf(r)?.pct)))
+const weekWins = computed(() => weekExits.value.filter(r => {
+  const p = exitPctOf(r)
+  return p && p.pct > 0
+}).length)
+const weekWinRate = computed(() => (weekExits.value.length
+  ? Math.round((weekWins.value / weekExits.value.length) * 100) : null))
 const weekAvgScore = computed(() => avgOf(withinDays(rows.value, WEEK_DAYS).map(r => r.disciplineScore)))
+
+/**
+ * 卖出流水（全窗口，不止近 7 日）：每笔了结带上买入日、成本基准与持有快照数，
+ * 页面只管展示，算法全在 realizedOf 里——和复盘页同一套口径。
+ */
+const exitRows = computed(() => {
+  const first = new Map()
+  const datesByCode = new Map()
+  for (const r of rows.value) {
+    if (!first.has(r.stockCode)) first.set(r.stockCode, r.tradeDate)
+    if (!datesByCode.has(r.stockCode)) datesByCode.set(r.stockCode, [])
+    datesByCode.get(r.stockCode).push(r.tradeDate)
+  }
+  const out = []
+  for (const r of [...rows.value].reverse()) {
+    const priced = r.sellPrice !== null && r.sellPrice !== undefined && Number(r.sellPrice) > 0
+    if (r.status !== '今日清仓' && !priced) continue
+    const held = (datesByCode.get(r.stockCode) || []).filter(d => d <= r.tradeDate)
+    out.push({
+      ...r,
+      kind: r.status === '今日清仓' ? '清仓' : '减仓',
+      buyDate: first.get(r.stockCode) || r.tradeDate,
+      basis: realizedOf(r)?.basis ?? null,
+      real: realizedOf(r),
+      holdDays: new Set(held).size
+    })
+  }
+  return out
+})
+const exitPriced = computed(() => exitRows.value.filter(r => r.real).length)
+
+/** 卖出日：清仓日优先；只减过仓的显示最后一次了结日并标「减」。 */
+function sellDateText(row) {
+  if (row.sellDate) return row.sellDate
+  if (row.lastExit) return row.lastExit.tradeDate + ' 减'
+  return '—'
+}
 
 /** 次日处理决策：快照日持仓中且有决策内容的行；四档有值用四档，否则整段 nextDayPlan 兜底。 */
 const nextDayDecisions = computed(() =>
@@ -350,14 +511,15 @@ const hasPlanColumns = computed(() => nextDayDecisions.value.some(r => r.planOpe
 
 /**
  * 标的维度聚合：同一 stockCode 的各日快照串成一条生命周期。
- * 买入日=最早快照日，卖出日=最后一条"今日清仓"快照日；持有天数=去重快照日数。
+ * 买入日=最早快照日，卖出日=最后一条"今日清仓"快照日（只减过仓的退到最后一笔成交价，标「减」）；
+ * 持有天数=去重快照日数；已实现额=该标的各笔有成交价的卖出相加。
  */
 const lifecycleRows = computed(() => {
   const map = new Map()
   for (const r of rows.value) {
     let g = map.get(r.stockCode)
     if (!g) {
-      g = { stockCode: r.stockCode, stockName: r.stockName, industry: '', boardNum: null, buyDate: r.tradeDate, sellDate: '', timeline: [], lastRow: r }
+      g = { stockCode: r.stockCode, stockName: r.stockName, industry: '', boardNum: null, buyDate: r.tradeDate, sellDate: '', exits: [], timeline: [], lastRow: r }
       map.set(r.stockCode, g)
     }
     if (r.tradeDate < g.buyDate) g.buyDate = r.tradeDate
@@ -365,6 +527,7 @@ const lifecycleRows = computed(() => {
     if (r.boardNum != null) g.boardNum = r.boardNum
     if (r.stockName) g.stockName = r.stockName
     if (r.status === '今日清仓' && r.tradeDate > g.sellDate) g.sellDate = r.tradeDate
+    if (r.sellPrice !== null && r.sellPrice !== undefined && Number(r.sellPrice) > 0) g.exits.push(r)
     g.timeline.push(r)
     g.lastRow = r
   }
@@ -372,9 +535,13 @@ const lifecycleRows = computed(() => {
     const dates = new Set(g.timeline.map(t => t.tradeDate))
     const scores = g.timeline.map(t => t.disciplineScore).filter(v => v != null)
     const floats = g.timeline.map(t => t.floatPct).filter(v => v != null)
+    const amounts = g.exits.map(t => realizedOf(t)?.amount).filter(v => v !== null && v !== undefined)
     return {
       ...g,
       holdDays: dates.size,
+      lastExit: g.exits.length ? g.exits[g.exits.length - 1] : null,
+      exitCount: g.exits.length,
+      realizedAmount: amounts.length ? amounts.reduce((a, b) => a + Number(b), 0) : null,
       lastScore: scores.length ? scores[scores.length - 1] : null,
       lastFloat: floats.length ? floats[floats.length - 1] : null,
       status: g.lastRow.status === '今日清仓' ? '已清' : '持仓'
@@ -427,6 +594,8 @@ function delayClass(v) {
 /** 生命周期时间轴：把一行快照翻译成 事件/注脚。 */
 function lifeEvent(t) {
   if (t.status === '今日清仓') return t.action || '清仓'
+  // 状态还是持仓中但当天有成交价 = 走掉了一部分，这一笔以前只能糊在动作文本里
+  if (t.sellPrice !== null && t.sellPrice !== undefined && Number(t.sellPrice) > 0) return t.action || '减仓'
   if (t.action) return t.action
   return '持有'
 }
@@ -434,6 +603,10 @@ function lifeNote(t) {
   const parts = []
   if (t.industry) parts.push(t.industry)
   if (t.disciplineScore != null) parts.push('纪律 ' + t.disciplineScore)
+  // 成交价与卖量优先于浮动：这一行如果做了了结，看的是真卖了多少
+  if (t.sellPrice !== null && t.sellPrice !== undefined && Number(t.sellPrice) > 0) {
+    parts.push('卖 ' + t.sellPrice + (t.sellQty ? '×' + t.sellQty : ''))
+  }
   if (t.floatPct != null) parts.push(fmtPct(t.floatPct))
   return parts.join(' · ')
 }

@@ -19,6 +19,10 @@ public class PositionRequest {
     private BigDecimal currentPrice;
     /** 持仓股数；留空 = 没填，该行不进金额类汇总（市值/盈亏额），只进等权口径。 */
     private Integer quantity;
+    /** 当日了结成交均价（真卖出的价，不是收盘价）。留空 = 没填，该行不进已实现口径。 */
+    private BigDecimal sellPrice;
+    /** 当日卖出股数；减仓时只是一部分，状态仍可填「持仓中」。留空 = 没填（不等于 0 股）。 */
+    private Integer sellQty;
     /** 手记的浮动盈亏%。留空且成本/现价都在时服务端补算，填了就用你的。 */
     private BigDecimal floatPct;
     private String action;

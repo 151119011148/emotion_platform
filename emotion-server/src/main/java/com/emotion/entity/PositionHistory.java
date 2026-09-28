@@ -34,6 +34,10 @@ public class PositionHistory {
     private BigDecimal currentPrice;
     /** 被替换时的持仓股数：少了它，一次保存就把股数丢了、回滚也捞不回来。 */
     private Integer quantity;
+    /** 被替换时的当日成交均价快照：少了它，一次保存就把成交价丢了、回滚也捞不回来。 */
+    private BigDecimal sellPrice;
+    /** 被替换时的当日卖出股数快照。 */
+    private Integer sellQty;
     private BigDecimal floatPct;
     private String action;
     private String plannedAction;

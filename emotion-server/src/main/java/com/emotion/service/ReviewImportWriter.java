@@ -167,6 +167,10 @@ public class ReviewImportWriter {
             p.setCostPrice(r.getCost());
             p.setCurrentPrice(r.getCurrent());
             p.setQuantity(r.getQuantity());
+            // 当日了结：卖价/卖量没写就是 NULL。整表替换是删除重建，md 不带这两个键的话，
+            // 之前在页面上填的成交价会被这次导入一起抹掉——所以导出模板必须带得出来。
+            p.setSellPrice(r.getSellPrice());
+            p.setSellQty(r.getSellQty());
             p.setFloatPct(r.getFloatPct());
             p.setAction(r.getAction());
             p.setPlannedAction(r.getPlannedAction());

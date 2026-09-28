@@ -25,6 +25,39 @@ class ReviewImportParserTest {
 
     private static final LocalDate TODAY = LocalDate.of(2026, 9, 4);
 
+    /**
+     * 卖价/卖量可选，且不能被相邻的 现价/数量 抢走：标签匹配靠空白边界，
+     * 「现价12.12 卖价13.2」里两个都得各归各的。
+     */
+    @Test
+    void sellPriceAndQtyAreOptionalAndDoNotCollideWithNeighbourLabels() {
+        ReviewDoc plain = ReviewImportParser.parse(
+                "```meta\ndate: 2026-09-03\n持仓: 002229 鸿博股份 成本11.17 现价12.12 动作未动 应做竞价清仓 纪律违约\n```",
+                TODAY);
+        assertFalse(plain.hasErrors(), plain.errorsText());
+        assertNull(plain.getPositions().get(0).getSellPrice(), "没写卖价就是不知道，不许拿现价顶上");
+        assertNull(plain.getPositions().get(0).getSellQty());
+
+        ReviewDoc both = ReviewImportParser.parse(
+                "```meta\ndate: 2026-09-03\n持仓: 002229 鸿博股份 现价12.12 卖价13.2 数量1000 卖量600 "
+                        + "动作未动 应做竞价清仓 纪律违约\n```", TODAY);
+        assertFalse(both.hasErrors(), both.errorsText());
+        ReviewDoc.PositionRow r = both.getPositions().get(0);
+        assertEquals(new BigDecimal("12.12"), r.getCurrent());
+        assertEquals(new BigDecimal("13.2"), r.getSellPrice());
+        assertEquals(Integer.valueOf(1000), r.getQuantity());
+        assertEquals(Integer.valueOf(600), r.getSellQty());
+    }
+
+    /** 卖价写了但不是数字 → 整行拒绝并给行号，不能让半截值进库。 */
+    @Test
+    void nonNumericSellPriceRejectsTheRow() {
+        ReviewDoc doc = ReviewImportParser.parse(
+                "```meta\ndate: 2026-09-03\n持仓: 002229 鸿博股份 卖价没成交 动作未动 应做清仓 纪律遵守\n```", TODAY);
+        assertTrue(doc.hasErrors(), "卖价不是数字却整行收下，等于把垃圾写进台账");
+        assertTrue(doc.errorsText().contains("卖价"), doc.errorsText());
+    }
+
     /** 只喂一行持仓时的最小 meta 外壳：持仓/题材这些多行键必须写在 meta 围栏块里才认。 */
     private static String meta() {
         return "```meta\ndate: 2026-09-03\n";

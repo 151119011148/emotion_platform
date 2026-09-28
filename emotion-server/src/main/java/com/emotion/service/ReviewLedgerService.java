@@ -104,6 +104,18 @@ public class ReviewLedgerService {
             p.setCostPrice(money(errors, at, "成本", r.getCostPrice()));
             p.setCurrentPrice(money(errors, at, "现价", r.getCurrentPrice()));
             p.setQuantity(qty(errors, at, r.getQuantity()));
+            // 卖价/卖量：宁缺毋滥。留空就是没填，服务端不用收盘价顶替（见 fillClosePrice 里那段说明）。
+            BigDecimal sellPrice = money(errors, at, "卖价", r.getSellPrice());
+            Integer sellQty = qty(errors, at, r.getSellQty());
+            p.setSellPrice(sellPrice);
+            p.setSellQty(sellQty);
+            if (sellQty != null && r.getQuantity() != null && r.getQuantity() > 0
+                    && sellQty > r.getQuantity()) {
+                // 报错就到此为止：errors 非空会让整批保存被拒（见本方法末尾），
+                // 不把两个字段悄悄置空再存——那等于把用户填的东西吞了还不吭声。
+                errors.add(at + "卖出股数 " + sellQty + " 比这一行填的持仓 " + r.getQuantity()
+                        + " 还多：减仓只填卖掉的那部分，整批保存已拒绝");
+            }
             p.setFloatPct(r.getFloatPct() != null
                     ? round(r.getFloatPct()) : floatPctOf(p.getCostPrice(), p.getCurrentPrice()));
             p.setAction(emptyToNull(r.getAction()));
@@ -142,6 +154,7 @@ public class ReviewLedgerService {
     public List<Position> readPositions(Long userId, LocalDate date) {
         List<Position> rows = positionStore.read(userId, date);
         backfill(rows);
+        deriveRealized(userId, rows);
         return rows;
     }
 
@@ -163,7 +176,10 @@ public class ReviewLedgerService {
         }
     }
 
-    /** 现价/行业/板数为空时自动回填（方案 P1：现价自动取行情，不手填；行业/板数同理不让页面留白）。
+    /**
+     * 现价/行业/板数为空时自动回填（方案 P1：现价自动取行情，不手填；行业/板数同理不让页面留白）。
+     *
+     * <p>这里<b>只补 current_price，绝不顺手补 sell_price</b>：收盘价不是成交价。
      * 优先取当日涨停池行——industry 与连板数都是当日口径；池里没有（非涨停股）则行业走全市场字典。 */
     private void fillClosePrice(LocalDate date, List<Position> rows) {
         if (rows.isEmpty()) {
@@ -241,7 +257,61 @@ public class ReviewLedgerService {
     public List<Position> allPositions(Long userId, Integer days) {
         List<Position> rows = positionStore.readAll(userId, days);
         backfill(rows);
+        deriveRealized(userId, rows);
         return rows;
+    }
+
+    /** 单日取数时按标的查「上一快照成本」的次数上限——超出就只认本行成本，避免 N+1 拖垮接口。 */
+    private static final int BASIS_LOOKUPS = 20;
+
+    /**
+     * 读取期派生 {@code basisCost} / {@code realizedPct}，两个字段都不落库。
+     *
+     * <p>为什么要有它：清仓行是<b>新的一行</b>，录的人往往只填股数不重填成本（成本留在上一天的
+     * 持仓中行上），于是「以什么价了结、赚了多少」这件事在台账里算不出来。这里按标的把最近一条
+     * 有成本的快照当基准补上——<b>只补这一次</b>，库里那列仍然是空的，不篡改你手记的口径。
+     *
+     * <p>不兜底：没有卖价就没有已实现，缺成本基准也没有，一律留 NULL 让页面显示「—」。
+     * 拿收盘价当成交价、或按 0 收益混进统计，都是把「不知道」写成「知道」。
+     *
+     * <p>入参按 tradeDate 升序（{@code read} / {@code readAll} 都这么排），所以正着走一遍就能拿到
+     * 「本行之前最近的成本」；窗口里没有更早的（首日即清仓）才回库查一次。
+     */
+    public void deriveRealized(Long userId, List<Position> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return;
+        }
+        Map<String, BigDecimal> lastCost = new HashMap<>();
+        int lookups = 0;
+        for (Position p : rows) {
+            if (p.getCostPrice() != null) {
+                lastCost.put(p.getStockCode(), p.getCostPrice());
+            }
+            if (p.getSellPrice() == null) {
+                continue;
+            }
+            BigDecimal basis = p.getCostPrice() != null ? p.getCostPrice() : lastCost.get(p.getStockCode());
+            if (basis == null && lookups < BASIS_LOOKUPS) {
+                lookups++;
+                Position prior = positionStore.lastWithCostBefore(userId, p.getStockCode(), p.getTradeDate());
+                if (prior != null && prior.getCostPrice() != null) {
+                    basis = prior.getCostPrice();
+                    lastCost.put(p.getStockCode(), basis);
+                }
+            }
+            p.setBasisCost(basis);
+            p.setRealizedPct(realizedPctOf(basis, p.getSellPrice()));
+        }
+    }
+
+    /** 已实现% = (卖价 - 成本基准) / 成本基准；任一侧缺数或成本非正都回 NULL，不猜。 */
+    static BigDecimal realizedPctOf(BigDecimal basisCost, BigDecimal sellPrice) {
+        if (basisCost == null || sellPrice == null || basisCost.signum() <= 0) {
+            return null;
+        }
+        return sellPrice.subtract(basisCost)
+                .multiply(BigDecimal.valueOf(100))
+                .divide(basisCost, MONEY_SCALE, RoundingMode.HALF_UP);
     }
 
     /** 标记某持仓已执行，闭环：回填真实动作，executed 置 1。 */
@@ -396,6 +466,7 @@ public class ReviewLedgerService {
 
     private static boolean blankPosition(PositionRequest r) {
         return trim(r.getStockCode()).isEmpty() && trim(r.getAction()).isEmpty()
+                && r.getSellPrice() == null && r.getSellQty() == null
                 && trim(r.getPlannedAction()).isEmpty() && trim(r.getDiscipline()).isEmpty()
                 && r.getCostPrice() == null && r.getCurrentPrice() == null && r.getFloatPct() == null;
     }

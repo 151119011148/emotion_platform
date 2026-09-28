@@ -236,17 +236,22 @@ public final class ReviewDocFormatter {
             sb.append("（这天没有导入过持仓台账）\n");
             return prompt(sb, "有持仓就逐只写「实际动作 vs 应做动作 vs 纪律」；空仓写为什么空。");
         }
-        sb.append("| 标的 | 成本 | 现价 | 浮动 | 动作 | 应做 | 纪律 |\n|---|---|---|---|---|---|---|\n");
+        // 卖价/卖出量是「当日了结」那一笔的真实成交，与现价（收盘）并列摆出来，两者不等就是差价。
+        sb.append("| 标的 | 成本 | 现价 | 卖价 | 卖出量 | 浮动 | 动作 | 应做 | 纪律 |\n")
+                .append("|---|---|---|---|---|---|---|---|---|\n");
         for (Position p : m.positions) {
             sb.append("| ").append(cell(p.getStockName())).append(" ").append(cell(p.getStockCode())).append(" | ")
                     .append(price(p.getCostPrice())).append(" | ")
                     .append(price(p.getCurrentPrice())).append(" | ")
+                    .append(price(p.getSellPrice())).append(" | ")
+                    .append(p.getSellQty() == null ? "—" : plain(p.getSellQty())).append(" | ")
                     .append(p.getFloatPct() == null ? "—" : signed(p.getFloatPct(), "%")).append(" | ")
                     .append(cell(p.getAction())).append(" | ")
                     .append(cell(p.getPlannedAction())).append(" | ")
                     .append(cell(p.getDiscipline())).append(" |\n");
         }
-        return prompt(sb, "连续「应做未做」是这块最该沉淀的东西——写清楚为什么没执行。");
+        return prompt(sb, "连续「应做未做」是这块最该沉淀的东西——写清楚为什么没执行；"
+                + "卖了就记成交均价，别拿收盘价当卖价。");
     }
 
     // ---- 【五、对答案与兑现】 ----
