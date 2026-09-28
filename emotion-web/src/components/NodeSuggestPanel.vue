@@ -6,6 +6,10 @@
         <el-tag :type="statusType(s.suggestedStatus)" size="small">建议 {{ s.suggestedStatus }}</el-tag>
         <!-- 类型是采纳要落的第九个值，进指纹：看不见就点采纳，点的就是个假的采纳 -->
         <span class="ntag" v-if="s.nodeType" :class="'nt-' + s.nodeType">建议 {{ s.nodeTypeLabel }}</span>
+        <!-- 续板判定只有破壁两行有，它进指纹：没看见就点采纳，采纳的就是个假的那一格 -->
+        <el-tag v-if="s.repairStatusLabel" size="small" :type="repairType(s.repairStatus)" effect="plain">
+          续板 {{ s.repairStatusLabel }}
+        </el-tag>
         <el-tag v-if="!s.ready" type="info" size="small">判据不齐，不能采纳</el-tag>
         <span class="same" v-if="sameAsStored">与库里那条一字不差</span>
       </template>
@@ -71,8 +75,8 @@
       节点票 {{ s.nodeStock }}{{ s.nodeStockMaxBoard ? `（最高 ${s.nodeStockMaxBoard} 板）` : '' }}
     </p>
     <p class="hint">
-      采纳只写这一条节点自己的八个字段，不动你填的备注；
-      点了「有效/失效」之后这条会从「当前追踪」进「历史节点」。
+      采纳只写这一条节点自己算出来的那几格——高低切是状态与晋级那一组，破壁两行是状态与续板判定那一组，
+      两边都不动你填的备注；点了「有效/失效」之后这条会从「当前追踪」进「历史节点」。
     </p>
   </div>
 </template>
@@ -140,6 +144,11 @@ function passClass(pass) {
   return pass === true ? 'f-pass' : pass === false ? 'f-fail' : 'f-unknown'
 }
 
+/** 续板三态配色与状态标签同一套语义：待判定黄、成功绿、未续板红，读的人不用换字典。 */
+function repairType(repair) {
+  return { SUCCESS: 'success', FAILED: 'danger', PENDING: 'warning' }[repair] || 'info'
+}
+
 const filterSummary = computed(() => {
   const items = s.value?.filter || []
   const passed = items.filter((f) => f.pass === true).length
@@ -150,8 +159,11 @@ const filterSummary = computed(() => {
 
 const sameAsStored = computed(() => {
   const n = props.node
-  return !!s.value && s.value.ready && s.value.status === n.status
-    && String(s.value.t1PromotionCount) === String(n.t1PromotionCount)
+  if (!s.value || !s.value.ready || s.value.status !== n.status) return false
+  // 破壁那两行比续板判定：那两行两边都不带晋级数，比它等于永远"一字不差"
+  return s.value.repairStatus != null
+    ? String(s.value.repairStatus) === String(n.repairStatus)
+    : String(s.value.t1PromotionCount) === String(n.t1PromotionCount)
 })
 
 watch(() => props.node?.id, load, { immediate: true })

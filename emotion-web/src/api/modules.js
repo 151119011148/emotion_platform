@@ -52,7 +52,13 @@ export const nodeApi = {
   // 采纳只回传指纹，那八个值由服务端重算并逐字段比对后落库
   adopt: (id, fingerprint) => api.post(`/nodes/${id}/adopt`, { fingerprint }),
   // 「从今日天梯新增节点」的轻量预填：D0日期/涨停跌停家数/最高板/今日龙头候选。只读本地表
-  ladderIntel: (date) => api.get('/nodes/ladder-intel', { params: { date }, skipErrorToast: true })
+  ladderIntel: (date) => api.get('/nodes/ladder-intel', { params: { date }, skipErrorToast: true }),
+  /**
+   * 把曲线上那颗 ☆/★ 立成节点：试探日一行，成功日连前一天那次试探一起两行。
+   * 哪天是试探、哪天算成功，服务端只认 TiantiService 那一份判定，页面不许自己拼字段。
+   * 幂等在服务里挡：同一天同一类型已立过就返回既有行，回执的 alreadyExists 会说清。
+   */
+  createBreak: (date) => api.post('/nodes/break', null, { params: { date } })
 }
 
 /**
@@ -64,6 +70,11 @@ export const prdApi = {
   tianti: (date) => api.get('/tianti', { params: { date }, timeout: 25000, skipErrorToast: true }),
   // 连板高度曲线：日期区间内每天最高连板高度及对应个股
   heightRange: (start, end) => api.get('/tianti/height-range', { params: { start, end }, skipErrorToast: true }),
+  /**
+   * 破壁详情：曲线上 ☆（试探）/★（破壁成功）那天的助攻、盘口、情绪闸门与次日结算。
+   * 判定读的仍是服务端那一份，这里只是把那一天摆全；null 是"不知道"不是 0 只，页面照原样留空。
+   */
+  breakDetail: (date) => api.get('/tianti/break-detail', { params: { date }, timeout: 25000, skipErrorToast: true }),
   shouban: (date) => api.get('/shouban', { params: { date }, timeout: 25000, skipErrorToast: true }),
   mainline: (date) => api.get('/mainline', { params: { date }, timeout: 25000, skipErrorToast: true }),
   // 双轨 v0.2：雷达区「升级到主线区」写接口（落 t_mainline_mark）

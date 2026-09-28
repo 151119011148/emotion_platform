@@ -103,8 +103,8 @@
             <div class="candidates" v-if="parsedCandidates.length">
               <el-tag v-for="c in parsedCandidates" :key="c" size="small" type="info">{{ c }}</el-tag>
             </div>
-            <!-- 破局日＝观察日：0 候选是规则本身，不是数据缺失，必须显式说清楚 -->
-            <div class="observe-note" v-else-if="isObserveDay(activeNode)">◌ 观察日 · 不产候选</div>
+            <!-- 试探破壁＝观察日：不产候选池是规则本身，但当天<b>有</b>一票——追线的那只，看它次日续不续板 -->
+            <div class="observe-note" v-else-if="isObserveDay(activeNode)">◌ 观察日 · 只看追线那只续不续板，不产候选</div>
           </div>
         </div>
         <div class="timeline-step" :class="{ active: activeNode.t1Date }">
@@ -113,12 +113,20 @@
             <span class="step-label">T+1（验证日）</span>
             <span class="step-date">{{ activeNode.t1Date || '待验证' }}</span>
             <template v-if="activeNode.t1Date">
-              <span class="step-desc">
-                老龙反包：{{ t1Repack(activeNode.t1AnchorRepack) }}
-              </span>
-              <span class="step-desc">
-                晋级数量：{{ activeNode.t1PromotionCount }}只（{{ fmtRate(activeNode.t1PromotionRate) }}%）
-              </span>
+              <template v-if="isSpaceNode(activeNode)">
+                <span class="step-desc">续板判定：{{ repairText(activeNode.repairStatus) }}</span>
+                <span class="step-desc" v-if="activeNode.breakBoard != null">
+                  追的破壁线：{{ activeNode.breakBoard }} 板
+                </span>
+              </template>
+              <template v-else>
+                <span class="step-desc">
+                  老龙反包：{{ t1Repack(activeNode.t1AnchorRepack) }}
+                </span>
+                <span class="step-desc">
+                  晋级数量：{{ activeNode.t1PromotionCount }}只（{{ fmtRate(activeNode.t1PromotionRate) }}%）
+                </span>
+              </template>
             </template>
           </div>
         </div>
@@ -154,7 +162,7 @@
       <div class="history-head">
         <h3>历史节点</h3>
         <div class="filters">
-          <el-select v-model="nodeTypeFilter" size="small" style="width: 130px" placeholder="节点类型">
+          <el-select v-model="nodeTypeFilter" size="small" style="width: 152px" placeholder="节点类型">
             <el-option label="全部类型" value="" />
             <el-option v-for="t in NODE_TYPES" :key="t.value" :label="t.label" :value="t.value" />
             <el-option label="未识别" :value="NONE_KEY" />
@@ -182,16 +190,21 @@
                 <el-tag v-for="t in reasonTags(row)" :key="t" size="small"
                   :type="row.status === '失效' ? 'danger' : 'success'">{{ t }}</el-tag>
               </div>
-              <div class="detail-row">T+1：{{ row.t1Date || '—' }} | 老龙反包 {{ t1Repack(row.t1AnchorRepack) }} | 晋级 {{ row.t1PromotionCount }}只（{{ fmtRate(row.t1PromotionRate) }}%）| 节点票最高 {{ row.nodeStockMaxBoard ? row.nodeStockMaxBoard + '板' : '—' }}</div>
+              <div class="detail-row" v-if="isSpaceNode(row)">T+1：{{ row.t1Date || '—' }} | 续板判定 {{ repairText(row.repairStatus) }} | 追 {{ row.breakBoard != null ? row.breakBoard + '板破壁线' : '破壁线未知' }} | 节点票最高 {{ row.nodeStockMaxBoard ? row.nodeStockMaxBoard + '板' : '—' }}</div>
+              <div class="detail-row" v-else>T+1：{{ row.t1Date || '—' }} | 老龙反包 {{ t1Repack(row.t1AnchorRepack) }} | 晋级 {{ row.t1PromotionCount }}只（{{ fmtRate(row.t1PromotionRate) }}%）| 节点票最高 {{ row.nodeStockMaxBoard ? row.nodeStockMaxBoard + '板' : '—' }}</div>
               <div class="detail-row">前置过滤器：{{ filterLabel(row) }}</div>
               <div class="detail-row">D0情绪：{{ row.d0Score != null ? row.d0Score + '分' : '—' }} <template v-if="row.d0Cycle">· {{ row.d0Cycle }}</template> | 上次复算：{{ fmtTime(row.lastRecalcAt) || '—' }}</div>
             </div>
           </template>
         </el-table-column>
         <el-table-column prop="d0Date" label="D0日期" width="104" />
-        <el-table-column label="节点类型" width="104">
+        <el-table-column label="节点类型" width="128">
           <template #default="{ row }">
             <span class="ntag" :class="nodeTypeClass(row)">{{ nodeTypeLabel(row) }}</span>
+            <!-- 破壁两行的结论挂在续板判定上：类型只说它是哪一天，这一格说那天成了没有 -->
+            <div class="reason-tags" v-if="row.repairStatus">
+              <el-tag size="small" :type="repairType(row.repairStatus)" effect="plain">{{ repairText(row.repairStatus) }}</el-tag>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="锚定龙头" min-width="150" show-overflow-tooltip>
@@ -446,15 +459,15 @@ const dateRange = ref(null)
 /**
  * 类型轴的取值闭集（PRD §2）。后端 NodeService.nodeTypeLabel 认的就是这些，
  * 落库也是这些原值；筛选器选项与展示文案共用这一份，避免前后端口径漂移。
- * 周期节点 = 启动/分歧/切换（横向），空间节点 = 破局日/破局次日（纵向），
+ * 周期节点 = 启动/分歧/切换（横向），空间节点 = 试探破壁/破壁成功（纵向，旧周期那面墙被追平、被破掉），
  * 高低切节点 = 接位/补位/转切（纵向，老龙断板后按题材同不同属性分流，复算算出来后采纳才落库）。
  */
 const NODE_TYPES = [
   { value: 'START', label: '启动日' },
   { value: 'DIVERGE', label: '分歧日' },
   { value: 'SWITCH', label: '切换日' },
-  { value: 'SPACE_BREAK', label: '破局日 · 观察' },
-  { value: 'SPACE_BREAK_NEXT', label: '破局次日 · 出手' },
+  { value: 'SPACE_BREAK', label: '试探破壁 · 观察' },
+  { value: 'SPACE_BREAK_NEXT', label: '破壁成功 · 出手' },
   { value: 'SPLIT_PENDING', label: '接位 · 待定' },
   { value: 'FILL_SAME', label: '补位节点' },
   { value: 'SWITCH_CROSS', label: '转切节点' }
@@ -481,9 +494,23 @@ function nodeTypeClass(row) {
   const t = row?.nodeType
   return 'nt-' + (t && KNOWN_NODE_TYPES.has(t) ? t : 'none')
 }
-/** 观察日（破局日）：当天 0 候选是规则要求，不是数据缺失。 */
+/** 观察日（试探破壁）：这天不产候选池，只有追线的那一只，结论等它次日续不续板。 */
 function isObserveDay(row) {
   return row?.nodeType === 'SPACE_BREAK'
+}
+
+/** 空间轴两行：它们的验证格是「续板判定」，不是高低切的老龙反包与晋级率。 */
+function isSpaceNode(row) {
+  return row?.nodeType === 'SPACE_BREAK' || row?.nodeType === 'SPACE_BREAK_NEXT'
+}
+
+/** 续板三态的中文：PENDING 由复算算成 SUCCESS/FAILED，他点采纳才转。未知就是未知，不兜成"没续板"。 */
+function repairText(repair) {
+  return { PENDING: '待判定', SUCCESS: '续板成功', FAILED: '未续板' }[repair] || '—'
+}
+
+function repairType(repair) {
+  return { SUCCESS: 'success', FAILED: 'danger', PENDING: 'warning' }[repair] || 'info'
 }
 
 /** 六态路径：节点在情绪周期里的位置。active 命中 D0 周期。 */

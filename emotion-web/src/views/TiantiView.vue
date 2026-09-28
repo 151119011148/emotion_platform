@@ -129,6 +129,9 @@
     <BoardHeightCurve :rows="heightCurveRows" :selected="date" name="连板高度"
                       zoom-group="tianti-curve" @select="date = $event" />
 
+    <!-- 曲线上那颗 ☆/★ 的辅助验证面板。挂不挂只读 dayPoint —— 与曲线标记同一份判定，页面不另算一套 -->
+    <BreakDetailPanel v-if="dayPoint && (dayPoint.isProbe || dayPoint.isBreak)" :date="date" />
+
     <div class="stat-grid" v-loading="loading">
       <div class="stat">
         <span class="stat-label">旧龙高度 / 当前最高连板</span>
@@ -304,6 +307,7 @@ import { prdApi, leaderApi, recordApi } from '../api/modules'
 import { signed, fiveDimBandClassOf } from '../utils/scores'
 import { useTradingCalendar } from '../utils/tradingCalendar'
 import { useScoringStore } from '../stores/scoring'
+import BreakDetailPanel from '../components/BreakDetailPanel.vue'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
 import BoardHeightCurve from '../components/BoardHeightCurve.vue'
 import DimIntroTip from '../components/DimIntroTip.vue'
@@ -323,7 +327,11 @@ const date = ref(route.query.date || todayStr)
 const highlightCode = ref(route.query.code || null)
 const loading = ref(false)
 const vo = ref(null)
-/** 曲线取数窗口：往前留够两年，回补出来的历史一路都能用 −/≪ 翻回来。 */
+/**
+ * 曲线取数窗口：往前留够两年，回补出来的历史一路都能用 −/≪ 翻回来。
+ * 与后端 TiantiService.BREAK_LOOKBACK_DAYS 同值——破壁详情面板的判定窗口用的就是它，
+ * 两边各改一处会让面板说的线和曲线画的线不是同一段。
+ */
 const LOOKBACK_DAYS = 760
 const curveRows = ref([])
 // 连板高度曲线数据：全量按日升序，右端按所选日期截给曲线画
@@ -369,14 +377,29 @@ function mapHeightRow(r) {
 const heightCurveRows = computed(() => heightCurveAll.value.filter((r) => r.date <= date.value))
 
 /**
- * 所选日期的判定点 + 它的次日。
- * 次日用全量数组取：曲线只看 ≤ 所选日期，但「试探有没有兑现」恰好只有往后一天能回答，
+ * 所选日期的判定点 + 它的前一日与次日。
+ * 前后都用全量数组取：曲线只看 ≤ 所选日期，但「试探有没有兑现」恰好只有往后一天能回答，
  * 看历史某天时它就摆在数组里，标签当场降级；只有最新一天还没有次日，保持待验证。
+ * 前一日回答的是另一头：这天追的是<b>进来时挂着的那条线</b>，见 {@link chasedLine}。
  */
 function breakAt(day) {
   const i = heightCurveAll.value.findIndex((r) => r.date === day)
-  if (i < 0) return { row: null, next: null }
-  return { row: heightCurveAll.value[i], next: heightCurveAll.value[i + 1] || null }
+  if (i < 0) return { row: null, prev: null, next: null }
+  return {
+    row: heightCurveAll.value[i],
+    prev: i > 0 ? heightCurveAll.value[i - 1] : null,
+    next: heightCurveAll.value[i + 1] || null
+  }
+}
+
+/**
+ * 试探日追的那条线 = 进这天时挂着的那一条，也就是前一天那个点的 ceiling。
+ * 追平当天线跟着它的板高一起抬（8.28 深中华Ａ 追的是 6 板线，它这一站把线抬到 7），
+ * 拿当天的数说「追 7 板线」等于倒过来说。与后端 TiantiService.chasedLine 同一份读法。
+ */
+function chasedLine(row, prev) {
+  if (prev && prev.ceiling != null) return prev.ceiling
+  return row ? row.ceiling : null
 }
 
 /** 所选日期的判定点：核心数据卡与天梯标签同读这一份，两处不会各算一套口径 */
@@ -401,16 +424,18 @@ const refHeight = computed(() => {
  * 看的正是最新一天时还没有次日，只能说"待验证"，不能替市场先下结论。
  */
 function breakTagOf(code) {
-  const { row, next } = breakAt(date.value)
+  const { row, prev, next } = breakAt(date.value)
   if (!row || !code) return null
   if (row.isBreak && row.breakStock && row.breakStock.code === code) {
     return { text: `★破壁 ${row.prevHigh}→${row.maxHeight}板`, type: 'danger' }
   }
   if (row.isProbe && row.probeStock && row.probeStock.code === code) {
+    // 标签上的线高读追的那一条，不读当天已经跟着它抬起来的 ceiling
+    const line = chasedLine(row, prev)
     const confirmed = !!(next && next.isBreak && next.breakStock && next.breakStock.code === code)
-    if (confirmed) return { text: `☆试探 ${row.ceiling}板·已兑现`, type: 'warning' }
-    if (next) return { text: `☆试探 ${row.ceiling}板·未兑现`, type: 'info' }
-    return { text: `☆试探 ${row.ceiling}板·待次日`, type: 'primary' }
+    if (confirmed) return { text: `☆试探 ${line}板·已兑现`, type: 'warning' }
+    if (next) return { text: `☆试探 ${line}板·未兑现`, type: 'info' }
+    return { text: `☆试探 ${line}板·待次日`, type: 'primary' }
   }
   return null
 }
