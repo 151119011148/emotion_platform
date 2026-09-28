@@ -15,11 +15,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.emotion.dto.MainlinePromoteRequest;
 import com.emotion.market.MarketDataException;
+import com.emotion.service.BreakDetailService;
 import com.emotion.service.MainlineService;
 import com.emotion.service.PrdMetricsService;
 import com.emotion.service.ShoubanService;
 import com.emotion.service.TiantiService;
 import com.emotion.vo.ApiResponse;
+import com.emotion.vo.BreakDetailVO;
 import com.emotion.vo.MainlineVO;
 import com.emotion.vo.ShoubanVO;
 import com.emotion.vo.TiantiVO;
@@ -38,13 +40,16 @@ public class PrdController {
     private final TiantiService tiantiService;
     private final ShoubanService shoubanService;
     private final MainlineService mainlineService;
+    private final BreakDetailService breakDetailService;
 
     public PrdController(TiantiService tiantiService,
                          ShoubanService shoubanService,
-                         MainlineService mainlineService) {
+                         MainlineService mainlineService,
+                         BreakDetailService breakDetailService) {
         this.tiantiService = tiantiService;
         this.shoubanService = shoubanService;
         this.mainlineService = mainlineService;
+        this.breakDetailService = breakDetailService;
     }
 
     /** 连板天梯：四层分组 + 龙头分工标签（PRD P2）。 */
@@ -62,6 +67,13 @@ public class PrdController {
     public ApiResponse<List<TiantiVO.HeightPoint>> heightRange(@RequestParam String start,
                                                                @RequestParam String end) {
         return ApiResponse.ok(tiantiService.heightRange(parse(start), parse(end)));
+    }
+
+    /** 破壁详情：曲线上 ☆（试探）/★（破壁成功）那天的助攻、盘口、情绪闸门与次日结算。 */
+    @GetMapping("/tianti/break-detail")
+    public ApiResponse<BreakDetailVO> breakDetail(Authentication auth,
+                                                  @RequestParam(required = false) String date) {
+        return ApiResponse.ok(breakDetailService.vo(userId(auth), parse(date)));
     }
 
     /** 首板池：封住/炸板两表 + 1 进 2 晋级统计（PRD P3）。 */

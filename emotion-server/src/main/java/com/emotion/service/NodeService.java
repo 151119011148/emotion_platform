@@ -114,6 +114,7 @@ public class NodeService {
      * 新节点一律"待验证"。
      */
     public com.emotion.vo.NodeVO create(Long userId, NodeEvent event) {
+        checkNodeType(event.getNodeType());
         event.setUserId(userId);
         if (event.getStatus() == null || event.getStatus().trim().isEmpty()) {
             event.setStatus(STATUS_PENDING);
@@ -143,7 +144,10 @@ public class NodeService {
         if (event.getNote() != null) existing.setNote(event.getNote());
         if (event.getD0Candidates() != null) existing.setD0Candidates(event.getD0Candidates());
         if (event.getTheme() != null) existing.setTheme(event.getTheme());
-        if (event.getNodeType() != null) existing.setNodeType(event.getNodeType());
+        if (event.getNodeType() != null) {
+            checkNodeType(event.getNodeType());
+            existing.setNodeType(event.getNodeType());
+        }
         if (event.getBreakStockCode() != null) existing.setBreakStockCode(event.getBreakStockCode());
         if (event.getBreakBoard() != null) existing.setBreakBoard(event.getBreakBoard());
         if (event.getBreakForm() != null) existing.setBreakForm(event.getBreakForm());
@@ -152,6 +156,33 @@ public class NodeService {
 
         nodeEventMapper.updateById(existing);
         return existing;
+    }
+
+    /** 单个节点的富化视图；不存在或非本人则抛错。 */
+    public com.emotion.vo.NodeVO detail(Long userId, Long id) {
+        NodeEvent node = nodeEventMapper.selectOne(new LambdaQueryWrapper<NodeEvent>()
+                .eq(NodeEvent::getId, id)
+                .eq(NodeEvent::getUserId, userId));
+        if (node == null) {
+            throw new IllegalArgumentException("节点事件不存在：" + id);
+        }
+        return enrichLite(node, userId);
+    }
+
+    /**
+     * 类型轴是闭集：认不出来的值不收。留空（null 或空串）是合法状态——策略没识别出来的节点
+     * 就该是 NULL，界面显示「未识别」；但拼错的、前端乱发的必须挡下来，
+     * 否则它会被 {@code nodePart} 按 0 分算，一个字母的错就是一次无声的降权。
+     */
+    static void checkNodeType(String nodeType) {
+        if (nodeType == null || nodeType.trim().isEmpty()) {
+            return;
+        }
+        if (nodeTypeLabel(nodeType) == null) {
+            throw new IllegalArgumentException("未知的节点类型：" + nodeType
+                    + "，只能是 START/DIVERGE/SWITCH/SPLIT_PENDING/FILL_SAME/SWITCH_CROSS/"
+                    + "SPACE_BREAK/SPACE_BREAK_NEXT 之一，或留空表示未识别");
+        }
     }
 
     /** 删除自己的一个节点事件；不存在/非本人则抛错。 */
@@ -216,9 +247,9 @@ public class NodeService {
             case "SWITCH_CROSS":
                 return "转切节点";
             case "SPACE_BREAK":
-                return "破局日 · 观察";
+                return "试探破壁 · 观察";
             case "SPACE_BREAK_NEXT":
-                return "破局次日 · 出手";
+                return "破壁成功 · 出手";
             case "START":
                 return "启动日";
             case "SWITCH":
@@ -568,7 +599,8 @@ public class NodeService {
     // ---------- 杂项 ----------
 
     /** 节点票格式是「名称(代码)」→ 抽 6 位代码；解析不出就当没确认。 */
-    private static String stockCodeOf(String nodeStock) {
+    /** 「名称(000012)」转 6 位代码；打分侧与破壁节点写库共用这一个格式，两边必须同一把解析。 */
+    static String stockCodeOf(String nodeStock) {
         if (nodeStock == null) {
             return null;
         }

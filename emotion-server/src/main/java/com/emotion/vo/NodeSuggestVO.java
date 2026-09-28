@@ -48,6 +48,13 @@ public class NodeSuggestVO {
     private String nodeType;
     /** {@link #nodeType} 的中文展示名，进指纹的就是这一份（与 status 存"有效/失效"同一个道理）。 */
     private String nodeTypeLabel;
+    /**
+     * 续板判定，仅破壁分支有值：PENDING=次一交易日还没明细／SUCCESS=次日续板／FAILED=没续板。
+     * 高低切一族这一格恒为 null，采纳也就不碰它。
+     */
+    private String repairStatus;
+    /** {@link #repairStatus} 的中文展示名，进破壁分支指纹的就是这一份。 */
+    private String repairStatusLabel;
 
     private Promotion promotion;
     private List<FilterItem> filter = new ArrayList<>();

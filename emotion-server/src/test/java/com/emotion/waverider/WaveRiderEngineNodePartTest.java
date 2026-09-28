@@ -47,15 +47,32 @@ class WaveRiderEngineNodePartTest {
     /**
      * 有类型、但权重表里查不到这个类型 → 0 分，不替它猜一个。
      *
-     * <p>{@code SPACE_BREAK} 这类还没进权重表的节点就是这一档：宁可这项不给分，
+     * <p>拼错的、以后新加却忘了配权重的类型都落在这一档：宁可这项不给分，
      * 也不要出现「界面没说给了、分数里却混进一个凭空的权重」。
+     * 破壁一族现在在表里了（见 {@link #spaceBreakTypesCarryTheirWeights}），
+     * 拿一个没配过的键才判得了这条——V34 那套「破局形态」的键就一直是这种状态。
      */
     @Test
     void typeMissingFromWeightTableScoresZero() {
-        assertEquals(0.0, WaveRiderEngine.nodePart(typed("SPACE_BREAK"),
+        assertEquals(0.0, WaveRiderEngine.nodePart(typed("BREAK_FORM"),
                 new WaveRiderConfig().getNodeTypeWeights()), 1e-9);
         assertEquals(0.0, WaveRiderEngine.nodePart(typed("START"),
                 new LinkedHashMap<String, Double>()), 1e-9);
+    }
+
+    /**
+     * 空间轴两个类型自带权重：试探 0.6／成功 1.0。
+     *
+     * <p>0.6 不是保守系数，是"未确认"本身的价：试探只说明有票追平了那面壁，
+     * 成不成要等它次日续板；续板成功就是新周期在位龙，按满分给。
+     * 与高低切一族同理，这两个键必须和判定同一轮上线——{@code nodePart} 对
+     * 「有类型但表里查不到」是给 0 分的，先立节点后配权重等于白立。
+     */
+    @Test
+    void spaceBreakTypesCarryTheirWeights() {
+        Map<String, Double> weights = new WaveRiderConfig().getNodeTypeWeights();
+        assertEquals(0.6, WaveRiderEngine.nodePart(typed("SPACE_BREAK"), weights), 1e-9);
+        assertEquals(1.0, WaveRiderEngine.nodePart(typed("SPACE_BREAK_NEXT"), weights), 1e-9);
     }
 
     /**

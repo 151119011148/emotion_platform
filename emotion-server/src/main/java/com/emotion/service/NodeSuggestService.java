@@ -24,6 +24,7 @@ import com.emotion.entity.NodeEvent;
 import com.emotion.mapper.MarketDailyMapper;
 import com.emotion.mapper.MarketStockMapper;
 import com.emotion.mapper.NodeEventMapper;
+import com.emotion.vo.BreakDetailVO;
 import com.emotion.vo.NodeSuggestVO;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -105,11 +106,24 @@ public class NodeSuggestService {
     /** 板块节点类型码。已下线：仅供识别存量脏数据，不得用于新建分支。 */
     static final String SYSTEM_B = "B";
 
-    /** 采纳要落的九个字段。指纹、比对、写库三处共用这一张表——漏一个字段就是点了个假的采纳。 */
+    /**
+     * 采纳要落的字段：<b>指纹、比对、写库三处共用这几张表——漏一个字段就是点了个假的采纳。</b>
+     *
+     * <p>高低切一族九键（原样不动），破壁两行六键：这里没有老龙反包、没有晋级数与晋级率，
+     * 多出来的是"次日续没续板"那一格 {@code repairStatus}。{@link #fpKeys} 选哪一张，
+     * {@code adopt()} 就落哪几格——两边必须同时改。
+     */
     private static final List<String> FP_KEYS = Collections.unmodifiableList(Arrays.asList(
             "status", "t1Date", "t1AnchorRepack", "t1PromotionCount", "t1PromotionRate",
             "nodeValid", "nodeStock", "nodeStockMaxBoard", "nodeType"));
+    private static final List<String> BREAK_FP_KEYS = Collections.unmodifiableList(Arrays.asList(
+            "status", "t1Date", "nodeStock", "nodeStockMaxBoard", "nodeType", "repairStatus"));
     private static final Map<String, String> FP_LABELS = labels();
+
+    /** 这一条走哪张键表：按<b>建议</b>的类型分流，破壁两行只认自己那六格。 */
+    static List<String> fpKeys(NodeSuggestVO vo) {
+        return NodeBreakService.isBreakType(vo.getNodeType()) ? BREAK_FP_KEYS : FP_KEYS;
+    }
 
     private static Map<String, String> labels() {
         Map<String, String> map = new LinkedHashMap<>();
@@ -122,6 +136,7 @@ public class NodeSuggestService {
         map.put("nodeStock", "节点票");
         map.put("nodeStockMaxBoard", "节点票最高板数");
         map.put("nodeType", "节点类型");
+        map.put("repairStatus", "续板判定");
         return Collections.unmodifiableMap(map);
     }
 
@@ -130,22 +145,33 @@ public class NodeSuggestService {
     private final MarketDailyMapper marketDailyMapper;
     private final ObjectMapper json;
     private final IndustryClassifyService industryClassify;
+    /** 破壁两行的取数口：曲线那个点、它的次日、助攻盘口与闸门，判定一份都不在这儿重写。 */
+    private final BreakDetailService breakDetailService;
 
     public NodeSuggestService(NodeEventMapper nodeEventMapper,
                               MarketStockMapper marketStockMapper,
                               MarketDailyMapper marketDailyMapper,
                               ObjectMapper json,
-                              IndustryClassifyService industryClassify) {
+                              IndustryClassifyService industryClassify,
+                              BreakDetailService breakDetailService) {
         this.nodeEventMapper = nodeEventMapper;
         this.marketStockMapper = marketStockMapper;
         this.marketDailyMapper = marketDailyMapper;
         this.json = json;
         this.industryClassify = industryClassify;
+        this.breakDetailService = breakDetailService;
     }
 
     public NodeSuggestVO suggest(Long userId, Long id) {
         NodeEvent node = own(userId, id);
-        return decide(node, fetch(node, userId), json);
+        // 破壁两行判的是"次日续没续板"，跟高低切那套晋级率没有关系：按登记的类型分流，两条路互不改
+        return breakRow(node)
+                ? decideBreak(node, fetchBreak(node, userId), json)
+                : decide(node, fetch(node, userId), json);
+    }
+
+    private static boolean breakRow(NodeEvent node) {
+        return NodeBreakService.isBreakType(node.getNodeType());
     }
 
     /**
@@ -156,7 +182,10 @@ public class NodeSuggestService {
      */
     public NodeEvent adopt(Long userId, Long id, String fingerprint) {
         NodeEvent node = own(userId, id);
-        NodeSuggestVO fresh = decide(node, fetch(node, userId), json);
+        boolean breakRow = breakRow(node);
+        NodeSuggestVO fresh = breakRow
+                ? decideBreak(node, fetchBreak(node, userId), json)
+                : decide(node, fetch(node, userId), json);
         if (!fresh.isReady()) {
             throw new IllegalArgumentException("这条节点还不能采纳：" + join(fresh.getMissing(), "；"));
         }
@@ -167,12 +196,19 @@ public class NodeSuggestService {
         }
         node.setStatus(fresh.getStatus());
         node.setT1Date(fresh.getT1Date());
-        node.setT1AnchorRepack(fresh.getT1AnchorRepack());
-        node.setT1PromotionCount(fresh.getT1PromotionCount());
-        node.setT1PromotionRate(fresh.getT1PromotionRate());
         node.setNodeValid(fresh.getNodeValid());
         node.setNodeStock(fresh.getNodeStock());
         node.setNodeStockMaxBoard(fresh.getNodeStockMaxBoard());
+        if (breakRow) {
+            // 老龙反包／晋级数／晋级率是高低切的账，破壁行一次采纳都不该碰这三格
+            if (fresh.getRepairStatus() != null) {
+                node.setRepairStatus(fresh.getRepairStatus());
+            }
+        } else {
+            node.setT1AnchorRepack(fresh.getT1AnchorRepack());
+            node.setT1PromotionCount(fresh.getT1PromotionCount());
+            node.setT1PromotionRate(fresh.getT1PromotionRate());
+        }
         node.setStatusNote(cut(fresh.getReason(), STATUS_NOTE_MAX));
         node.setConclusionReason(fresh.getConclusionReason());
         // 没判出类型就不动他已有的标：这条采纳的是状态与晋级，不该把自己没算出来的东西抹成空
@@ -216,6 +252,8 @@ public class NodeSuggestService {
          * 助攻只数从这里数，判据本身仍是纯函数。
          */
         List<MarketStock> supportRows = new ArrayList<>();
+        /** 破壁分支的全部原料：曲线那一天的点、它的次日、助攻盘口与闸门；高低切分支恒 null。 */
+        BreakDetailVO breakDetail;
         /** 窗口应有的交易日数：老龙断板前的板高 H 定出来的 max(H−1,1)，与破壁线钉线同一个参数。 */
         Integer splitWindowDays;
         /** 库里已经落了几天的明细。小于 {@link #splitWindowDays} 就说明窗口还没走完，接位还得等。 */
@@ -539,6 +577,178 @@ public class NodeSuggestService {
         addWarnings(r, vo);
         vo.setFingerprint(fingerprint(json, vo));
         return vo;
+    }
+
+    // ---------- 破壁分支：试探破壁 / 破壁成功 ----------
+
+    /**
+     * 破壁行的取数：只问 {@link BreakDetailService} 要那一天那一份。
+     * <b>一条判据都不在这儿重算</b>——续没续板是 {@code TiantiService.detectBreaks} 的结论，
+     * 曲线上的 ★ 与面板已经共用它；这里再算一遍就是第二份判定，两份迟早打架。
+     */
+    private Readings fetchBreak(NodeEvent node, Long userId) {
+        Readings r = new Readings();
+        r.d0 = node.getD0Date();
+        if (r.d0 == null) {
+            r.missing.add("D0 日期未填：没有破壁那天，续没续板判不了");
+            return r;
+        }
+        r.breakDetail = breakDetailService.vo(userId, r.d0);
+        BreakDetailVO.Outcome o = r.breakDetail.getOutcome();
+        r.t1 = o == null ? null : o.getNextDate();
+        return r;
+    }
+
+    /**
+     * 破壁两行的判定，一句话：<b>试探行看次日续没续板，成功行看这天还是不是 ★</b>。
+     *
+     * <p>三种"判不了"分开说：曲线上没有点＝那天没行情（缺数，不许采纳）；有点但事件变了＝
+     * 前提真的不成立了（建议作废，由他点）；试探行的次日还没明细（缺数，不许采纳）。
+     *
+     * <p>助攻、盘口、情绪闸门一律只进 {@code reason} 与 {@code warnings}：他定的口径是
+     * "只算、只展示"，没进 ready 闸门，也就不许在这里偷偷变成否决项。
+     */
+    static NodeSuggestVO decideBreak(NodeEvent node, Readings r, ObjectMapper json) {
+        NodeSuggestVO vo = new NodeSuggestVO();
+        vo.setNodeId(node.getId());
+        // 破壁节点既不是系统A也不是系统B：这一格留空，界面按破壁那一套排面显示
+        vo.setSystemType(null);
+        vo.setNodeType(node.getNodeType());
+        vo.setNodeTypeLabel(NodeService.nodeTypeLabel(node.getNodeType()));
+        vo.setT1Date(r.t1);
+        vo.getMissing().addAll(r.missing);
+
+        boolean probeRow = NodeBreakService.TYPE_PROBE.equals(node.getNodeType());
+        String repair = probeRow ? NodeBreakService.REPAIR_PENDING : null;
+        String status = STATUS_PENDING;
+        String conclusion = null;
+        BreakDetailVO d = r.breakDetail;
+        if (d != null) {
+            if (d.getSubject() != null) {
+                vo.setNodeStock(NodeBreakService.displayOf(
+                        d.getSubject().getName(), d.getSubject().getCode()));
+                vo.setNodeStockMaxBoard(d.getSubject().getBoard());
+            }
+            boolean matches = probeRow
+                    ? BreakDetailVO.EVENT_PROBE.equals(d.getEvent())
+                    : BreakDetailVO.EVENT_BREAK.equals(d.getEvent());
+            if (!matches) {
+                if (Boolean.FALSE.equals(d.getCurvePoint())) {
+                    vo.getMissing().add(r.d0 + " 这天连板高度曲线上没有点："
+                            + trim(d.getDetailMissingReason()));
+                } else {
+                    status = STATUS_INVALID;
+                    conclusion = "破壁事件已不成立";
+                    vo.getWarnings().add("曲线上 " + r.d0 + " 这天"
+                            + (probeRow ? "已经没有 ☆（试探破壁）" : "已经没有 ★（破壁成功）")
+                            + "：这一行的前提在现在的数据里不成立。采纳就是把它作废；"
+                            + "先去连板生态页看清那条线再决定");
+                }
+            } else if (probeRow) {
+                BreakDetailVO.Outcome o = d.getOutcome();
+                if (o == null || BreakDetailVO.OUTCOME_PENDING.equals(o.getResult())) {
+                    vo.getMissing().add(o == null
+                            ? "次一交易日的盘面明细还没落库，续没续板判不了" : o.getReason());
+                } else {
+                    repair = o.getResult();
+                    boolean ok = BreakDetailVO.OUTCOME_SUCCESS.equals(repair);
+                    status = ok ? STATUS_VALID : STATUS_INVALID;
+                    conclusion = ok ? "续板成功" : "未续板失效";
+                }
+            } else {
+                status = STATUS_VALID;
+                conclusion = "破壁成功";
+            }
+        }
+        vo.setSuggestedStatus(status);
+        vo.setStatus(status);
+        vo.setNodeValid(STATUS_VALID.equals(status) ? 1 : 0);
+        vo.setRepairStatus(repair);
+        vo.setRepairStatusLabel(repairLabel(repair));
+        vo.setConclusionReason(conclusion);
+        addBreakReadings(d, vo);
+        vo.setReady(vo.getMissing().isEmpty());
+        vo.setReason(breakReason(r, d, vo, status));
+        vo.setFingerprint(fingerprint(json, vo));
+        return vo;
+    }
+
+    /** 续板判定的中文标签：进指纹的是这一份，diff 出来那句"待判定 → 未续板"他才看得懂。 */
+    static String repairLabel(String repair) {
+        if (repair == null) {
+            return null;
+        }
+        if (NodeBreakService.REPAIR_PENDING.equals(repair)) {
+            return "待判定";
+        }
+        if (BreakDetailVO.OUTCOME_SUCCESS.equals(repair)) {
+            return "续板成功";
+        }
+        return BreakDetailVO.OUTCOME_FAILED.equals(repair) ? "未续板" : repair;
+    }
+
+    /** 助攻／盘口／闸门三条只出声不否决：一条都不进 missing，ready 只由"续没续板判没判得出来"决定。 */
+    private static void addBreakReadings(BreakDetailVO d, NodeSuggestVO vo) {
+        if (d == null) {
+            return;
+        }
+        // 「没有点」和「有点但只有名义天梯」是两种不同的空，两处都得把原因说出来：
+        // 助攻那几格是 null 的时候，界面上留下的空白会被读成"0 只助攻"。
+        if ((Boolean.FALSE.equals(d.getCurvePoint()) || Boolean.FALSE.equals(d.getDetailAvailable()))
+                && notBlank(d.getDetailMissingReason())) {
+            vo.getWarnings().add(d.getDetailMissingReason());
+        }
+        BreakDetailVO.Assist a = d.getAssist();
+        if (a != null) {
+            vo.getWarnings().add("同属性助攻 首" + dash(a.getSameIndustryFirst())
+                    + "／二" + dash(a.getSameIndustrySecond())
+                    + "／3+ " + dash(a.getSameIndustryThirdPlus())
+                    + "，合计 " + dash(a.getTotal()) + " 只（梯队线 " + BreakDetailService.MIN_LADDER_ASSIST
+                    + " 只）——只展示，不进闸门、不改权重");
+        }
+        BreakDetailVO.BoardInfo b = d.getBoard();
+        if (b != null) {
+            vo.getWarnings().add("盘口 形态 " + dash(b.getPattern()) + "、炸板 " + dash(b.getBreakCount())
+                    + " 次、换手率 " + dash(b.getTurnoverRate()) + "%、封单/流通 " + dash(b.getSealRatio())
+                    + "%" + (Boolean.TRUE.equals(b.getOneWordKilling()) ? "（一字缩量断魂刀）" : "")
+                    + "——烂板与缩量他没有数值口径，这里只列数，收不收手你定");
+        }
+        if (d.getGateWarnings() != null) {
+            for (String each : d.getGateWarnings()) {
+                vo.getWarnings().add("情绪闸门｜" + each);
+            }
+        }
+    }
+
+    private static String breakReason(Readings r, BreakDetailVO d, NodeSuggestVO vo, String status) {
+        if (d == null || !vo.getMissing().isEmpty()) {
+            return "判据不齐：" + join(vo.getMissing(), "；");
+        }
+        StringBuilder text = new StringBuilder("破壁｜");
+        text.append(NodeService.nodeTypeLabel(vo.getNodeType())).append(" ").append(r.d0);
+        if (notBlank(vo.getNodeStock())) {
+            text.append(" ").append(vo.getNodeStock());
+            if (vo.getNodeStockMaxBoard() != null) {
+                text.append(" ").append(vo.getNodeStockMaxBoard()).append(" 板");
+            }
+        }
+        if (d.getCeiling() != null) {
+            text.append("，追 ").append(d.getCeiling()).append(" 板破壁线");
+            if (d.getLineOriginDate() != null) {
+                text.append("（这条线来自 ").append(d.getLineOriginDate());
+                if (d.getLineOriginStock() != null) {
+                    text.append(" ").append(d.getLineOriginStock().getName());
+                }
+                text.append("）");
+            }
+        }
+        if (notBlank(vo.getRepairStatusLabel())) {
+            text.append("；续板判定 ").append(vo.getRepairStatusLabel());
+        }
+        if (d.getOutcome() != null && notBlank(d.getOutcome().getReason())) {
+            text.append("：").append(d.getOutcome().getReason());
+        }
+        return text.append(" → ").append(status).toString();
     }
 
     /**
@@ -906,7 +1116,22 @@ public class NodeSuggestService {
     // ---------- 指纹 ----------
 
     static String fingerprint(ObjectMapper json, NodeSuggestVO vo) {
+        Map<String, String> all = fpValues(vo);
         Map<String, Object> values = new LinkedHashMap<>();
+        for (String key : fpKeys(vo)) {
+            values.put(key, all.get(key));
+        }
+        try {
+            return json.writeValueAsString(values);
+        } catch (Exception e) {
+            // 一串字符串值不可能序列化失败；真出了事也不能让建议接口整个红掉
+            return "";
+        }
+    }
+
+    /** 两条路上可能进指纹的格子一次备齐；键表只决定这次取哪几个，值口径两边共用一份。 */
+    private static Map<String, String> fpValues(NodeSuggestVO vo) {
+        Map<String, String> values = new LinkedHashMap<>();
         values.put("status", text(vo.getStatus()));
         values.put("t1Date", vo.getT1Date() == null ? "" : vo.getT1Date().toString());
         values.put("t1AnchorRepack", vo.getT1AnchorRepack() == null ? "" : vo.getT1AnchorRepack().toString());
@@ -920,32 +1145,28 @@ public class NodeSuggestService {
                 vo.getNodeStockMaxBoard() == null ? "" : vo.getNodeStockMaxBoard().toString());
         // 存中文标签不是类型码：与 status 存"有效/失效"同一个道理，比对不一致时那句 diff 他才看得懂
         values.put("nodeType", text(vo.getNodeTypeLabel()));
-        try {
-            return json.writeValueAsString(values);
-        } catch (Exception e) {
-            // 一串字符串值不可能序列化失败；真出了事也不能让建议接口整个红掉
-            return "";
-        }
+        values.put("repairStatus", text(vo.getRepairStatusLabel()));
+        return values;
     }
 
     /**
-     * 他看到的那九个值 vs 现在算出来的九个值，不一样的逐条报出来。
+     * 他看到的那几格 vs 现在算出来的那几格，不一样的逐条报出来。取哪几格由 {@link #fpKeys} 按分支定：
+     * 高低切九格、破壁两行六格。
      *
      * <p>只说"不一致"等于让他猜哪一格变了——这里报的是"晋级数量：5 → 现在算出 6"这种能当场看懂的话。
      */
     static List<String> diff(ObjectMapper json, String seen, NodeSuggestVO fresh) {
         JsonNode was;
-        JsonNode now;
         try {
             was = json.readTree(seen == null || seen.trim().isEmpty() ? "{}" : seen);
-            now = json.readTree(fingerprint(json, fresh));
         } catch (Exception e) {
             throw new IllegalArgumentException("采纳请求里的指纹解析不了，请刷新建议后重试");
         }
+        Map<String, String> now = fpValues(fresh);
         List<String> diffs = new ArrayList<>();
-        for (String key : FP_KEYS) {
+        for (String key : fpKeys(fresh)) {
             String before = was.path(key).asText("");
-            String after = now.path(key).asText("");
+            String after = text(now.get(key));
             if (!before.equals(after)) {
                 diffs.add(FP_LABELS.get(key) + "：" + (before.isEmpty() ? "无" : before)
                         + " → 现在算出 " + (after.isEmpty() ? "无" : after));
@@ -972,6 +1193,11 @@ public class NodeSuggestService {
 
     private static String text(String value) {
         return value == null ? "" : value;
+    }
+
+    /** 没数就写"无"：助攻与盘口这几格 null 是"不知道"，兜成 0 等于把不知道讲成一个读数。 */
+    private static String dash(Object value) {
+        return value == null ? "无" : String.valueOf(value);
     }
 
     private static boolean notBlank(String value) {

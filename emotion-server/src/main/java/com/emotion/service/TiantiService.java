@@ -68,6 +68,11 @@ public class TiantiService {
     private static final int PHASE_LINE = 0;
     private static final int PHASE_CYCLE = 1;
 
+    /** 破壁窗口的左边界：与前端 TiantiView.vue 的 LOOKBACK_DAYS 同值，各改一处会让面板和曲线对不上。 */
+    static final int BREAK_LOOKBACK_DAYS = 760;
+    /** 破壁窗口的右边界：往后多看两周，试探日的"次日"才在窗口里、结得了算。 */
+    static final int BREAK_FORWARD_MARGIN_DAYS = 15;
+
     private final PrdMetricsService prdMetrics;
     private final MarketStockMapper marketStockMapper;
     private final CrossDayQuoteAugmentor crossDayQuote;
@@ -189,6 +194,63 @@ public class TiantiService {
         }
         detectBreaks(out);
         return out;
+    }
+
+    /**
+     * 破壁判定专用窗口：以 {@code date} 为中心，往前 {@link #BREAK_LOOKBACK_DAYS} 天、往后
+     * {@link #BREAK_FORWARD_MARGIN_DAYS} 天，返回<b>整段</b>曲线点。
+     *
+     * <p>为什么不切片直接查那一天：{@link #detectBreaks} 的相位是从列表第一个点播种、按顺序往下推的，
+     * 换个左边界就可能换一个答案。所以"这天是不是试探日"这个问题，全项目只认这一把尺——
+     * 破壁详情面板与立节点都走它，才会和曲线上那颗 ☆/★ 对得上。
+     *
+     * <p>右边界要越过当天：试探成没成判的是<b>次日续不续板</b>，只取到当天的话那一天永远悬着。
+     */
+    public List<TiantiVO.HeightPoint> breakWindow(LocalDate date) {
+        return heightRange(date.minusDays(BREAK_LOOKBACK_DAYS),
+                date.plusDays(BREAK_FORWARD_MARGIN_DAYS));
+    }
+
+    /**
+     * 破壁窗口 + 定位到那一天，连同前后各一个点：判试探成没成要看<b>次日</b>，
+     * 破壁成功日往前补那一次试探要看<b>前一日</b>。
+     * 当天没有涨停明细时 {@link BreakDay#getPoint()} 是 null（不是"没有破壁"，是判不起来）。
+     */
+    public BreakDay breakDay(LocalDate date) {
+        return new BreakDay(breakWindow(date), date);
+    }
+
+    /** {@link #breakDay} 的返回：窗口里的那一天和它的前后各一天。 */
+    public static final class BreakDay {
+        private final TiantiVO.HeightPoint prev;
+        private final TiantiVO.HeightPoint point;
+        private final TiantiVO.HeightPoint next;
+
+        /** 包内可见只为单测能直接搓一个窗口（本类是 final，Mockito mock 不动）；生产侧只走 {@link #breakDay}。 */
+        BreakDay(List<TiantiVO.HeightPoint> pts, LocalDate date) {
+            int idx = -1;
+            for (int i = 0; i < pts.size(); i++) {
+                if (date.equals(pts.get(i).getTradeDate())) {
+                    idx = i;
+                    break;
+                }
+            }
+            this.point = idx < 0 ? null : pts.get(idx);
+            this.prev = idx <= 0 ? null : pts.get(idx - 1);
+            this.next = idx < 0 || idx + 1 >= pts.size() ? null : pts.get(idx + 1);
+        }
+
+        public TiantiVO.HeightPoint getPrev() {
+            return prev;
+        }
+
+        public TiantiVO.HeightPoint getPoint() {
+            return point;
+        }
+
+        public TiantiVO.HeightPoint getNext() {
+            return next;
+        }
     }
 
     /** 冰点/常态/强市三档兜底：混沌高 ≤2 要 4 板、3~4 要 5 板、≥5 要 6 板才算真破壁。 */
@@ -545,8 +607,25 @@ public class TiantiService {
         return codes;
     }
 
-    /** 这只票当天的连板数：读了 2 板以上名单就是它自己的板高，没名单时按"在最高板名单上＝当天最高板"退化。 */
-    private static int boardOf(TiantiVO.HeightPoint p, String code) {
+    /**
+     * 试探日<b>追的那条线</b>：进入这天时挂着的那一条，也就是前一天那个点的 {@code ceiling}。
+     *
+     * <p>不能用当天那个点的 ceiling——追平当天线就跟着它的板高抬（8.28 深中华Ａ 追的是 6 板线，
+     * 它这一站把线抬到 7），拿当天的数说"追 7 板线"等于倒过来说。前一天没有点（窗口首日）才退回当天。
+     * 详情面板与立节点共用这一份读法。
+     */
+    static Integer chasedLine(TiantiVO.HeightPoint prev, TiantiVO.HeightPoint point) {
+        if (prev != null && prev.getCeiling() != null) {
+            return prev.getCeiling();
+        }
+        return point == null ? null : point.getCeiling();
+    }
+
+    /**
+     * 这只票当天的连板数：读了 2 板以上名单就是它自己的板高，没名单时按"在最高板名单上＝当天最高板"退化。
+     * 破壁详情面板读次日板高也走这一个口子，两边对板高的读法必须一致。
+     */
+    static int boardOf(TiantiVO.HeightPoint p, String code) {
         if (code == null) {
             return 0;
         }

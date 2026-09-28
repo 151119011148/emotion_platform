@@ -109,6 +109,10 @@ public class WaveRiderConfig {
         w.put("SWITCH_CROSS", 0.35);
         w.put("FILL_SAME", 0.3);
         w.put("SPLIT_PENDING", 0.2);
+        // 空间轴：试探只是"有票追平了这面壁"，还没确认，0.6 这个数本身就代表未确认；
+        // 续板破壁成功就是新周期在位龙，按满分给。
+        w.put("SPACE_BREAK", 0.6);
+        w.put("SPACE_BREAK_NEXT", 1.0);
         return w;
     }
 
