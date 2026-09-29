@@ -431,7 +431,7 @@
             <el-table-column label="股数" width="76">
               <template #default="{ row }">
                 <el-input-number v-model="row.quantity" size="small" :min="1" :step="100" :controls="false"
-                  style="width: 100%" placeholder="股数" />
+                  style="width: 100%" placeholder="股数" @change="syncStatus(row)" />
               </template>
             </el-table-column>
             <!-- 当日了结：卖价是你真卖出的那一笔，不是收盘价（现价那列是行情自动补的）。
@@ -449,7 +449,8 @@
             <el-table-column label="卖出量" width="80">
               <template #default="{ row }">
                 <el-input-number v-model="row.sellQty" size="small" :min="1" :step="100" :controls="false"
-                  style="width: 100%" :placeholder="row.status === '今日清仓' && row.quantity ? String(row.quantity) : '减仓'" />
+                  style="width: 100%" :placeholder="row.status === '今日清仓' && row.quantity ? String(row.quantity) : '减仓'"
+                  @change="syncStatus(row)" />
               </template>
             </el-table-column>
             <el-table-column label="浮动%" width="78">
@@ -968,6 +969,17 @@ function removePos(row) {
 /** 延迟天/纪律分只对清仓行有意义：切回持仓时清掉，避免留下没人看的脏值 */
 function onStatusChange(row) {
   if (row.status !== '今日清仓') { row.delayDays = null; row.disciplineScore = null }
+}
+/** 卖量 ≥ 股数 → 自动切清仓；反过来改回持仓中。省得每次手拉下拉框。 */
+function syncStatus(row) {
+  const q = Number(row.quantity) || 0
+  const s = Number(row.sellQty) || 0
+  if (q > 0 && s >= q) {
+    row.status = '今日清仓'
+  } else if (row.status === '今日清仓' && s < q) {
+    row.status = '持仓中'
+    onStatusChange(row)
+  }
 }
 
 function round2(v) { return Math.round(Number(v) * 100) / 100 }
