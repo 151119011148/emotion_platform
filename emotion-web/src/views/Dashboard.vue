@@ -66,7 +66,7 @@
           <span class="done-act">{{ p.actualAction }}</span>
           <span class="pending-date">决策日 {{ (p.tradeDate || '').slice(5) }}</span>
         </div>
-        <el-button type="primary" plain size="small" @click="goReview(p)">去台账 →</el-button>
+        <el-button type="primary" plain size="small" @click="goLedger">去台账 →</el-button>
       </div>
     </div>
 
@@ -259,13 +259,23 @@ function goReview(p) {
   router.push({ name: 'Review', query: { date: target, to: 'ledger' } })
 }
 
+/** 已裁决那几行去 D10：改的是这只票现在的持仓状态，跨日台账才看得见全貌；
+    待裁决的「去处理」仍然去复盘页当天那一段，因为要对着当天的行情做动作。 */
+function goLedger() {
+  router.push({ name: 'Positions' })
+}
+
 /* 外溢①的痕迹行：待裁决空了以后显示最近已裁决。
    库里只有 executed 标记、没有执行时间列，所以只能说「最近」，说不成「今日」。 */
 const executedList = ref([])
 async function loadExecuted() {
   try {
-    const res = await recordApi.executedPositions(3)
-    executedList.value = res?.data || []
+    const res = await recordApi.executedPositions(10)
+    // 清仓＝仓位已经出干净了，没有还要回台账改的东西，摆在这里只是噪音。
+    // 多取几条再筛：只取 3 条的话，连着三条都是清仓就整行空掉了。
+    executedList.value = (res?.data || [])
+      .filter((p) => !(p.actualAction || '').includes('清仓'))
+      .slice(0, 3)
   } catch (e) { executedList.value = [] }
 }
 
