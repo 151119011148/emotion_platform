@@ -87,7 +87,25 @@ class NodeSuggestServiceTest {
         r.anchorRows = new ArrayList<>(Arrays.asList(
                 limit("000017", "深中华A", LocalDate.of(2026, 8, 28), 7, "饰品"),
                 down("000017", "深中华A", LocalDate.of(2026, 9, 3))));
+        // 深中华A 是真数据：08-28 成交 12.53 亿、08-27 6.06 亿＝2.07 倍 ≥1.5 → 钱在断板前一日就下来了，
+        // 候选照旧取 D0 的二连板。这条判据在这儿真跑一遍，fixture 与判据就不会各说各话。
+        r.pool = NodeSuggestService.pickCandidatePool(D0, anchorAmounts(),
+                Arrays.asList(D0, T1, LocalDate.of(2026, 9, 2), LocalDate.of(2026, 9, 3),
+                        LocalDate.of(2026, 9, 4)));
         return r;
+    }
+
+    /** 老龙断板前后的成交额（库里单位是元，这里按亿填）。 */
+    private static List<MarketStock> anchorAmounts() {
+        return new ArrayList<>(Arrays.asList(
+                amount("000017", "深中华A", LocalDate.of(2026, 8, 27), 6, "6.06"),
+                amount("000017", "深中华A", LocalDate.of(2026, 8, 28), 7, "12.53")));
+    }
+
+    private static MarketStock amount(String code, String name, LocalDate date, int board, String yi) {
+        MarketStock row = limit(code, name, date, board, "饰品");
+        row.setAmount(new BigDecimal(yi).multiply(new BigDecimal("100000000")));
+        return row;
     }
 
     private static Map<String, Integer> boards(Object[][] pairs) {
@@ -333,8 +351,9 @@ class NodeSuggestServiceTest {
     @Test
     void 指纹不认识的字段一律按不一致处理() {
         NodeSuggestVO fresh = decide(shenZhonghuaA(), knownDay());
-        assertEquals(8, NodeSuggestService.diff(JSON, "{}", fresh).size());
-        assertEquals(8, NodeSuggestService.diff(JSON, null, fresh).size());
+        // 十键里有九格在这份 fixture 上有值（节点类型这一格判不出来，标签为空）；候选池是第十键，非空
+        assertEquals(9, NodeSuggestService.diff(JSON, "{}", fresh).size());
+        assertEquals(9, NodeSuggestService.diff(JSON, null, fresh).size());
     }
 
     @Test

@@ -42,8 +42,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  *   <li>判据不齐就说"不齐"。{@link NodeSuggestVO#getMissing()} 非空即不 ready，前端不给采纳按钮。
  *       缺数时最诱人的写法是把晋级数兜成 0，而那正好撞上他文档里"0 只 → 失败"这条真结论——
  *       一个没拉过行情的日子会被判成失效节点，这是这套系统能犯的最坏错误。</li>
- *   <li>候选池按明细复算，<b>不用</b>他手打的 {@code d0_candidates}。那份名单是盘中的判断，
- *       而判据要的是"D0 那天所有的二板"；两者不一致时在这里看得出来，才谈得上核对。</li>
+ *   <li>候选池按盘面明细复算，<b>不用</b>他手打的 {@code d0_candidates}，也不是写死的"D0 二板"：
+ *       哪天、几板由老龙的放量日决定（{@link #pickCandidatePool}）。他手打的那份是盘中的判断，
+ *       两者不一致时在这里看得出来，才谈得上核对。</li>
  *   <li>近似判据一律标在 {@code source} 与 {@code warnings} 上。明细里跌停价是空的，
  *       "未一字跌停"这条就只能退化成"那天有没有跌停"，说清楚比装准有价值。</li>
  * </ol>
@@ -64,10 +65,26 @@ public class NodeSuggestService {
     /**
      * §三 系统A 的 D0 候选池＝D0 当天全部<b>二板</b>。
      *
-     * <p>候选池打标的复算（{@code NodeService.d0CandidatePools}）用的是同一个数：屏幕上挂
-     * 「D0候选」标的，必须就是判据算晋级率时数的那几只。两处各写一个 2 迟早会对不上。
+     * <p>这是「老龙在断板前一日就放量」那一支的板数：钱在前一日已经下来，那天的首板到 D0 正是二板，
+     * 两个取法数到的是同一批票。前一日没放量时候选池改跟放量日走、板数取首板，见
+     * {@link #pickCandidatePool}——高低切切的是资金，资金没从上面下来就不许去数二板。
+     *
+     * <p>候选池打标（{@code NodeService.d0CandidatePools}）仍用这一个数，它标的是「D0 有候选」这件事；
+     * 接位的候选池现在可能不是 D0，两处口径已不同，这一点在标说明里写明白。
      */
     static final int A_CANDIDATE_BOARD = 2;
+    /**
+     * 放量倍率：老龙当日成交额 ≥ 它<b>上一有成交记录日</b>的 1.5 倍即算放量。
+     *
+     * <p>他文档里「放量」只有定性说法（{@code 04_题材与龙头联动.md} 的「老龙头/高位放量大面」），
+     * 没有数值口径，这条常量是照两个真实样本的分离点定的（金额取自生产库 {@code t_market_stock.amount}）：
+     * 华瓷股份 09-22 是 0.48 亿 ÷ 09-21 0.51 亿＝0.95 倍（未放量）、09-23 炸板当天 16.26 亿＝33.59 倍（放量）；
+     * 深中华Ａ 08-28 是 12.53 亿 ÷ 08-27 6.06 亿＝2.07 倍（放量）。1.2~2.0 之间任意值都判得一样，
+     * <strong>要改口径只改这一个数</strong>。
+     */
+    static final BigDecimal HEAVY_AMOUNT_RATIO = new BigDecimal("1.5");
+    /** 断板后往后找几天「资金下来」的那一天：与 {@link #KILL_WATCH_DAYS} 同一天数，断板后盯几天是一回事。 */
+    static final int HEAVY_SEARCH_DAYS = 5;
     /** §三 系统A 操作流程 T+1「收盘确认：D0 二板晋级率 ≥ 30% → 节点有效」。百分数。 */
     static final BigDecimal A_MIN_RATE = new BigDecimal("30.00");
     /**
@@ -109,13 +126,13 @@ public class NodeSuggestService {
     /**
      * 采纳要落的字段：<b>指纹、比对、写库三处共用这几张表——漏一个字段就是点了个假的采纳。</b>
      *
-     * <p>高低切一族九键（原样不动），破壁两行六键：这里没有老龙反包、没有晋级数与晋级率，
+     * <p>高低切一族十键（原样九键 + 候选池），破壁两行六键：这里没有老龙反包、没有晋级数与晋级率，
      * 多出来的是"次日续没续板"那一格 {@code repairStatus}。{@link #fpKeys} 选哪一张，
      * {@code adopt()} 就落哪几格——两边必须同时改。
      */
     private static final List<String> FP_KEYS = Collections.unmodifiableList(Arrays.asList(
             "status", "t1Date", "t1AnchorRepack", "t1PromotionCount", "t1PromotionRate",
-            "nodeValid", "nodeStock", "nodeStockMaxBoard", "nodeType"));
+            "nodeValid", "nodeStock", "nodeStockMaxBoard", "nodeType", "candidatePool"));
     private static final List<String> BREAK_FP_KEYS = Collections.unmodifiableList(Arrays.asList(
             "status", "t1Date", "nodeStock", "nodeStockMaxBoard", "nodeType", "repairStatus"));
     private static final Map<String, String> FP_LABELS = labels();
@@ -136,6 +153,7 @@ public class NodeSuggestService {
         map.put("nodeStock", "节点票");
         map.put("nodeStockMaxBoard", "节点票最高板数");
         map.put("nodeType", "节点类型");
+        map.put("candidatePool", "候选池");
         map.put("repairStatus", "续板判定");
         return Collections.unmodifiableMap(map);
     }
@@ -208,6 +226,8 @@ public class NodeSuggestService {
             node.setT1AnchorRepack(fresh.getT1AnchorRepack());
             node.setT1PromotionCount(fresh.getT1PromotionCount());
             node.setT1PromotionRate(fresh.getT1PromotionRate());
+            // 接位认的是哪一天的几板：判据跟着老龙放量日走，这一格就是那次采纳认下来的池子
+            node.setCandidatePool(fresh.getCandidatePool());
         }
         node.setStatusNote(cut(fresh.getReason(), STATUS_NOTE_MAX));
         node.setConclusionReason(fresh.getConclusionReason());
@@ -237,15 +257,20 @@ public class NodeSuggestService {
         boolean anchorFuzzy;
         /** 老龙在窗口内的全部明细行，D0 是否跌停 / T+1 是否反包 / 之后有没有跌停都从这几行读。 */
         List<MarketStock> anchorRows = new ArrayList<>();
+        /**
+         * 接位的候选池：哪一天、取几板，由老龙的放量日决定（{@link #pickCandidatePool}）。
+         * 高低切分支必填；判不了放量时它是「D0 + 二板」这一支的兜底，{@code fallback} 标着兜过底。
+         */
+        CandidatePool pool;
         Integer limitDownCount;
         Integer limitUpCount;
         /** D0 起往前（含 D0）的连板高度，倒序：[D0, D0-1, ...]。 */
         List<Integer> heights = new ArrayList<>();
-        /** D0 候选票（A＝全部二板，B＝板块内首板）。 */
+        /** 候选票（放量在前一日＝D0 全部二板；否则＝放量日的首板）。 */
         List<MarketStock> candidates = new ArrayList<>();
         /** T+1 涨停池 code → 连板数。null = 那天没明细，代表"未知"而不是"都没晋级"。 */
         Map<String, Integer> t1Boards;
-        /** 候选票在 D0 之后（含 D0）出现过的最高连板数。 */
+        /** 候选票在<b>候选日</b>之后（含候选日）出现过的最高连板数。 */
         Map<String, Integer> maxBoards = new TreeMap<>();
         /**
          * 分流窗口（D0 之后 max(H−1,1) 个交易日）内逐日的涨停明细，行业已按 TDX 二级行业口径重映射。
@@ -270,6 +295,7 @@ public class NodeSuggestService {
         }
         readFilterRecord(r, r.d0);
         readAnchor(r, node);
+        readCandidatePool(r, node);
         readT1(r, node);
         readCandidates(r, node);
         readSupportWindow(r, node);
@@ -369,36 +395,205 @@ public class NodeSuggestService {
         return null;
     }
 
+    // ---------- 候选池：接位跟老龙的放量日走，不跟断板日走 ----------
+
+    /**
+     * 接位候选池的四种落点。
+     * <ol>
+     *   <li>老龙<b>断板前一日就放量</b> → 候选＝D0 的二连板。钱在前一日已经下来，那天的首板到今天正是二板，
+     *       两种数法数到的是同一批票（深中华Ａ：08-28 七板 12.53 亿对 08-27 6.06 亿，08-31 的国芳集团＝08-28 的首板）。</li>
+     *   <li>前一日<b>明确没放量</b> → 往后找第一个放量日，候选＝<b>那天的首板</b>
+     *       （华瓷股份：09-22 0.48 亿对 09-21 0.51 亿是缩量，09-23 炸板当天 16.26 亿才放量）。</li>
+     *   <li>窗口内<b>没有一天放量</b> → 资金还没从上面下来，接位对象无从谈起：不给候选池，{@link #missing} 说话。</li>
+     *   <li><b>比不了</b>（那几天没有成交额记录） → 退回第 1 条的取法，但 {@link #fallback} 标着：
+     *       这是兜底不是结论，界面上必须出声。</li>
+     * </ol>
+     */
+    static class CandidatePool {
+        LocalDate date;
+        Integer board;
+        boolean fallback;
+        /** 比的哪两天、各多少亿、几倍，全写在这儿：他得看得懂"为什么是这一天的首板"。 */
+        String basis;
+        /** 非空即接位不成立。 */
+        String missing;
+
+        /** 给指纹和界面用的一句：{@code 2026-09-23 首板}。判不出池时是空串。 */
+        String label() {
+            if (date == null || board == null) {
+                return "";
+            }
+            return date + " " + boardName(board);
+        }
+    }
+
+    /**
+     * 纯函数：喂老龙的明细行和 D0 之后的交易日，吐出候选池。不打库、不看用户。
+     *
+     * <p>放量比的是<b>老龙自己上一有成交额记录的那一天</b>，不是全场交易日：它断板前后可能压根不在任何池里，
+     * 那种日子算「未知」，既不能当没放量、也不能当放量——缺数不是结论。跌停日的大额成交一样算，
+     * 他知识库里「老龙头/高位放量大面」说的就是出货也是资金下来。
+     */
+    static CandidatePool pickCandidatePool(LocalDate d0, List<MarketStock> anchorRows,
+                                           List<LocalDate> forwardDates) {
+        CandidatePool out = new CandidatePool();
+        TreeMap<LocalDate, BigDecimal> amounts = new TreeMap<>();
+        for (MarketStock row : anchorRows) {
+            if (row.getTradeDate() == null || row.getAmount() == null) {
+                continue;
+            }
+            BigDecimal best = amounts.get(row.getTradeDate());
+            if (best == null || row.getAmount().compareTo(best) > 0) {
+                amounts.put(row.getTradeDate(), row.getAmount());
+            }
+        }
+        Map.Entry<LocalDate, BigDecimal> prev = amounts.lowerEntry(d0);
+        if (prev == null) {
+            return fallbackTwoBoard(out, d0, "老龙在 " + d0 + " 之前没有任何带成交额的盘面记录，"
+                    + "断板前一日放没放量判不了");
+        }
+        Map.Entry<LocalDate, BigDecimal> base = amounts.lowerEntry(prev.getKey());
+        if (base == null) {
+            return fallbackTwoBoard(out, d0, prev.getKey() + " 是老龙有成交额记录里最早的一天，没有前一笔可比，"
+                    + "放没放量判不了");
+        }
+        BigDecimal prevRatio = ratio(prev.getValue(), base.getValue());
+        if (prevRatio == null) {
+            return fallbackTwoBoard(out, d0, base.getKey() + " 老龙成交额是 0，倍数算不出来，放没放量判不了");
+        }
+        if (prevRatio.compareTo(HEAVY_AMOUNT_RATIO) >= 0) {
+            out.date = d0;
+            out.board = A_CANDIDATE_BOARD;
+            out.basis = "老龙 " + prev.getKey() + " 成交 " + yi(prev.getValue()) + " 亿，是 " + base.getKey()
+                    + " " + yi(base.getValue()) + " 亿的 " + prevRatio.toPlainString() + " 倍 ≥"
+                    + HEAVY_AMOUNT_RATIO.toPlainString() + " → 钱在断板前一日已经下来，候选取 " + d0
+                    + " 的二连板（＝放量日那批首板延续过来的一只不差）";
+            return out;
+        }
+        List<String> trail = new ArrayList<>();
+        for (LocalDate day : forwardDates) {
+            if (day == null || day.isBefore(d0)) {
+                continue;
+            }
+            BigDecimal amount = amounts.get(day);
+            Map.Entry<LocalDate, BigDecimal> before = amounts.lowerEntry(day);
+            if (amount == null || before == null) {
+                trail.add(day + " 无成交额记录·未知");
+                continue;
+            }
+            BigDecimal r = ratio(amount, before.getValue());
+            if (r == null) {
+                trail.add(day + " 前一笔为 0·判不了");
+                continue;
+            }
+            trail.add(day + " " + r.toPlainString() + "倍");
+            if (r.compareTo(HEAVY_AMOUNT_RATIO) >= 0) {
+                out.date = day;
+                out.board = 1;
+                out.basis = "老龙断板前一日 " + prev.getKey() + " 只有 " + yi(prev.getValue()) + " 亿，对 "
+                        + base.getKey() + " " + yi(base.getValue()) + " 亿是 " + prevRatio.toPlainString()
+                        + " 倍——没放量，资金还挂在上面；到 " + day + " 才下来：" + yi(before.getValue())
+                        + " 亿 → " + yi(amount) + " 亿 = " + r.toPlainString() + " 倍 ≥"
+                        + HEAVY_AMOUNT_RATIO.toPlainString() + " → 候选取 " + day + " 的首板";
+                return out;
+            }
+        }
+        out.missing = "老龙断板前一日 " + prev.getKey() + " 没放量（" + yi(prev.getValue()) + " 亿对 "
+                + base.getKey() + " " + yi(base.getValue()) + " 亿 = " + prevRatio.toPlainString() + " 倍），"
+                + "往后 " + HEAVY_SEARCH_DAYS + " 个交易日也没有一天放量（" + join(trail, "、")
+                + "）——资金还没从上面下来，高低切没开始，接位对象无从谈起";
+        return out;
+    }
+
+    /** 兜底走原口径：判不了不等于没放量，但也不该让整页历史节点因为缺数而不能采纳。 */
+    private static CandidatePool fallbackTwoBoard(CandidatePool out, LocalDate d0, String why) {
+        out.date = d0;
+        out.board = A_CANDIDATE_BOARD;
+        out.fallback = true;
+        out.basis = why + "——候选退回原口径取 " + d0 + " 的二连板。这是兜底，不是判出来的结论";
+        return out;
+    }
+
+    /** 倍率：除不动（前一笔为 0 或缺）就返回 null，让调用方走"判不了"那一支，不兜成 0 倍。 */
+    private static BigDecimal ratio(BigDecimal now, BigDecimal before) {
+        if (now == null || before == null || before.signum() <= 0) {
+            return null;
+        }
+        return now.divide(before, 2, RoundingMode.HALF_UP);
+    }
+
+    /** 成交额库里存的是元，说人话按亿。 */
+    private static String yi(BigDecimal amount) {
+        return amount.divide(new BigDecimal("100000000"), 2, RoundingMode.HALF_UP).toPlainString();
+    }
+
+    /**
+     * 取老龙自己的成交额序列 + D0 之后的交易日，交给 {@link #pickCandidatePool}。
+     *
+     * <p>单独一条查询、按代码取，<b>不动 {@code readAnchor} 那份 {@code anchorRows}</b>：那份窗口一放宽，
+     * 「老龙断板后跌停」那句提醒和「最近一次涨停日」会跟着悄悄变远，那是两件不相干的事。
+     */
+    private void readCandidatePool(Readings r, NodeEvent node) {
+        if (SYSTEM_B.equals(node.getSystemType())) {
+            // 系统B 取的是板块内 D0 首板，本来就不数二板；已下线，只供存量脏数据显示建议
+            CandidatePool pool = new CandidatePool();
+            pool.date = r.d0;
+            pool.board = 1;
+            pool.basis = "系统B 按板块取 " + r.d0 + " 的首板，不走放量这条";
+            r.pool = pool;
+            return;
+        }
+        List<MarketStock> amountRows = Boolean.TRUE.equals(r.anchorMatched)
+                ? marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
+                        .eq(MarketStock::getCode, r.anchorCode)
+                        .ge(MarketStock::getTradeDate, r.d0.minusDays(ANCHOR_LOOKBACK_DAYS))
+                        .le(MarketStock::getTradeDate, r.d0.plusDays(HEAVY_SEARCH_DAYS * 3L + 15)))
+                : new ArrayList<>();
+        List<LocalDate> dates = marketStockMapper.listDetailDatesBetween(
+                r.d0, r.d0.plusDays(HEAVY_SEARCH_DAYS * 3L + 15));
+        List<LocalDate> forward = dates.size() > HEAVY_SEARCH_DAYS
+                ? dates.subList(0, HEAVY_SEARCH_DAYS) : dates;
+        r.pool = pickCandidatePool(r.d0, amountRows, forward);
+        if (r.pool.missing != null) {
+            r.missing.add(r.pool.missing);
+        }
+    }
+
+    /** T+1 是<b>候选池</b>的次日：候选日一挪，验证日、晋級、最高板、分流窗口都跟着它，不能还数断板日的下一天。 */
     private void readT1(Readings r, NodeEvent node) {
         if (node.getT1Date() != null) {
             r.t1 = node.getT1Date();
             return;
         }
-        r.t1 = marketStockMapper.nextDetailDate(r.d0);
+        LocalDate from = r.pool != null && r.pool.date != null ? r.pool.date : r.d0;
+        r.t1 = marketStockMapper.nextDetailDate(from);
         if (r.t1 == null) {
-            r.missing.add("D0 之后还没有任何一天的盘面明细：T+1 是验证日，没到就没有结论");
+            r.missing.add(from + " 之后还没有任何一天的盘面明细：T+1 是验证日，没到就没有结论");
         }
     }
 
     /**
-     * 候选池与 T+1 晋级。A 取"D0 全部二板"，B 取"板块内 D0 首板"——
-     * 两套判据唯一一处实质差别（§五 双轨对照表「D0核心标的」那一行）。
+     * 候选池与 T+1 晋级。候选日与板数都由 {@link #pickCandidatePool} 定：
+     * 老龙断板前一日就放量＝取 D0 的二连板，隔天才放量＝取那天的首板；系统B 是存量口径，取板块内 D0 首板。
      */
     private void readCandidates(Readings r, NodeEvent node) {
         boolean systemB = SYSTEM_B.equals(node.getSystemType());
-        int wantBoard = systemB ? 1 : A_CANDIDATE_BOARD;
+        if (r.pool == null || r.pool.date == null || r.pool.board == null) {
+            // 放量窗口内一天都没量：资金还没下来，接位对象无从谈起。缺数话 readCandidatePool 已经说过。
+            return;
+        }
         if (systemB && !notBlank(r.sector)) {
             r.missing.add("系统B 要按板块取 D0 首板，但老龙的行业没反查出来，板块范围无从定");
             return;
         }
-        List<MarketStock> d0Rows = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
-                .eq(MarketStock::getTradeDate, r.d0)
+        List<MarketStock> poolRows = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
+                .eq(MarketStock::getTradeDate, r.pool.date)
                 .eq(MarketStock::getPool, MarketStock.POOL_LIMIT_UP)
-                .eq(MarketStock::getConsecutive, wantBoard));
+                .eq(MarketStock::getConsecutive, r.pool.board));
         if (industryClassify != null) {
-            industryClassify.apply(d0Rows);
+            industryClassify.apply(poolRows);
         }
-        for (MarketStock row : d0Rows) {
+        for (MarketStock row : poolRows) {
             if (systemB && !r.sector.equals(row.getIndustry())) {
                 continue;
             }
@@ -408,8 +603,8 @@ public class NodeSuggestService {
             r.missing.add(emptyPoolMessage(r, systemB));
             return;
         }
-        // 「D0 之后最高板数」只依赖库里已有的明细，跟 T+1 拉没拉没关系。
-        // 必须在下面两个早退之前算：否则 T+1 空缺时，连当天明摆着的二板都显示成"—"。
+        // 「候选日之后最高板数」只依赖库里已有的明细，跟 T+1 拉没拉没关系。
+        // 必须在下面两个早退之前算：否则 T+1 空缺时，连当天明摆着的接位票都显示成"—"。
         fillMaxBoards(r);
         if (r.t1 == null) {
             return;
@@ -430,14 +625,19 @@ public class NodeSuggestService {
         r.t1Boards = boards;
     }
 
-    /** 候选票从 D0 往后逐日的最高连板：本地一次查询，不打任何上游。 */
+    /** 候选日：池子判得出来就跟着池子，判不出来（缺数或没放量）退到 D0，只影响查询窗口不影响结论。 */
+    private static LocalDate candidateDate(Readings r) {
+        return r.pool != null && r.pool.date != null ? r.pool.date : r.d0;
+    }
+
+    /** 候选票从<b>候选日</b>往后逐日的最高连板：本地一次查询，不打任何上游。 */
     private void fillMaxBoards(Readings r) {
         List<String> codes = new ArrayList<>();
         for (MarketStock row : r.candidates) {
             codes.add(row.getCode());
         }
         List<MarketStock> since = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
-                .ge(MarketStock::getTradeDate, r.d0)
+                .ge(MarketStock::getTradeDate, candidateDate(r))
                 .eq(MarketStock::getPool, MarketStock.POOL_LIMIT_UP)
                 .in(MarketStock::getCode, codes));
         for (MarketStock row : since) {
@@ -451,7 +651,8 @@ public class NodeSuggestService {
     }
 
     /**
-     * 高低切的分流窗口：D0 之后 max(H−1, 1) 个交易日的逐日涨停明细。
+     * 高低切的分流窗口：<b>候选日</b>之后 max(H−1, 1) 个交易日的逐日涨停明细。
+     * 助攻是从接位票立住那天开始扩散的，所以窗口跟着候选日走，不跟着断板日走。
      *
      * <p>窗口长度用的是老龙断板前的板高 H，与 {@link TiantiService} 把破壁线钉住
      * {@code max(chaosH - 1, 1)} 个交易日同一个参数——一轮老龙腾出来的位置，市场认它多久，
@@ -469,9 +670,10 @@ public class NodeSuggestService {
         }
         int days = Math.max(h - 1, 1);
         r.splitWindowDays = days;
+        LocalDate from = candidateDate(r).plusDays(1);
         // 交易日没法直接按个数取，先按 3 倍自然日宽取够、再由调用方按天数截断
         List<LocalDate> dates = marketStockMapper.listDetailDatesBetween(
-                r.d0.plusDays(1), r.d0.plusDays(days * 3L + 15));
+                from, from.plusDays(days * 3L + 15));
         r.splitWindowLanded = Math.min(dates.size(), days);
         if (dates.isEmpty()) {
             return;
@@ -510,6 +712,20 @@ public class NodeSuggestService {
         vo.setFilter(buildFilter(r));
         vo.setFilterAllPass(allPass(vo.getFilter()));
         vo.setAnchor(anchorVO(r));
+        // 候选池排在指纹之前：candidatePool 是采纳要落的第十格，晚一步就进不了比对
+        if (r.pool == null) {
+            vo.setCandidateDate(r.d0);
+            vo.setCandidateBoard(candidateBoard(r, systemB));
+            vo.setCandidatePool(poolLabel(r, systemB));
+        } else {
+            vo.setCandidateDate(r.pool.date);
+            vo.setCandidateBoard(r.pool.board);
+            vo.setCandidatePool(r.pool.label());
+            vo.setHeavyBasis(r.pool.basis);
+            if (r.pool.fallback) {
+                vo.getWarnings().add("老龙放没放量判不了｜" + r.pool.basis);
+            }
+        }
 
         List<NodeSuggestVO.Candidate> cands = candidates(r);
         int total = cands.size();
@@ -1040,16 +1256,34 @@ public class NodeSuggestService {
      * 会直接撞进 §三 判定规则里"0 只 → 失败"那一条，把一个没拉过行情的日子判成失效节点。
      */
     static String emptyPoolMessage(Readings r, boolean systemB) {
-        return r.d0 + " 涨停池里" + (systemB ? "没有「" + r.sector + "」板块的首板" : "没有二连板")
-                + "：D0 候选池是空的，晋级率无从算起";
+        return candidateDate(r) + " 涨停池里" + (systemB ? "没有「" + r.sector + "」板块的首板"
+                : "没有" + boardName(candidateBoard(r, systemB)))
+                + "：候选池是空的，晋级率无从算起";
     }
 
     private static String basis(Readings r, boolean systemB, int total) {
         String pool = systemB
-                ? r.d0 + " 涨停池「" + r.sector + "」板块的首板"
-                : r.d0 + " 涨停池的二连板";
+                ? candidateDate(r) + " 涨停池「" + r.sector + "」板块的" + boardName(candidateBoard(r, systemB))
+                : candidateDate(r) + " 涨停池的" + boardName(candidateBoard(r, systemB));
         return "分母＝" + pool + "复算，共 " + total + " 只；"
                 + (r.t1 == null ? "T+1 未定" : "分子＝这些代码在 " + r.t1 + " 仍涨停且连板数更高的只数");
+    }
+
+    /** 候选板数：池子判得出来跟着池子；判不出来退原口径——系统B 首板、系统A 二连板。 */
+    private static int candidateBoard(Readings r, boolean systemB) {
+        if (r.pool != null && r.pool.board != null) {
+            return r.pool.board;
+        }
+        return systemB ? 1 : A_CANDIDATE_BOARD;
+    }
+
+    private static String boardName(int board) {
+        return board == 1 ? "首板" : (board == 2 ? "二连板" : board + " 板");
+    }
+
+    /** 候选池的一句标签：{@code 2026-09-23 首板}。reason、VO 与采纳指纹三处共用这一个写法。 */
+    private static String poolLabel(Readings r, boolean systemB) {
+        return candidateDate(r) + " " + boardName(candidateBoard(r, systemB));
     }
 
     private static String reason(Readings r, NodeSuggestVO vo, boolean systemB,
@@ -1065,7 +1299,7 @@ public class NodeSuggestService {
         text.append("；T+1 ").append(r.t1).append(" 老龙").append(
                 vo.getT1AnchorRepack() == null ? "反包未知"
                         : (vo.getT1AnchorRepack() == 1 ? "反包" : "未反包"));
-        text.append("；").append(systemB ? "板块一进二 " : "D0 二板 ").append(total)
+        text.append("；").append(systemB ? "板块一进二 " : poolLabel(r, false) + " ").append(total)
                 .append(" 只晋级 ").append(count).append(" 只");
         if (rate != null) {
             text.append("（").append(rate.toPlainString()).append("%，").append(systemB
@@ -1145,13 +1379,14 @@ public class NodeSuggestService {
                 vo.getNodeStockMaxBoard() == null ? "" : vo.getNodeStockMaxBoard().toString());
         // 存中文标签不是类型码：与 status 存"有效/失效"同一个道理，比对不一致时那句 diff 他才看得懂
         values.put("nodeType", text(vo.getNodeTypeLabel()));
+        values.put("candidatePool", text(vo.getCandidatePool()));
         values.put("repairStatus", text(vo.getRepairStatusLabel()));
         return values;
     }
 
     /**
      * 他看到的那几格 vs 现在算出来的那几格，不一样的逐条报出来。取哪几格由 {@link #fpKeys} 按分支定：
-     * 高低切九格、破壁两行六格。
+     * 高低切十格、破壁两行六格。
      *
      * <p>只说"不一致"等于让他猜哪一格变了——这里报的是"晋级数量：5 → 现在算出 6"这种能当场看懂的话。
      */

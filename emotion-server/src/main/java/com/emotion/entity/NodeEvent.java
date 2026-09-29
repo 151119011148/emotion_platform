@@ -18,6 +18,15 @@ public class NodeEvent {
     private Integer anchorMaxBoard;
     private LocalDate d0Date;
     private String d0Candidates;
+    /**
+     * 接位候选池：这次采纳认下来的「哪天、几板」，形如 {@code 2026-09-23 首板}
+     * （迁移 V40__node_event_candidate_pool.sql）。
+     *
+     * <p>判据改版前它是写死的「D0 二板」，所以<b>存量的 NULL 就是那一版口径</b>，
+     * 别把它读成"没取候选池"。复算一次必然报出「候选池：无 → 现在算出 …」这条 diff，
+     * 那是判据变了该有的痕迹，不是数据坏了。
+     */
+    private String candidatePool;
     private LocalDate t1Date;
     private Integer t1AnchorRepack;
     private Integer t1PromotionCount;

@@ -459,8 +459,9 @@ public class NodeService {
     }
 
     /**
-     * 按明细复算这些 D0 各自的候选池：当天涨停池里恰好二板的票（§三 系统A，
-     * 板数与 {@code NodeSuggestService.readCandidates} 共用 {@link NodeSuggestService#A_CANDIDATE_BOARD}）。
+     * 按明细复算这些 D0 各自的候选池：当天涨停池里恰好二板的票。
+     * 板数取 {@link NodeSuggestService#A_CANDIDATE_BOARD} 只是同一个数字，<b>不代表与接位同池</b>：
+     * 复算的候选池现在跟着老龙的放量日走（可能是别的日子的首板），这一枚标只回答"D0 当天有哪些二板"。
      *
      * @return D0 → 当天二板的代码集合；那天没有二板就没有这个键
      */

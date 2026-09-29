@@ -240,7 +240,7 @@ class NodeSuggestServiceBreakTest {
 
     // ---------- 指纹：按分支取键 ----------
 
-    /** 破壁行六键，多出"续板判定"、少了高低切那三格：拿九格去比破壁行，每次采纳都会报假的变化。 */
+    /** 破壁行六键，多出"续板判定"、少了高低切那四格：拿十格去比破壁行，每次采纳都会报假的变化。 */
     @Test
     void breakFingerprintCarriesRepairAndDropsSplitColumns() {
         NodeSuggestVO vo = NodeSuggestService.decideBreak(probeRow(),
@@ -255,16 +255,17 @@ class NodeSuggestServiceBreakTest {
         assertTrue(vo.getFingerprint().contains("\"repairStatus\":\"续板成功\""), vo.getFingerprint());
     }
 
-    /** 高低切那九键一个都不许动：破壁分支是加进来的，不是替进去的。 */
+    /** 高低切那十键一个都不许动：破壁分支是加进来的，不是替进去的。 */
     @Test
-    void splitFingerprintKeepsItsNineKeys() {
+    void splitFingerprintKeepsItsTenKeys() {
         NodeSuggestVO vo = new NodeSuggestVO();
         vo.setNodeType(NodeSuggestService.TYPE_FILL_SAME);
 
         List<String> keys = NodeSuggestService.fpKeys(vo);
 
-        assertEquals(9, keys.size(), String.valueOf(keys));
+        assertEquals(10, keys.size(), String.valueOf(keys));
         assertTrue(keys.contains("t1AnchorRepack"), String.valueOf(keys));
+        assertTrue(keys.contains("candidatePool"), String.valueOf(keys));
         assertFalse(keys.contains("repairStatus"), String.valueOf(keys));
     }
 
@@ -291,7 +292,7 @@ class NodeSuggestServiceBreakTest {
         assertTrue(diffs.get(0).contains("续板判定：待判定 → 现在算出 未续板"), diffs.toString());
     }
 
-    /** 高低切的九键 diff 一条都不该看见"续板判定"——两张键表各比各的格。 */
+    /** 高低切的十键 diff 一条都不该看见"续板判定"——两张键表各比各的格。 */
     @Test
     void splitDiffNeverMentionsRepair() {
         ObjectMapper json = new ObjectMapper();
