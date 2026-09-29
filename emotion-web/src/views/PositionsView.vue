@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>持仓与台账</h2>
-        <div class="page-sub">主入口=每日复盘页（卖价/卖出量在持仓台账里填）· 本页=标的维度全生命周期 · 快照日 {{ latestDate || '—' }}</div>
+        <div class="page-sub">本页可就地改快照日的了结与纪律 · 代码/成本/现价与次日四档仍在每日复盘页录 · 快照日 {{ latestDate || '—' }}</div>
       </div>
       <el-button :loading="loading" @click="loadAll">刷新</el-button>
     </div>
@@ -11,6 +11,15 @@
     <!-- 顶部页签：切换四类视图 -->
     <div class="tabs">
       <div v-for="t in TABS" :key="t.key" class="tab" :class="{ on: tab === t.key }" @click="tab = t.key">{{ t.label }}</div>
+    </div>
+
+    <!-- 行内编辑的落点：改动先攒在本地，点保存才 PUT；不点就什么都没发生。
+         写口是「整日替换」，所以这一天的每一行都会原样带上——包括没动的行。 -->
+    <div class="edit-bar" v-if="dirtyCount">
+      <b>{{ dirtyCount }} 行有改动</b>
+      <span class="mini">将整日重写 {{ latestDate }} 的 {{ todayRows.length }} 行持仓（旧行服务端自动快照进历史表）</span>
+      <el-button size="small" type="primary" plain :loading="saving" @click="saveEdits">保存</el-button>
+      <el-button size="small" text @click="edits.clear()">放弃</el-button>
     </div>
 
     <!-- 统计卡：除纪律统计页签外都显示 -->
@@ -56,7 +65,7 @@
     <div class="sec" v-if="tab === 'holding' || tab === 'all'">
       <div class="sec-hd">
         <h2>🏷 当前持仓（{{ holdingRows.length }} 只）</h2>
-        <div class="note">快照日 {{ latestDate || '—' }} 收盘 · 现价自动取行情表，编辑回每日复盘页</div>
+        <div class="note">现价自动取行情表 · 卖价/卖出量/状态/纪律可就地改（状态改「今日清仓」只是台账更正，闭环仍用上方「标记执行」）</div>
       </div>
       <div class="sec-bd">
         <el-table :data="holdingRows" style="width: 100%" empty-text="快照日无持仓中记录">
@@ -90,19 +99,28 @@
           <el-table-column label="现价" width="80">
             <template #default="{ row }">{{ row.currentPrice ?? '—' }}</template>
           </el-table-column>
-          <el-table-column label="股数" width="82">
-            <template #default="{ row }">{{ qtyText(row.quantity) }}</template>
-          </el-table-column>
-          <!-- 当日了结：减仓就长这样——状态还是持仓中，但今天走掉的量与成交价必须看得见 -->
-          <el-table-column label="今日了结" width="110">
+          <el-table-column label="股数" width="86">
             <template #default="{ row }">
-              <template v-if="realizedOf(row) || row.sellPrice">
-                <div><span class="n">{{ row.sellPrice ?? '—' }}</span><span class="mini"> × {{ qtyText(row.sellQty) }}</span></div>
-                <div v-if="realizedOf(row)" class="mini" :class="pctClass(realizedOf(row).pct)">
-                  已实现 {{ fmtPct(realizedOf(row).pct) }}<template v-if="realizedOf(row).amount !== null"> · {{ yuan(realizedOf(row).amount) }}</template>
-                </div>
-              </template>
-              <span v-else class="mini">—</span>
+              <el-input-number :model-value="fieldOf(row, 'quantity')" size="small" :min="1" :step="100" :controls="false"
+                style="width: 100%" placeholder="股数" @change="(v) => setField(row, 'quantity', v)" />
+            </template>
+          </el-table-column>
+          <!-- 卖价是真卖出去那一笔的成交价，「现价」那列是行情给的收盘价——两列不是一回事，所以行内只改前者 -->
+          <el-table-column label="卖价" width="92">
+            <template #default="{ row }">
+              <el-input-number :model-value="fieldOf(row, 'sellPrice')" size="small" :min="0" :precision="2" :controls="false"
+                style="width: 100%" :placeholder="row.currentPrice ? String(row.currentPrice) : '成交'"
+                @change="(v) => setField(row, 'sellPrice', v)" />
+              <div v-if="realizedOf(view(row))" class="mini" :class="pctClass(realizedOf(view(row)).pct)">
+                已实现 {{ fmtPct(realizedOf(view(row)).pct) }}<template v-if="realizedOf(view(row)).amount !== null"> · {{ yuan(realizedOf(view(row)).amount) }}</template>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="卖出量" width="88">
+            <template #default="{ row }">
+              <el-input-number :model-value="fieldOf(row, 'sellQty')" size="small" :min="1" :step="100" :controls="false"
+                style="width: 100%" :placeholder="fieldOf(row, 'status') === '今日清仓' && row.quantity ? String(row.quantity) : '减仓'"
+                @change="(v) => onSellQtyChange(row, v)" />
             </template>
           </el-table-column>
           <el-table-column label="浮动" width="86">
@@ -111,12 +129,23 @@
               <div v-if="pnlOf(row)" class="mini" :class="pctClass(pnlOf(row).amount)">{{ yuan(pnlOf(row).amount) }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="状态" min-width="110">
+          <el-table-column label="状态" width="112">
             <template #default="{ row }">
-              <el-tag v-if="row.discipline === '违约'" type="danger" size="small">违约</el-tag>
-              <el-tag v-else-if="row.discipline === '待执行'" type="warning" size="small">待执行</el-tag>
-              <el-tag v-else-if="row.discipline === '遵守'" type="success" size="small">遵守</el-tag>
-              <el-tag v-else type="info" size="small">持仓中</el-tag>
+              <el-select :model-value="fieldOf(row, 'status')" size="small" @change="(v) => onStatusChange(row, v)">
+                <el-option label="持仓中" value="持仓中" />
+                <el-option label="今日清仓" value="今日清仓" />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column label="纪律" width="118">
+            <template #default="{ row }">
+              <div class="disc-cell">
+                <span class="disc-dot" :class="discClass(fieldOf(row, 'discipline'))"></span>
+                <el-select :model-value="fieldOf(row, 'discipline')" size="small" clearable placeholder="未填"
+                  @change="(v) => setField(row, 'discipline', v)">
+                  <el-option v-for="d in DISCIPLINES" :key="d" :label="d" :value="d" />
+                </el-select>
+              </div>
             </template>
           </el-table-column>
           <el-table-column label="次日决策" min-width="150" show-overflow-tooltip>
@@ -136,28 +165,42 @@
           <el-table-column label="名称" min-width="100">
             <template #default="{ row }"><b>{{ row.stockName }}</b></template>
           </el-table-column>
-          <el-table-column prop="action" label="动作" min-width="130" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.action || '—' }}</template>
+          <el-table-column label="动作" min-width="110">
+            <template #default="{ row }">
+              <el-input :model-value="fieldOf(row, 'action')" size="small" placeholder="今日动作"
+                @change="(v) => setField(row, 'action', v)" />
+            </template>
           </el-table-column>
           <el-table-column label="板数" width="70">
             <template #default="{ row }">{{ row.boardNum ? (row.boardNum > 1 ? row.boardNum + '板' : '首板') : '—' }}</template>
           </el-table-column>
-          <el-table-column label="股数" width="82">
-            <template #default="{ row }">{{ qtyText(row.quantity) }}</template>
-          </el-table-column>
-          <el-table-column label="卖价 × 量" width="112">
+          <el-table-column label="股数" width="86">
             <template #default="{ row }">
-              <span v-if="row.sellPrice" class="n">{{ row.sellPrice }}</span>
-              <span v-if="row.sellPrice" class="mini"> × {{ qtyText(row.sellQty) }}</span>
+              <el-input-number :model-value="fieldOf(row, 'quantity')" size="small" :min="1" :step="100" :controls="false"
+                style="width: 100%" placeholder="股数" @change="(v) => setField(row, 'quantity', v)" />
+            </template>
+          </el-table-column>
+          <el-table-column label="卖价" width="92">
+            <template #default="{ row }">
+              <el-input-number :model-value="fieldOf(row, 'sellPrice')" size="small" :min="0" :precision="2" :controls="false"
+                style="width: 100%" :placeholder="row.currentPrice ? String(row.currentPrice) : '成交'"
+                @change="(v) => setField(row, 'sellPrice', v)" />
               <!-- 没填成交价就是没填：不拿收盘价（现价那列）冒充，只在旁边说明缺的是什么 -->
-              <div v-else class="mini">未填<template v-if="row.currentPrice">（收盘 {{ row.currentPrice }}）</template></div>
+              <div v-if="fieldOf(row, 'sellPrice') == null && row.currentPrice" class="mini">收盘 {{ row.currentPrice }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column label="卖出量" width="88">
+            <template #default="{ row }">
+              <el-input-number :model-value="fieldOf(row, 'sellQty')" size="small" :min="1" :step="100" :controls="false"
+                style="width: 100%" :placeholder="row.quantity ? String(row.quantity) : '减仓'"
+                @change="(v) => onSellQtyChange(row, v)" />
             </template>
           </el-table-column>
           <el-table-column label="盈亏" width="96">
             <template #default="{ row }">
-              <template v-if="realizedOf(row)">
-                <span :class="pctClass(realizedOf(row).pct)">{{ fmtPct(realizedOf(row).pct) }}</span>
-                <div v-if="realizedOf(row).amount !== null" class="mini" :class="pctClass(realizedOf(row).amount)">{{ yuan(realizedOf(row).amount) }}</div>
+              <template v-if="realizedOf(view(row))">
+                <span :class="pctClass(realizedOf(view(row)).pct)">{{ fmtPct(realizedOf(view(row)).pct) }}</span>
+                <div v-if="realizedOf(view(row)).amount !== null" class="mini" :class="pctClass(realizedOf(view(row)).amount)">{{ yuan(realizedOf(view(row)).amount) }}</div>
                 <div v-else class="mini">缺卖出量</div>
               </template>
               <template v-else>
@@ -167,25 +210,43 @@
               </template>
             </template>
           </el-table-column>
-          <el-table-column prop="plannedAction" label="预案" min-width="130" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.plannedAction || '—' }}</template>
-          </el-table-column>
-          <el-table-column label="延迟" width="76">
+          <el-table-column label="应做" min-width="110">
             <template #default="{ row }">
-              <span :class="delayClass(row.delayDays)">{{ row.delayDays == null ? '—' : row.delayDays + '天' }}</span>
+              <el-input :model-value="fieldOf(row, 'plannedAction')" size="small" placeholder="计划"
+                @change="(v) => setField(row, 'plannedAction', v)" />
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="112">
+            <template #default="{ row }">
+              <el-select :model-value="fieldOf(row, 'status')" size="small" @change="(v) => onStatusChange(row, v)">
+                <el-option label="持仓中" value="持仓中" />
+                <el-option label="今日清仓" value="今日清仓" />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column label="延迟" width="80">
+            <template #default="{ row }">
+              <el-input-number :model-value="fieldOf(row, 'delayDays')" size="small" :min="0" :controls="false" style="width: 100%"
+                :disabled="view(row).status !== '今日清仓'" :placeholder="view(row).status !== '今日清仓' ? '清仓' : ''"
+                @change="(v) => setField(row, 'delayDays', v)" />
             </template>
           </el-table-column>
           <el-table-column label="纪律分" width="86">
             <template #default="{ row }">
-              <span class="n" :class="scoreClass(row.disciplineScore)">{{ row.disciplineScore ?? '—' }}</span>
+              <el-input-number :model-value="fieldOf(row, 'disciplineScore')" size="small" :min="0" :max="100" :controls="false"
+                style="width: 100%" :disabled="view(row).status !== '今日清仓'"
+                :placeholder="view(row).status !== '今日清仓' ? '清仓' : ''" @change="(v) => setField(row, 'disciplineScore', v)" />
             </template>
           </el-table-column>
-          <el-table-column label="评价" min-width="110">
+          <el-table-column label="评价" width="118">
             <template #default="{ row }">
-              <el-tag v-if="row.discipline === '遵守'" type="success" size="small">遵守</el-tag>
-              <el-tag v-else-if="row.discipline === '违约'" type="danger" size="small">违约</el-tag>
-              <el-tag v-else-if="row.discipline === '待执行'" type="warning" size="small">待执行</el-tag>
-              <span v-else>—</span>
+              <div class="disc-cell">
+                <span class="disc-dot" :class="discClass(fieldOf(row, 'discipline'))"></span>
+                <el-select :model-value="fieldOf(row, 'discipline')" size="small" clearable placeholder="未填"
+                  @change="(v) => setField(row, 'discipline', v)">
+                  <el-option v-for="d in DISCIPLINES" :key="d" :label="d" :value="d" />
+                </el-select>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -376,13 +437,13 @@
           </div>
         </div>
       </div>
-      <div class="foot">口径说明：纪律分为每行快照的自评分均值；违约=该做没做（discipline=违约）；延迟=清仓距应做时点的天数；已实现只在填了<b>成交价</b>的行上计算，收盘价不算。编辑回每日复盘页。</div>
+      <div class="foot">口径说明：纪律分为每行快照的自评分均值；违约=该做没做（discipline=违约）；延迟=清仓距应做时点的天数；已实现只在填了<b>成交价</b>的行上计算，收盘价不算。</div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { recordApi } from '../api/modules'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useTradingCalendar } from '../utils/tradingCalendar'
@@ -414,6 +475,86 @@ const latestDate = computed(() => (rows.value.length ? rows.value[rows.value.len
 const todayRows = computed(() => rows.value.filter(r => r.tradeDate === latestDate.value))
 const holdingRows = computed(() => todayRows.value.filter(r => r.status === '持仓中'))
 const closedRows = computed(() => todayRows.value.filter(r => r.status === '今日清仓'))
+
+/* ---------------- 行内编辑：只改快照日这两张表 ---------------- */
+/**
+ * 必须与后端 PositionRequest 的字段一一对齐：保存是「整日替换」，
+ * 少发一个键不是"这格不动"，而是把这一列在库里抹掉。
+ */
+const POS_KEYS = ['stockCode', 'stockName', 'costPrice', 'currentPrice', 'quantity', 'sellPrice', 'sellQty', 'floatPct', 'action',
+  'plannedAction', 'discipline', 'industry', 'boardNum', 'status', 'delayDays', 'disciplineScore',
+  'nextDayPlan', 'planOpen', 'planBreak', 'planLow', 'planFall', 'executed', 'actualAction']
+const DISCIPLINES = ['遵守', '违约', '待执行']
+
+/**
+ * 改动叠在 rows 之上、按行 id 记账，不直接写 rows：
+ * 生命周期/卖出流水读的是同一批对象，写脏了会在保存前就把没落库的数字摆上台面。
+ */
+const edits = reactive(new Map())
+const saving = ref(false)
+const dirtyCount = computed(() => edits.size)
+
+function norm(v) {
+  return v === undefined || v === null || v === '' ? null : v
+}
+/** 某一格的当前值（改动优先）。 */
+function fieldOf(row, key) {
+  const e = edits.get(row.id)
+  return e && key in e ? e[key] : row[key]
+}
+/** 整行的当前视图，给已实现/浮动这类派生列用。 */
+function view(row) {
+  const e = edits.get(row.id)
+  return e ? { ...row, ...e } : row
+}
+function setField(row, key, val) {
+  const next = norm(val)
+  const e = { ...(edits.get(row.id) || {}) }
+  if (next === norm(row[key])) delete e[key]
+  else e[key] = next
+  if (Object.keys(e).length) edits.set(row.id, e)
+  else edits.delete(row.id)
+}
+/** 与复盘页同规则：延迟天/纪律分只对清仓行有意义，改回持仓中就清掉，别留没人看的脏值。 */
+function onStatusChange(row, val) {
+  setField(row, 'status', val)
+  if (norm(val) !== '今日清仓') {
+    setField(row, 'delayDays', null)
+    setField(row, 'disciplineScore', null)
+  }
+}
+/** 卖出量 ≥ 股数 = 这一笔走干净了，自动切「今日清仓」，省得再手拉下拉框。 */
+function onSellQtyChange(row, val) {
+  setField(row, 'sellQty', val)
+  const r = view(row)
+  const q = Number(r.quantity) || 0
+  const s = Number(r.sellQty) || 0
+  if (q > 0 && s >= q) onStatusChange(row, '今日清仓')
+  else if (r.status === '今日清仓' && s < q) onStatusChange(row, '持仓中')
+}
+function discClass(v) {
+  return v === '遵守' ? 'grn' : v === '违约' ? 'red' : v === '待执行' ? 'yel' : ''
+}
+
+async function saveEdits() {
+  const date = latestDate.value
+  if (!date || !edits.size) return
+  const payload = todayRows.value.map(r => {
+    const o = {}
+    POS_KEYS.forEach(k => {
+      const v = fieldOf(r, k)
+      o[k] = v === undefined ? null : v
+    })
+    return o
+  })
+  saving.value = true
+  try {
+    await recordApi.savePositions(date, payload)
+    edits.clear()
+    ElMessage.success(`已整日重写 ${date} 的 ${payload.length} 行（旧行已自动快照）`)
+    await loadAll()
+  } catch (e) { /* 拦截器已弹：改动留着，别让人重敲一遍 */ } finally { saving.value = false }
+}
 
 /** 顶部卡：持仓均值浮动。 */
 const holdingAvgPct = computed(() => avgOf(holdingRows.value.map(r => r.floatPct)))
@@ -587,10 +728,6 @@ function scoreClass(v) {
   if (v == null) return ''
   return v >= 80 ? 'grn' : v >= 60 ? 'yel' : 'red'
 }
-function delayClass(v) {
-  if (v == null) return ''
-  return v === 0 ? 'grn' : v >= 2 ? 'red' : 'yel'
-}
 /** 生命周期时间轴：把一行快照翻译成 事件/注脚。 */
 function lifeEvent(t) {
   if (t.status === '今日清仓') return t.action || '清仓'
@@ -640,6 +777,8 @@ async function markExecuted(row) {
 
 async function loadAll() {
   loading.value = true
+  // 整日替换后行 id 会变，叠在旧 id 上的改动既渲染不出来也不会进 payload——先清掉，别留幽灵改动
+  edits.clear()
   try {
     const [allRes, pendRes] = await Promise.all([
       recordApi.allPositions(365),
@@ -691,6 +830,19 @@ onMounted(() => {
 .alert { background: rgba(210, 153, 34, 0.08); border: 1px solid rgba(210, 153, 34, 0.25); border-left: 3px solid #d29922; border-radius: 6px; padding: 9px 12px; margin-bottom: 14px; font-size: 12px; color: #c9d1d9; }
 .alert b { color: #d29922; }
 .alert-btn { margin-left: 4px; }
+
+/* 行内编辑的保存条：只在有未保存改动时占位，平时不挤版面 */
+.edit-bar { display: flex; align-items: center; gap: 10px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-left: 3px solid #3b82f6; border-radius: 6px; padding: 8px 12px; margin-bottom: 14px; font-size: 12px; color: #c9d1d9; }
+.edit-bar b { color: #58a6ff; white-space: nowrap; }
+.edit-bar .mini { flex: 1; }
+
+/* 纪律下拉前的色点：下拉框本身不带颜色语义，违约/遵守还是得一眼扫出来 */
+.disc-cell { display: flex; align-items: center; gap: 5px; }
+.disc-cell .el-select { flex: 1; }
+.disc-dot { width: 7px; height: 7px; border-radius: 50%; background: #4b5866; flex-shrink: 0; }
+.disc-dot.grn { background: #3fb950; }
+.disc-dot.red { background: #f85149; }
+.disc-dot.yel { background: #d29922; }
 
 /* 次日处理决策 */
 .dec-row { display: flex; gap: 12px; align-items: stretch; padding: 10px 0; border-bottom: 1px solid #21262d; }
