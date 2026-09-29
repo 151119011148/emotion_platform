@@ -372,9 +372,12 @@ public class WaveRiderEngine {
             double riskPenalty = riskPenalty(m, cfg);
             String riskFlag = riskFlag(m, cfg, riskPenalty);
             boolean isTopOfTopic = nz(m.getConsecutive()) >= topicTop.getOrDefault(topic(m), 0);
-            double nodePart = nodePart(nodeStocks.get(m.getCode()), cfg.getNodeTypeWeights());
+            NodeEvent node = nodeStocks.get(m.getCode());
+            double nodePart = nodePart(node, cfg.getNodeTypeWeights());
+            double boardPart = maxBoard > 0 ? (double) nz(m.getConsecutive()) / maxBoard : 0;
+            boolean early = isEarlySeal(m.getFirstSealTime());
 
-            double score = weightedScore(cfg, m, maxBoard, isTopOfTopic, riskPenalty, nodePart);
+            double score = weightedScore(cfg, boardPart, isTopOfTopic, nodePart, early, riskPenalty);
             scores.add(score);
             maxScore = Math.max(maxScore, score);
 
@@ -391,7 +394,9 @@ public class WaveRiderEngine {
             c.setPositionType(topic(m) + (isTopOfTopic ? " 最高板" : " " + nz(m.getConsecutive()) + " 板"));
             c.setScore(BigDecimal.valueOf(score).setScale(2, RoundingMode.HALF_UP));
             c.setRiskFlag(riskFlag);
-            c.setFilterDetailJson(filterDetail(m, cfg));
+            c.setFilterDetailJson(filterDetail(m, cfg,
+                    scoreDetail(cfg, m, maxBoard, boardPart, isTopOfTopic, node, nodePart,
+                            early, riskPenalty, riskFlag, score)));
             c.setCreatedAt(LocalDateTime.now());
             rows.add(c);
         }
@@ -463,16 +468,82 @@ public class WaveRiderEngine {
     }
 
     /** PRD §6.2 的评分公式。算出来的分只作展示与追溯，默认不参与排序（见类注释）。 */
-    private double weightedScore(WaveRiderConfig cfg, MarketStock m, int maxBoard,
-                                 boolean isTopOfTopic, double riskPenalty, double nodePart) {
+    private double weightedScore(WaveRiderConfig cfg, double boardPart, boolean isTopOfTopic,
+                                 double nodePart, boolean early, double riskPenalty) {
         Map<String, Double> w = cfg.getScoreWeights();
-        double boardPart = maxBoard > 0 ? (double) nz(m.getConsecutive()) / maxBoard : 0;
-        boolean early = isEarlySeal(m.getFirstSealTime());
         return w("board", w) * boardPart
                 + w("position", w) * (isTopOfTopic ? 1 : 0)
                 + w("node", w) * nodePart
                 + w("timing", w) * (early ? 1 : 0)
                 - w("risk", w) * riskPenalty;
+    }
+
+    /**
+     * 「得分是怎么来的」——界面上「得分」格悬浮看到的就是它。
+     *
+     * <p>分量一律由 {@link #build} 算好再传进来，这里不再重算：
+     * 总分与明细一旦各算一遍，页面上的数就成了第二份真相，漂移了还查不出来。
+     *
+     * <p><b>只给数与原始值，不给文案</b>：中文名、单位、「为什么这项没拿到分」的解释都在前端拼，
+     * 后端写死文案等于把展示层搬进引擎（同 {@code alertFlag} / {@code riskFlag} 的分工）。
+     *
+     * <p>历史行没有这段（老数据 filterDetailJson 里没有 score_breakdown），
+     * 前端按「取不到就只显示总分」降级，重跑当日即可补齐——不回填、不猜。
+     */
+    private Map<String, Object> scoreDetail(WaveRiderConfig cfg, MarketStock m, int maxBoard,
+                                            double boardPart, boolean isTopOfTopic, NodeEvent node,
+                                            double nodePart, boolean early, double riskPenalty,
+                                            String riskFlag, double score) {
+        Map<String, Double> w = cfg.getScoreWeights();
+        List<Map<String, Object>> terms = new ArrayList<>();
+
+        Map<String, Object> board = term("board", w("board", w), boardPart);
+        board.put("board", nz(m.getConsecutive()));
+        board.put("max_board", maxBoard);
+        terms.add(board);
+
+        terms.add(term("position", w("position", w), isTopOfTopic ? 1 : 0));
+
+        Map<String, Object> nodeTerm = term("node", w("node", w), nodePart);
+        // 类型系数从哪来：null 表示它不是节点票，有类型但权重表查不到则是 0，判据见 nodePart
+        nodeTerm.put("node_type", node == null ? null : node.getNodeType());
+        terms.add(nodeTerm);
+
+        Map<String, Object> timing = term("timing", w("timing", w), early ? 1 : 0);
+        timing.put("first_seal_time", m.getFirstSealTime());
+        terms.add(timing);
+
+        // 风险是唯一一项负值：扣分而非加分，value 取负号
+        Map<String, Object> risk = term("risk", w("risk", w), riskPenalty);
+        risk.put("value", -round4(w("risk", w) * riskPenalty));
+        risk.put("risk_flag", riskFlag);
+        terms.add(risk);
+
+        Map<String, Object> d = new LinkedHashMap<>();
+        d.put("terms", terms);
+        d.put("max_board", maxBoard);
+        // 满分 = 四项正权重之和（各项 raw 拉满时）；不含风险项，它是扣的
+        d.put("ceiling", round2(w("board", w) + w("position", w) + w("node", w) + w("timing", w)));
+        d.put("score", round2(score));
+        return d;
+    }
+
+    /** 单项：权重 × 原始值 = 得分。 */
+    private static Map<String, Object> term(String key, double weight, double raw) {
+        Map<String, Object> t = new LinkedHashMap<>();
+        t.put("key", key);
+        t.put("weight", round4(weight));
+        t.put("raw", round4(raw));
+        t.put("value", round4(weight * raw));
+        return t;
+    }
+
+    private static double round2(double v) {
+        return BigDecimal.valueOf(v).setScale(2, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    private static double round4(double v) {
+        return BigDecimal.valueOf(v).setScale(4, RoundingMode.HALF_UP).doubleValue();
     }
 
     /**
@@ -531,8 +602,8 @@ public class WaveRiderEngine {
         return lowTurnover && lowAmount;
     }
 
-    /** 过滤器逐条判定明细。界面「点开追溯」看到的就是它。 */
-    private String filterDetail(MarketStock m, WaveRiderConfig cfg) {
+    /** 过滤器逐条判定明细 + 得分构成。界面「点开追溯」看到的就是它。 */
+    private String filterDetail(MarketStock m, WaveRiderConfig cfg, Map<String, Object> scoreDetail) {
         Map<String, Object> d = new LinkedHashMap<>();
         d.put("code", m.getCode());
         d.put("board", m.getConsecutive());
@@ -547,6 +618,7 @@ public class WaveRiderEngine {
         d.put("filter_min_amount_yi", cfg.getFilterMinAmount());
         d.put("entry_gap_max", cfg.getEntryGapMax());
         d.put("position_mode", cfg.getPositionMode());
+        d.put("score_breakdown", scoreDetail);
         return toJson(d);
     }
 

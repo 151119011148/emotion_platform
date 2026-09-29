@@ -56,8 +56,8 @@
       </template>
 
       <el-table :data="candidates" row-key="code" size="small" stripe :row-class-name="rowClass" style="width: 100%">
-        <el-table-column prop="rankNo" label="#" width="52" />
-        <el-table-column label="名称" min-width="200">
+        <el-table-column prop="rankNo" label="#" width="48" align="center" />
+        <el-table-column label="名称" min-width="150">
           <template #default="{ row }">
             <div class="nm">
               <el-tooltip placement="top" :show-after="150">
@@ -73,12 +73,12 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="连板" prop="board" width="86" sortable>
+        <el-table-column label="连板" prop="board" width="72" align="center" sortable>
           <template #default="{ row }">
             <span class="board">{{ row.board }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="题材" min-width="190">
+        <el-table-column label="题材" min-width="240">
           <template #default="{ row }">
             <span v-if="row.tdxThemes && row.tdxThemes.length" class="thm">
               <el-tag v-for="t in topThemes(row)" :key="t.name" size="small" effect="plain"
@@ -90,14 +90,15 @@
               title="这只票在通达信题材索引里没有记录，退回引擎分组用的行业">{{ row.topic || '—' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="封单强度" width="142" sortable :sort-method="compareSeal">
+        <el-table-column label="封单强度" width="118" align="right" header-align="right" sortable
+          :sort-method="compareSeal">
           <template #default="{ row }">
             <span v-if="sealRatio(row) != null" class="num">{{ sealRatio(row).toFixed(2) }}%</span>
             <span v-else class="mut">—</span>
             <el-tag v-if="needQueue(row)" size="small" type="warning" effect="plain" class="qtag">排队</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="score" label="得分" width="122" sortable>
+        <el-table-column prop="score" label="得分" width="112" align="right" header-align="right" sortable>
           <template #header>
             <span class="th-score">
               得分
@@ -130,15 +131,50 @@
             </span>
           </template>
           <template #default="{ row }">
-            <span class="num">{{ row.score == null ? '—' : Number(row.score).toFixed(2) }}</span>
+            <el-tooltip placement="left" effect="dark" :show-after="120">
+              <template #content>
+                <div class="sr">
+                  <b class="sr-title">{{ row.name }} · 得分构成</b>
+                  <template v-if="bdOf(row)">
+                    <div class="sr-note sr-note-top">
+                      满分 {{ fmt2(bdOf(row).ceiling) }}（四项正权重之和，不含扣分）
+                    </div>
+                    <div v-for="t in bdOf(row).terms" :key="t.key" class="sr-row">
+                      <span class="sr-w">{{ fmt2(t.weight) }} ×</span>
+                      <span class="sr-body">
+                        <span class="sr-n">{{ termName(t.key) }}</span>
+                        <span class="sr-d">{{ rawText(t) }}</span>
+                      </span>
+                      <span class="sr-v" :class="termCls(t.value)">{{ signed(t.value) }}</span>
+                    </div>
+                    <div class="sr-foot">
+                      合计 <b>{{ fmt2(bdOf(row).score) }}</b> / 满分 {{ fmt2(bdOf(row).ceiling) }}
+                      · 当日最高板 {{ bdOf(row).max_board }} 板
+                    </div>
+                  </template>
+                  <div v-else class="sr-note">
+                    这一行产出于明细功能之前，只存了总分；重跑当日即可补上构成，这里不猜。
+                  </div>
+                </div>
+              </template>
+              <span class="sc">
+                <span :class="['sc-val', { 'sc-empty': row.score == null }]">
+                  {{ row.score == null ? '—' : Number(row.score).toFixed(2) }}
+                </span>
+                <span :class="['sc-bar', { 'sc-bar-none': !bdOf(row) }]">
+                  <i v-for="(s, i) in segsOf(row)" :key="i" :class="{ pen: s.pen }"
+                    :style="{ width: s.width, background: s.pen ? '' : s.color }" />
+                </span>
+              </span>
+            </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="建议仓位" width="88">
+        <el-table-column label="建议仓位" width="84" align="right" header-align="right">
           <template #default="{ row }">
             <span class="num pos">{{ posText(row.suggestPosition) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="警示" width="128">
+        <el-table-column label="警示" width="112">
           <template #default="{ row }">
             <span v-if="row.alertFlag || row.riskFlag" class="alerts">
               <el-tag v-if="row.alertFlag" size="small" type="danger" effect="dark"
@@ -149,7 +185,7 @@
             <span v-else class="mut">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="T+1 跳空" width="90">
+        <el-table-column label="T+1 跳空" width="86" align="right" header-align="right">
           <template #default="{ row }">
             <span v-if="t1Of(row) && t1Of(row).gapPct != null" :class="['num', cls(t1Of(row).gapPct)]">
               {{ pct(t1Of(row).gapPct) }}
@@ -157,7 +193,7 @@
             <span v-else class="mut">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="打板收益" width="94">
+        <el-table-column label="打板收益" width="86" align="right" header-align="right">
           <template #default="{ row }">
             <span v-if="t1Of(row) && t1Of(row).t1ChangePct != null" :class="['num', cls(t1Of(row).t1ChangePct)]">
               {{ pct(t1Of(row).t1ChangePct) }}
@@ -165,7 +201,7 @@
             <span v-else class="mut">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="接盘收益" width="94">
+        <el-table-column label="接盘收益" width="86" align="right" header-align="right">
           <template #default="{ row }">
             <span v-if="bPct(row) != null" :class="['num', cls(bPct(row))]">
               <b>{{ pct(bPct(row)) }}</b>
@@ -173,7 +209,7 @@
             <span v-else class="mut">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="结果" width="90">
+        <el-table-column label="结果" width="76" align="center">
           <template #default="{ row }">
             <span v-if="!t1Of(row)" class="mut">待验证</span>
             <el-tag v-else-if="t1Of(row).promoted === 1" size="small" type="danger" effect="dark">晋级</el-tag>
@@ -515,6 +551,101 @@ function compareSeal(a, b) {
 function needQueue(row) {
   const r = sealRatio(row)
   return r != null && r >= 150
+}
+
+/**
+ * 得分明细。后端把四项的分量写进 filterDetailJson.score_breakdown（只展示、不参与排序），
+ * 前端一律<b>不重算</b>——重算一旦与引擎的公式漂移，页面上的数就成了第二份真相，且查不出来。
+ * 老数据没有这一段（明细功能是后加的）：取不到就只显示总分，重跑当日补齐，不猜。
+ */
+function bdOf(row) {
+  if (!row || !row.filterDetailJson) return null
+  try {
+    return JSON.parse(row.filterDetailJson).score_breakdown || null
+  } catch (e) {
+    return null
+  }
+}
+
+/** 四项的名称与色。与「得分构成」悬浮里从左到右的顺序一致：高度 → 身位 → 节点 → 早封。 */
+const TERM_NAME = { board: '全场高度', position: '身位板', node: '节点', timing: '早封板', risk: '风险' }
+const TERM_COLOR = { board: '#fbbf24', position: '#38bdf8', node: '#f87171', timing: '#a78bfa', risk: '#34d399' }
+
+function termName(key) {
+  return TERM_NAME[key] || key
+}
+
+/**
+ * 「得分」格里那条迷你堆叠条的切分：条的总长恒等于<b>满分</b>，
+ * 实心段＝实际拿到的加分（按项分色），右端的<b>斜纹段</b>＝被风险扣掉的那截。
+ * 所以「实心＋斜纹」的长度就是扣前得分占满分的比例，扣了多少一眼看得到。
+ */
+function segsOf(row) {
+  const b = bdOf(row)
+  if (!b) return []
+  const ceiling = Number(b.ceiling) || 1
+  const segs = []
+  for (const t of b.terms || []) {
+    if (t.key === 'risk') continue
+    const v = Number(t.value) || 0
+    if (v <= 0) continue
+    segs.push({ color: TERM_COLOR[t.key] || '#8899a6', width: (v / ceiling * 100).toFixed(2) + '%' })
+  }
+  const risk = (b.terms || []).find((t) => t.key === 'risk')
+  const pen = risk ? Math.abs(Number(risk.value) || 0) : 0
+  if (pen > 0) {
+    segs.push({ pen: true, width: (pen / ceiling * 100).toFixed(2) + '%' })
+  }
+  return segs
+}
+
+/**
+ * 每项「原始值」那一句——回答「这项为什么没拿到分」。
+ * 文案在这一层拼，后端只给数与原始值（节点类型、首封时间、连板数）。
+ */
+function rawText(t) {
+  if (!t) return ''
+  const raw = Number(t.raw) || 0
+  if (t.key === 'board') {
+    return (t.board || 0) + '板 ÷ 当日最高 ' + (t.max_board || 0) + '板 = ' + fmt2(raw)
+  }
+  if (t.key === 'position') {
+    return raw ? '题材内最高板（是）' : '同题材有更高板（否）'
+  }
+  if (t.key === 'node') {
+    const TYPE_TEXT = { START: '启动 1.0', SWITCH: '切换 0.8', DIVERGE: '分歧 0.6' }
+    if (raw <= 0) return '这段窗口里没有它（不是节点票）'
+    if (t.node_type == null) return '节点票 · 未录类型，按启动 1.0 计'
+    return '节点类型 ' + (TYPE_TEXT[t.node_type] || t.node_type) + ' → ' + fmt2(raw)
+  }
+  if (t.key === 'timing') {
+    return (raw ? '10:00 前首封（' : '10:00 后首封（') + sealClock(t.first_seal_time) + '）'
+  }
+  if (t.key === 'risk') {
+    return t.risk_flag ? '命中 ' + riskText(t.risk_flag) + '，扣满' : '无'
+  }
+  return String(t.raw)
+}
+
+/** first_seal_time 是 5 位/6 位混存（94536 / 104156），一律先补零再切。 */
+function sealClock(v) {
+  if (v == null || v === '') return '—'
+  const s = String(v).padStart(6, '0')
+  return s.slice(0, 2) + ':' + s.slice(2, 4)
+}
+
+function fmt2(v) {
+  return v == null ? '—' : Number(v).toFixed(2)
+}
+
+function signed(v) {
+  const n = Number(v) || 0
+  return (n > 0 ? '+' : '') + n.toFixed(2)
+}
+
+/** 扣分项才上色（绿＝负向）；加分用常色，避免和「涨红」的行情色撞语义。 */
+function termCls(v) {
+  return v == null ? '' : (Number(v) < 0 ? 'down' : '')
 }
 
 /** 中国市场惯例：涨红跌绿。 */
@@ -936,6 +1067,79 @@ onMounted(async () => {
 }
 .mb12 {
   margin-bottom: 12px;
+}
+
+/* ===== 得分格：总分 + 迷你堆叠条 =====
+   条宽固定 52px、总长恒等于满分，所以不同行之间可以直接比「填了几成」；
+   列宽因此只从 86 加到 112，不用为了塞明细把表格撑开。 */
+.sc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  cursor: help;
+}
+.sc-val {
+  color: #e1e8ed;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.sc-val.sc-empty {
+  color: #6b7c8c;
+  font-weight: 400;
+}
+.sc-bar {
+  display: inline-flex;
+  flex: none;
+  width: 52px;
+  height: 7px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #0f1720;
+  border: 1px solid #3a4d63;
+}
+/* 老行没有明细：给个空槽而不是空白，否则「没数据」和「得 0 分」长得一样 */
+.sc-bar-none {
+  border-style: dashed;
+  border-color: #2d3748;
+}
+.sc-bar i {
+  display: block;
+  height: 100%;
+}
+/* 风险扣分：斜纹，跟加分的实心段区分开——分数高不等于没扣分 */
+.sc-bar i.pen {
+  background: repeating-linear-gradient(45deg, #34d399, #34d399 2px, #0f1720 2px, #0f1720 4px);
+}
+
+/* 得分明细面板：每行「权重 × 原始值 = 得分」 */
+.sr-row {
+  display: grid;
+  grid-template-columns: 46px 1fr 46px;
+  gap: 6px;
+  align-items: baseline;
+  margin-bottom: 5px;
+}
+.sr-v {
+  color: #e1e8ed;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.sr-foot {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid #3a4d63;
+  color: #8899a6;
+  font-size: 11.5px;
+}
+.sr-foot b {
+  color: #fbbf24;
+  font-variant-numeric: tabular-nums;
+}
+.sr-note-top {
+  margin: 0 0 7px;
+  padding: 0;
+  border: 0;
 }
 
 /* 表头「得分」的说明悬浮。
