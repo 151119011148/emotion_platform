@@ -57,6 +57,19 @@
       </div>
     </div>
 
+    <!-- 待裁决空了以后的痕迹行：裁决关闭不等于没发生过，也保住跳台账的入口 -->
+    <div v-else-if="executedList.length" class="pending-card done-card">
+      <div class="pending-head done-head">✅ 最近已裁决 <span class="pending-count">{{ executedList.length }} 条</span></div>
+      <div v-for="p in executedList" :key="p.id" class="pending-body done-body">
+        <div class="pending-title">
+          <b>{{ p.stockName }}</b> <span class="muted">{{ p.stockCode }}</span>
+          <span class="done-act">{{ p.actualAction }}</span>
+          <span class="pending-date">决策日 {{ (p.tradeDate || '').slice(5) }}</span>
+        </div>
+        <el-button type="primary" plain size="small" @click="goReview(p)">去台账 →</el-button>
+      </div>
+    </div>
+
     <!-- 曲线：紧贴页头温度下方；点可以点——点了切到那天的仪表盘 -->
     <div class="chart-section">
       <div class="chart-controls">
@@ -246,6 +259,16 @@ function goReview(p) {
   router.push({ name: 'Review', query: { date: target, to: 'ledger' } })
 }
 
+/* 外溢①的痕迹行：待裁决空了以后显示最近已裁决。
+   库里只有 executed 标记、没有执行时间列，所以只能说「最近」，说不成「今日」。 */
+const executedList = ref([])
+async function loadExecuted() {
+  try {
+    const res = await recordApi.executedPositions(3)
+    executedList.value = res?.data || []
+  } catch (e) { executedList.value = [] }
+}
+
 /** 点击曲线点：整页切到那天（页头温度、五维卡、阶段定位都跟着换）。 */
 async function loadByDate(date) {
   loadError.value = ''
@@ -275,6 +298,7 @@ onMounted(() => {
   loadCurve()
   loadAdvice()
   loadPending()
+  loadExecuted()
 })
 </script>
 
@@ -434,6 +458,14 @@ onMounted(() => {
 .pending-date { color: #94a3b8; font-size: 12px; font-weight: 400; }
 .pending-plan { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; }
 .pend-tier { background: #1c2a3a; color: #e2e8f0; font-size: 12px; padding: 3px 9px; border-radius: 6px; border: 1px solid #2a3b4f; }
+
+/* 最近已裁决：沿用待裁决卡的形状，配色降到青绿——已闭环，不再催人 */
+.done-card { background: linear-gradient(135deg, rgba(16,185,129,.10), rgba(16,185,129,.03)); border-color: #0f766e; }
+.done-head { color: #34d399; }
+.done-card .pending-count { color: #34d399; }
+.done-card .pending-body + .pending-body { border-top-color: rgba(15,118,110,.35); }
+.done-body .pending-title { flex: 1; }
+.done-act { background: #12332a; color: #6ee7b7; font-size: 12px; padding: 3px 9px; border-radius: 6px; border: 1px solid #1f5c4a; }
 
 @media (max-width: 960px) {
   .bottom-row {

@@ -264,6 +264,14 @@ public class DailyRecordController {
         return ApiResponse.ok(reviewLedgerService.pendingPositions(userId, b, limit));
     }
 
+    /** 外溢点①的痕迹行：待裁决列表空了以后，仪表盘用它显示「最近已裁决」，limit 缺省 3。 */
+    @GetMapping("/positions/executed")
+    public ApiResponse<List<com.emotion.entity.Position>> executedPositions(Authentication auth,
+                                                                            @RequestParam(defaultValue = "3") int limit) {
+        Long userId = (Long) auth.getPrincipal();
+        return ApiResponse.ok(reviewLedgerService.executedPositions(userId, limit));
+    }
+
     /** 标记某持仓已执行：回填真实动作，executed 置 1，闭环完成。 */
     @PostMapping("/positions/{id}/execute")
     public ApiResponse<Boolean> markExecuted(Authentication auth,
