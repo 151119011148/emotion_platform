@@ -92,7 +92,7 @@ public class ReviewFetchService {
         public Integer rows;
         public String msg;
 
-        Event(String task, String status, Integer rows, String msg) {
+        public Event(String task, String status, Integer rows, String msg) {
             this.task = task;
             this.status = status;
             this.rows = rows;
