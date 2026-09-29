@@ -27,18 +27,25 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 /**
  * 接位候选池跟着<b>老龙的放量日</b>走，不跟着断板日走。
  *
- * <p>他原话：高低切本质是资金高低切，资金什么时候从上面下来，看的是老龙放量那一天。所以
- * 「断板当天取二板」只是<b>放量发生在断板前一日</b>时的一种巧合——那天的首板到 D0 正好是二板。
- * 两例都取自生产库 {@code t_market_stock} 的真实成交额，一条对一条：
+ * <p>他原话：高低切本质是资金高低切，资金什么时候从上面下来，看的是老龙放量那一天。所以池子的日子
+ * ＝<b>放量那一天</b>，板数取当天已经站上二板的那批（钱放出来的当天就有人接，接得住的正是已经往上晋了一级的票）。
+ * 放量比的基准是<b>这段连板到前一天为止的常态量（有成交额那几天的中位数）</b>，不是前一交易日：
+ * 缩量不等于钱收回去了。金额全部取自生产库 {@code t_market_stock.amount}，一条对一条：
  * <ul>
- *   <li>深中华Ａ 000017：08-28 七板 12.53 亿 ÷ 08-27 6.06 亿＝2.07 倍 → 钱在前一日就下来了 → D0 二板照旧；
- *       而 08-28 的首板国芳集团到 08-31 正是二板，两种数法数到同一批票。</li>
- *   <li>华瓷股份 001216：09-22 0.48 亿 ÷ 09-21 0.51 亿＝0.95 倍（缩量），09-23 炸板当天 16.26 亿才放量
- *       → 候选挪到 09-23、板数取 1。</li>
+ *   <li>闽东电力 000993：09-16 六板 18.11 亿<b>环比只有 0.82 倍</b>，但＝常态量 6.79 亿的 2.67 倍 → 算放量
+ *       → 候选＝09-16 的九只二板，其中华瓷股份 09-17 三板、一路六板，是他认的那只接位票。
+ *       这一条是他 2026-09-29 连着打回两次的：先按环比判成"没放量"→ 整个节点被判缺数；
+ *       改按常态量后又取断板日 09-17 的二板 → 池子里压根没有已经涨到三板去的华瓷。</li>
+ *   <li>深中华Ａ 000017：08-28 七板 12.53 亿＝常态量 5.52 亿的 2.27 倍 → 候选＝08-28 当天的二连板。
+ *       <b>代价写在这儿</b>：他自己登记为「有效」的 922 那行，节点票原来是他手挑的国芳集团（08-28 首板、
+ *       08-31 二板），按这条口径国芳不在这个池子里，池内窗口最高板是 4 板的新赛股份。换人是他选定要付的，
+ *       落不落归他点采纳。</li>
+ *   <li>华瓷股份 001216 自己断板那轮：09-22 0.48 亿只是常态量 0.76 亿的 0.64 倍（在缩），09-23 炸板当天
+ *       16.26 亿才把量放出来 → 放量日＝断板日，往前没有"当天已二板"的批次可接，候选挪到 09-23 的首板。</li>
  * </ul>
  *
  * <p>第三、第四条是这套判据的分寸：窗口内一天都没放量＝资金还没下来，接位对象无从谈起，
- * <b>这是缺数一样的不许采纳，不是"那就照旧取二板"</b>；而老龙断板前后压根没有成交额记录＝判不了，
+ * <b>这是缺数一样的不许采纳，不是"那就照旧取二板"</b>；而这段连板里压根没有成交额记录＝判不了，
  * 退回原口径但必须在界面上出声——8 月上旬那段 amount 大面积缺失，卡住会让整页历史节点都不可采纳。
  */
 class NodeSuggestServiceHeavyTest {
@@ -46,6 +53,7 @@ class NodeSuggestServiceHeavyTest {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final LocalDate D0_HUA = LocalDate.of(2026, 9, 23);
     private static final LocalDate D0_SHEN = LocalDate.of(2026, 8, 31);
+    private static final LocalDate D0_MIN = LocalDate.of(2026, 9, 17);
 
     /** 09-23 起往后五个交易日：窗口按交易日数，不是自然日。 */
     private static final List<LocalDate> WINDOW_0923 = Arrays.asList(
@@ -64,24 +72,50 @@ class NodeSuggestServiceHeavyTest {
         assertEquals(D0_HUA, pool.date);
         assertEquals(Integer.valueOf(1), pool.board);
         assertEquals("2026-09-23 首板", pool.label());
-        // 来路必须把两次比较都讲清：前一日没放量（0.48 对 0.51），到这天才下来（0.48 → 16.26）
-        assertTrue(pool.basis.contains("0.95"), pool.basis);
+        // 来路必须把两次比较都讲清：前一日还在常态水位（0.48 对常态量 0.76＝0.64），到这天才放出来（16.26＝21.62 倍）
+        assertTrue(pool.basis.contains("0.64"), pool.basis);
         assertTrue(pool.basis.contains("16.26"), pool.basis);
-        assertTrue(pool.basis.contains("33.59"), pool.basis);
+        assertTrue(pool.basis.contains("21.62"), pool.basis);
     }
 
-    /** 深中华型：钱在断板前一日已经下来 → 现行为一字不改，候选仍是 D0 的二连板。 */
+    /** 深中华型：钱在断板前一日就放出来 → 候选＝放量日当天（08-28）的二连板，不是断板日 08-31 的那批。 */
     @Test
-    void 前一日已放量时照旧取断板日二板() {
+    void 前一日已放量时取放量日当天的二板() {
         CandidatePool pool = NodeSuggestService.pickCandidatePool(D0_SHEN, shenZhonghua(),
                 Arrays.asList(D0_SHEN, LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 2),
                         LocalDate.of(2026, 9, 3), LocalDate.of(2026, 9, 4), LocalDate.of(2026, 9, 7)));
 
         assertNull(pool.missing, pool.basis);
         assertFalse(pool.fallback, pool.basis);
-        assertEquals(D0_SHEN, pool.date);
+        assertEquals(LocalDate.of(2026, 8, 28), pool.date);
         assertEquals(Integer.valueOf(2), pool.board);
-        assertTrue(pool.basis.contains("2.07"), pool.basis);
+        assertEquals("2026-08-28 二连板", pool.label());
+        assertTrue(pool.basis.contains("2.27"), pool.basis);
+        // 池子落在放量日而不是断板日：08-28 首板的国芳集团从此不在 922 的候选里（库里 08-28 二板最高是新赛股份 4 板）
+    }
+
+    /**
+     * 闽东型：断板前一日<b>环比在缩</b>（09-16 18.11 亿对 09-15 22.11 亿＝0.82），但这两天都悬在
+     * 这段连板常态量（6.79 亿）的三倍上下 → 一样算放量 → 候选取<b>放量日 09-16 当天</b>的二连板。
+     *
+     * <p>为什么必须落在 09-16：他认的接位票是华瓷股份，它 09-15 首板、09-16 二板、09-17 已经三板。
+     * 池子取断板日 09-17 的二板就压根数不到它（09-17 那批是 内蒙新华 等五只）。上一版拿前一交易日当基准
+     * 把 09-16 判成"没放量"、往后又找不到放量日，于是 968 整个被判缺数不可采纳——那是同一个节点上
+     * 他连打回来的第一版。缩量只是钱没继续加，不是钱收回去了。
+     */
+    @Test
+    void 环比缩量但仍悬在高位一样算放量() {
+        CandidatePool pool = NodeSuggestService.pickCandidatePool(D0_MIN, minDong(),
+                Arrays.asList(D0_MIN, LocalDate.of(2026, 9, 18), LocalDate.of(2026, 9, 21),
+                        LocalDate.of(2026, 9, 22), LocalDate.of(2026, 9, 23)));
+
+        assertNull(pool.missing, pool.basis);
+        assertFalse(pool.fallback, pool.basis);
+        assertEquals(LocalDate.of(2026, 9, 16), pool.date);
+        assertEquals(Integer.valueOf(2), pool.board);
+        assertEquals("2026-09-16 二连板", pool.label());
+        assertTrue(pool.basis.contains("6.79"), pool.basis);
+        assertTrue(pool.basis.contains("2.67"), pool.basis);
     }
 
     // ---------- 一条判据的两条边界 ----------
@@ -130,7 +164,7 @@ class NodeSuggestServiceHeavyTest {
 
     // ---------- 判不了 ≠ 没放量 ----------
 
-    /** 08-20/08-21 库里 amount 是 NULL：老龙有成交记录里最早的那天没有前一笔可比，判不了就是判不了。 */
+    /** 段内 08-20/08-21 有行但 amount 是 NULL：08-24 是这段里第一个有额度的日子，前面没有常态量可比＝判不了。 */
     @Test
     void 成交额缺失时退回原口径但要出声() {
         CandidatePool pool = NodeSuggestService.pickCandidatePool(LocalDate.of(2026, 8, 25),
@@ -147,8 +181,8 @@ class NodeSuggestServiceHeavyTest {
     @Test
     void 兜底那条在建议里看得见也采纳得了() {
         Readings r = readings(fallbackPool(D0_HUA, NodeSuggestService.A_CANDIDATE_BOARD,
-                "老龙在 2026-09-23 之前没有任何带成交额的盘面记录——候选退回原口径取 2026-09-23 的二连板。"
-                        + "这是兜底，不是判出来的结论"));
+                "老龙这段连板从 2026-09-15 起，到 2026-09-23 之前一个有成交额的交易日都没有，放没放量判不了"
+                        + "——候选退回原口径取 2026-09-23 的二连板。这是兜底，不是判出来的结论"));
         NodeSuggestVO vo = NodeSuggestService.decide(huaCiNode(), r, JSON);
 
         assertTrue(vo.isReady(), vo.getMissing().toString());
@@ -230,6 +264,19 @@ class NodeSuggestServiceHeavyTest {
                 up("001216", "华瓷股份", LocalDate.of(2026, 9, 21), 5, "0.51219505")));
         rows.add(up("001216", "华瓷股份", LocalDate.of(2026, 9, 22), 6, "0.48414477"));
         rows.add(zb("001216", "华瓷股份", LocalDate.of(2026, 9, 23), "16.26331872"));
+        return rows;
+    }
+
+    /** 闽东电力 000993 在库里的真实成交额：09-15 放出 22.11 亿，09-16 六板缩到 18.11 亿但仍悬在高位。 */
+    private static List<MarketStock> minDong() {
+        List<MarketStock> rows = new ArrayList<>(Arrays.asList(
+                up("000993", "闽东电力", LocalDate.of(2026, 9, 9), 1, "3.27"),
+                up("000993", "闽东电力", LocalDate.of(2026, 9, 10), 2, "6.79"),
+                up("000993", "闽东电力", LocalDate.of(2026, 9, 11), 3, "6.65"),
+                up("000993", "闽东电力", LocalDate.of(2026, 9, 14), 4, "8.46"),
+                up("000993", "闽东电力", LocalDate.of(2026, 9, 15), 5, "22.11")));
+        rows.add(up("000993", "闽东电力", LocalDate.of(2026, 9, 16), 6, "18.11"));
+        rows.add(zb("000993", "闽东电力", LocalDate.of(2026, 9, 18), "20.88"));
         return rows;
     }
 

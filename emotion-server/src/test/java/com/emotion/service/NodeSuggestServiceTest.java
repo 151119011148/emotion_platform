@@ -87,8 +87,9 @@ class NodeSuggestServiceTest {
         r.anchorRows = new ArrayList<>(Arrays.asList(
                 limit("000017", "深中华A", LocalDate.of(2026, 8, 28), 7, "饰品"),
                 down("000017", "深中华A", LocalDate.of(2026, 9, 3))));
-        // 深中华A 是真数据：08-28 成交 12.53 亿、08-27 6.06 亿＝2.07 倍 ≥1.5 → 钱在断板前一日就下来了，
-        // 候选照旧取 D0 的二连板。这条判据在这儿真跑一遍，fixture 与判据就不会各说各话。
+        // 深中华A 是真数据：08-28 成交 12.53 亿、这段（08-27 起）常态量 6.06 亿＝2.07 倍 ≥1.5 → 钱在断板前一日就放出来了，
+        // 池子落在放量日 08-28 当天的二板。下面 candidates 那份 08-31 十只二板是他文档 §七 手抄的已知答案，
+        // 只用来喂 decide() 的晋级与挑票，与判据认定的池子落在哪天是两回事。
         r.pool = NodeSuggestService.pickCandidatePool(D0, anchorAmounts(),
                 Arrays.asList(D0, T1, LocalDate.of(2026, 9, 2), LocalDate.of(2026, 9, 3),
                         LocalDate.of(2026, 9, 4)));
