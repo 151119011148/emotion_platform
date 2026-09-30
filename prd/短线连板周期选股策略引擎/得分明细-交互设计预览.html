@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>WaveRider 得分明细 · 交互设计预览</title>
+<style>
+  :root{
+    --bg:#0f1419; --card:#1a2332; --card2:#16202e; --bd:#2d3748; --bd2:#3a4d63;
+    --tx:#cbd5e0; --tx2:#8899a6; --tx3:#6b7c8c; --hi:#e1e8ed;
+    --up:#f87171; --down:#34d399; --amber:#fbbf24; --blue:#38bdf8; --purple:#a78bfa;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);
+    font:13px/1.6 "PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;padding:22px 26px 40px}
+  h1{font-size:19px;color:var(--hi);margin:0 0 6px}
+  h2{font-size:15px;color:var(--hi);margin:0}
+  .lead{color:var(--tx2);font-size:12.5px;margin:0 0 18px;max-width:900px}
+  .lead b{color:var(--amber)}
+  .plan{background:var(--card);border:1px solid var(--bd);border-radius:8px;margin-bottom:16px;overflow:visible}
+  .plan-head{display:flex;align-items:baseline;gap:10px;padding:12px 16px;border-bottom:1px solid var(--bd)}
+  .badge{font-size:11px;padding:1px 7px;border-radius:10px;border:1px solid var(--bd2);color:var(--tx2)}
+  .badge.rec{background:rgba(251,191,36,.14);border-color:rgba(251,191,36,.5);color:var(--amber)}
+  .badge.no{background:rgba(107,124,140,.14);color:var(--tx3)}
+  .plan-desc{color:var(--tx2);font-size:12.5px;margin-left:auto;text-align:right}
+  .plan-body{padding:14px 16px}
+  .note{margin:10px 0 0;color:var(--tx3);font-size:12px;line-height:1.7}
+  .note b{color:var(--tx2)}
+  .note code{color:var(--amber);background:rgba(251,191,36,.1);padding:1px 4px;border-radius:3px}
+
+  /* ---- 模拟 el-table ---- */
+  table.et{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px;table-layout:fixed}
+  table.et th{background:var(--card2);color:var(--tx2);font-weight:500;text-align:left;
+    padding:8px 0;border-bottom:1px solid var(--bd);white-space:nowrap}
+  table.et th>span{padding:0 10px;display:block}
+  table.et td{padding:9px 10px;border-bottom:1px solid var(--bd);vertical-align:middle;overflow:visible}
+  table.et tbody tr:nth-child(even) td{background:#1f2b3b}
+  table.et td.r,table.et th.r>span{text-align:right}
+  table.et td.c,table.et th.c>span{text-align:center}
+  .num{font-variant-numeric:tabular-nums}
+  .mut{color:var(--tx3)}
+  .up{color:var(--up)}
+  .down{color:var(--down)}
+  .nm{color:var(--hi);font-weight:600;border-bottom:1px dashed rgba(136,153,166,.45)}
+  .tag{display:inline-block;font-size:11px;line-height:18px;padding:0 6px;border-radius:3px;margin:0 3px 0 0}
+  .tag.node{background:rgba(248,113,113,.9);color:#1a2332;font-weight:600}
+  .tag.d0{background:rgba(56,189,248,.9);color:#12202b;font-weight:600}
+  .tag.thm{background:rgba(56,189,248,.1);border:1px solid rgba(56,189,248,.34);color:#7dd3fc;line-height:17px}
+  .tag.warn{background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.45);color:var(--amber);line-height:17px}
+  .tag.risk{background:rgba(251,191,36,.9);color:#1a2332;font-weight:600}
+  .board{display:inline-block;min-width:22px;padding:1px 6px;border-radius:4px;
+    background:rgba(251,191,36,.14);color:var(--amber);font-weight:600;text-align:center}
+  .pos{color:var(--amber)}
+  .row-node td:first-child{box-shadow:inset 3px 0 0 var(--up)}
+
+  /* ---- 方案 A：格内迷你堆叠条 + 悬浮明细 ---- */
+  .sc{display:flex;align-items:center;justify-content:flex-end;gap:7px;cursor:help}
+  .sc-val{font-variant-numeric:tabular-nums;color:var(--hi);font-weight:600}
+  .sc-bar{display:flex;width:52px;height:7px;border-radius:3px;overflow:hidden;background:#0f1720;
+    border:1px solid var(--bd2);flex:none}
+  .sc-bar i{display:block;height:100%}
+  .sc-bar i.pen{background:repeating-linear-gradient(45deg,#34d399,#34d399 2px,#0f1720 2px,#0f1720 4px)}
+  .sc-empty{color:var(--tx3)}
+  .cell{position:relative}
+  .pop{position:absolute;right:0;top:calc(100% + 4px);z-index:30;width:322px;
+    background:#16202e;border:1px solid var(--bd2);border-radius:8px;padding:11px 13px;
+    box-shadow:0 8px 24px rgba(0,0,0,.55);text-align:left;
+    opacity:0;visibility:hidden;transform:translateY(-3px);transition:opacity .14s,transform .14s}
+  .cell:hover .pop{opacity:1;visibility:visible;transform:translateY(0)}
+  .pop-t{color:var(--hi);font-weight:600;margin-bottom:2px}
+  .pop-s{color:var(--tx3);font-size:11.5px;margin-bottom:8px}
+  .prow{display:grid;grid-template-columns:60px 1fr 46px;gap:8px;align-items:center;margin-bottom:6px}
+  .p-n{color:var(--tx);font-size:12px}
+  .p-f{color:var(--tx3);font-size:11px}
+  .p-bar{height:6px;border-radius:3px;background:#0f1720;border:1px solid #26364a;overflow:hidden}
+  .p-bar i{display:block;height:100%}
+  .p-v{font-variant-numeric:tabular-nums;text-align:right;color:var(--hi);font-size:12px}
+  .p-v.neg{color:var(--down)}
+  .pop-foot{margin-top:8px;padding-top:7px;border-top:1px solid var(--bd2);
+    display:flex;justify-content:space-between;color:var(--tx2);font-size:11.5px}
+  .pop-foot b{color:var(--amber);font-variant-numeric:tabular-nums}
+  .legend{display:flex;gap:12px;margin:0 0 10px;color:var(--tx3);font-size:11.5px}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+
+  /* ---- 方案 B：展开行 ---- */
+  .exp-toggle{color:var(--tx3);cursor:pointer;font-size:11px}
+  .detail{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;padding:12px 14px;background:#16202e}
+  .dcard{background:#1a2332;border:1px solid var(--bd);border-radius:7px;padding:9px 11px}
+  .d-lab{color:var(--tx2);font-size:11.5px;display:flex;align-items:center;gap:5px}
+  .dot{width:8px;height:8px;border-radius:2px;flex:none}
+  .d-eq{color:var(--tx3);font-size:11px;margin:5px 0 3px;font-variant-numeric:tabular-nums}
+  .d-eq b{color:var(--tx);font-weight:600}
+  .d-val{font-size:16px;font-weight:700;color:var(--hi);font-variant-numeric:tabular-nums}
+  .d-val.neg{color:var(--down)}
+  .d-mut{color:var(--tx3);font-size:11px}
+  .d-sum{grid-column:1/-1;color:var(--tx2);font-size:12px;border-top:1px solid var(--bd);padding-top:8px}
+  .d-sum b{color:var(--amber)}
+
+  /* ---- 方案 C：拆成子列 ---- */
+  .sub{color:var(--tx2);font-size:11.5px}
+  .sub th{font-size:11.5px}
+  .cmp{margin-top:22px;background:var(--card2);border:1px solid var(--bd);border-radius:8px;padding:12px 16px}
+  .cmp h3{margin:0 0 8px;font-size:13px;color:var(--hi)}
+  .cmp table{width:100%;border-collapse:collapse;font-size:12px}
+  .cmp td,.cmp th{border-bottom:1px solid var(--bd);padding:6px 8px;text-align:left;color:var(--tx2)}
+  .cmp th{color:var(--tx3);font-weight:500}
+  .cmp td.y{color:var(--down)}
+  .cmp td.n{color:var(--tx3)}
+</style>
+</head>
+<body>
+
+<h1>策略选股 · 得分明细设计预览</h1>
+<p class="lead">
+  当前「得分」列只有一个总分，看不出分是怎么来的。下面三个方案都基于同一份公式：
+  <b>得分 = 高度 0.5×(板数÷当日最高板) + 身位 0.3×(是否题材最高板) + 节点 0.2×(类型系数) + 早封 0.1×(是否10:00前) − 风险 0.2×(扣分，上限1)</b>，
+  满分 1.10。示例数据权重取默认模板（0.5 / 0.3 / 0.2 / 0.1 / 0.2），当日最高板 = 5 板。
+  鼠标停在得分格上看明细（方案 A），点「明细」看展开行（方案 B）。
+</p>
+
+<!-- ============ 方案 A ============ -->
+<div class="plan">
+  <div class="plan-head">
+    <h2>方案 A · 格内迷你堆叠条 + 悬浮明细（推荐）</h2>
+    <span class="badge rec">推荐</span>
+    <span class="plan-desc">列宽 86 → 112px，只多 26px；扫一眼能比构成，停下来能看算式</span>
+  </div>
+  <div class="plan-body">
+    <div class="legend">
+      <span><i style="background:#fbbf24"></i>全场高度</span>
+      <span><i style="background:#38bdf8"></i>身位板</span>
+      <span><i style="background:#f87171"></i>节点</span>
+      <span><i style="background:#a78bfa"></i>早封板</span>
+      <span><i style="background:repeating-linear-gradient(45deg,#34d399,#34d399 2px,#0f1720 2px,#0f1720 4px)"></i>风险扣分（斜纹）</span>
+    </div>
+    <table class="et">
+      <colgroup>
+        <col style="width:48px"><col style="width:150px"><col style="width:72px"><col style="width:200px">
+        <col style="width:112px"><col style="width:112px"><col style="width:84px"><col style="width:112px">
+        <col style="width:86px"><col style="width:86px"><col style="width:86px"><col style="width:76px">
+      </colgroup>
+      <thead>
+        <tr>
+          <th class="c"><span>#</span></th><th><span>名称</span></th><th class="c"><span>连板</span></th>
+          <th><span>题材</span></th><th class="r"><span>封单强度</span></th>
+          <th class="r"><span>得分</span></th><th class="r"><span>建议仓位</span></th>
+          <th><span>警示</span></th><th class="r"><span>T+1跳空</span></th>
+          <th class="r"><span>打板收益</span></th><th class="r"><span>接盘收益</span></th>
+          <th class="c"><span>结果</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- 1 -->
+        <tr class="row-node">
+          <td class="c num">1</td>
+          <td><span class="nm">泰慕士</span> <span class="tag node">节点票</span><span class="tag d0">D0候选</span></td>
+          <td class="c"><span class="board">5</span></td>
+          <td><span class="tag thm">纺织制造</span><span class="tag thm">跨境电商</span><span class="mut">+2</span></td>
+          <td class="r num">318.40% <span class="tag warn">排队</span></td>
+          <td class="r cell">
+            <div class="sc">
+              <span class="sc-val">1.10</span>
+              <span class="sc-bar">
+                <i style="width:45.5%;background:#fbbf24"></i>
+                <i style="width:27.3%;background:#38bdf8"></i>
+                <i style="width:18.2%;background:#f87171"></i>
+                <i style="width:9.0%;background:#a78bfa"></i>
+              </span>
+            </div>
+            <div class="pop">
+              <div class="pop-t">泰慕士 001234 · 得分构成</div>
+              <div class="pop-s">权重取当前策略：0.5 / 0.3 / 0.2 / 0.1，风险 0.2</div>
+              <div class="prow"><span class="p-n">全场高度</span>
+                <span><span class="p-f">0.50 × 5板 ÷ 最高5板 =</span>
+                  <span class="p-bar" style="display:block;margin-top:3px"><i style="width:100%;background:#fbbf24"></i></span></span>
+                <span class="p-v">+0.50</span></div>
+              <div class="prow"><span class="p-n">身位板</span>
+                <span><span class="p-f">0.30 × 题材内最高板（是） =</span>
+                  <span class="p-bar" style="display:block;margin-top:3px"><i style="width:100%;background:#38bdf8"></i></span></span>
+                <span class="p-v">+0.30</span></div>
+              <div class="prow"><span class="p-n">节点</span>
+                <span><span class="p-f">0.20 × 1.00（未录类型，按启动计） =</span>
+                  <span class="p-bar" style="display:block;margin-top:3px"><i style="width:83%;background:#f87171"></i></span></span>
+                <span class="p-v">+0.20</span></div>
+              <div class="prow"><span class="p-n">早封板</span>
+                <span><span class="p-f">0.10 × 09:25 首封（是） =</span>
+                  <span class="p-bar" style="display:block;margin-top:3px"><i style="width:100%;background:#a78bfa"></i></span></span>
+                <span class="p-v">+0.10</span></div>
+              <div class="prow"><span class="p-n">风险</span>
+                <span><span class="p-f">−0.20 × 0（无） =</span>
+                  <span class="p-bar" style="display:block;margin-top:3px"><i style="width:0;background:#34d399"></i></span></span>
+                <span class="p-v">−0.00</span></div>
+              <div class="pop-foot"><span>合计 <b>1.10</b> / 满分 1.10</span><span>仓位 8.0% × 100%</span></div>
+            </div>
+          </td>
+          <td class="r num pos">8.00%</td>
+          <td><span class="tag risk">一字缩量</span></td>
+          <td class="r num up">+7.12%</td><td class="r num up">+9.98%</td><td class="r num down">+2.67%</td>
+          <td class="c"><span class="tag node">晋级</span></td>
+        </tr>
+        <!-- 2 -->
+        <tr>
+          <td class="c num">2</td>
+          <td><span class="nm">华资实业</span></td>
+          <td class="c"><span class="board">3</span></td>
+          <td><span class="tag thm">农产品加工</span><span class="tag thm">糖业</span></td>
+          <td class="r num">82.15%</td>
+          <td class="r cell">
+            <div class="sc">
+              <span class="sc-val">0.56</span>
+              <span class="sc-bar">
+                <i style="width:40.0%;background:#fbbf24"></i>
+                <i style="width:28.6%;background:#38bdf8"></i>
+                <i style="width:28.6%;background:#f87171"></i>
+                <i style="width:14.3%;background:#34d399" class="pen"></i>
+              </span>
+            </div>
+            <div class="pop">
+              <div class="pop-t">华资实业 600191 · 得分构成</div>
+              <div class="pop-s">权重取当前策略：0.5 / 0.3 / 0.2 / 0.1，风险 0.2</div>
+              <div class="prow"><span class="p-n">全场高度</span>
+                <span><span class="p-f">0.50 × 3板 ÷ 最高5板 =</span>
+                  <span class="p-bar" style="display:block;margin-top:3px"><i style="width:60%;background:#fbbf24"></i></span></span>
+                <span class="p-v">+0.30</span></div>
+              <div class="prow"><span class="p-n">身位板</span>
+                <span><span class="p-f">0.30 × 题材内最高板（是） =</span>
+                  <span class="p-bar" style="display:block;margin-top:3px"><i style="width:100%;background:#38bdf8"></i></span></span>
+                <span class="p-v">+0.30</span></div>
+              <div class="prow"><span class="p-n">节点</span>
+                <span><span class="p-f">0.20 × 0.80（切换 SWITCH） =</span>
+                  <span class="p-bar" style="display:block;margin-top:3px"><i style="width:67%;background:#f87171"></i></span></span>
+                <span class="p-v">+0.16</span></div>
+              <div class="prow"><span class="p-n">早封板</span>
+                <span><span class="p-f">0.10 × 10:42 首封（否） =</span>
+                  <span class="p-bar" style="display:block;margin-top:3px"><i style="width:0;background:#a78bfa"></i></span></span>
+                <span class="p-v">+0.00</span></div>
+              <div class="prow"><span class="p-n">风险</span>
+                <span><span class="p-f">−0.20 × 1（一字缩量） =</span>
+                  <span class="p-bar" style="display:block;margin-top:3px"><i style="width:100%;background:#34d399"></i></span></span>
+                <span class="p-v neg">−0.20</span></div>
+              <div class="pop-foot"><span>合计 <b>0.56</b> / 满分 1.10</span><span>仓位 8.0% × 51% ÷ 2（风险折半）</span></div>
+            </div>
+          </td>
+          <td class="r num pos">2.04%</td>
+          <td><span class="tag risk">一字缩量</span></td>
+          <td class="r num up">+3.05%</td><td class="r num up">+4.11%</td><td class="r num up">+1.03%</td>
+          <td class="c"><span class="tag" style="background:rgba(52,211,153,.9);color:#10251c">未连板</span></td>
+        </tr>
+        <!-- 3 -->
+        <tr>
+          <td class="c num">3</td>
+          <td><span class="nm">大明电子</span></td>
+          <td class="c"><span class="board">4</span></td>
+          <td><span class="tag thm">汽车零部件</span><span class="mut">+4</span></td>
+          <td class="r num">46.70%</td>
+          <td class="r cell">
+            <div class="sc">
+              <span class="sc-val">0.50</span>
+              <span class="sc-bar">
+                <i style="width:80.0%;background:#fbbf24"></i>
+                <i style="width:20.0%;background:#a78bfa"></i>
+              </span>
+            </div>
+            <div class="pop">
+              <div class="pop-t">大明电子 603376 · 得分构成</div>
+              <div class="pop-s">权重取当前策略：0.5 / 0.3 / 0.2 / 0.1，风险 0.2</div>
+              <div class="prow"><span class="p-n">全场高度</span>
+                <span><span class="p-f">0.50 × 4板 ÷ 最高5板 =</span>
+                  <span class="p-bar" style="display:block;margin-top:3px"><i style="width:80%;background:#fbbf24"></i></span></span>
+                <span class="p-v">+0.40</span></div>
+              <div class="prow"><span class="p-n">身位板</span>
+                <span><span class="p-f">0.30 × 同题材有 5 板（否） =</span>
+                  <span class="p-bar" style="display:block;margin-top:3px"><i style="width:0;background:#38bdf8"></i></span></span>
+                <span class="p-v">+0.00</span></div>
+              <div class="prow"><span class="p-n">节点</span>
+                <span><span class="p-f">0.20 × 0（不在节点窗口内） =</span>
+                  <span class="p-bar" style="display:block;margin-top:3px"><i style="width:0;background:#f87171"></i></span></span>
+                <span class="p-v">+0.00</span></div>
+              <div class="prow"><span class="p-n">早封板</span>
+                <span><span class="p-f">0.10 × 09:47 首封（是） =</span>
+                  <span class="p-bar" style="display:block;margin-top:3px"><i style="width:100%;background:#a78bfa"></i></span></span>
+                <span class="p-v">+0.10</span></div>
+              <div class="prow"><span class="p-n">风险</span>
+                <span><span class="p-f">−0.20 × 0（无） =</span>
+                  <span class="p-bar" style="display:block;margin-top:3px"><i style="width:0;background:#34d399"></i></span></span>
+                <span class="p-v">−0.00</span></div>
+              <div class="pop-foot"><span>合计 <b>0.50</b> / 满分 1.10</span><span>仓位 8.0% × 45%</span></div>
+            </div>
+          </td>
+          <td class="r num pos">3.64%</td>
+          <td><span class="mut">—</span></td>
+          <td class="r num up">+1.20%</td><td class="r num down">−1.86%</td><td class="r num down">−3.02%</td>
+          <td class="c"><span class="tag" style="background:rgba(52,211,153,.9);color:#10251c">未连板</span></td>
+        </tr>
+        <!-- 4 未评 -->
+        <tr>
+          <td class="c num">4</td>
+          <td><span class="nm">某新票</span></td>
+          <td class="c"><span class="board">3</span></td>
+          <td><span class="tag thm">专用设备</span></td>
+          <td class="r num"><span class="mut">—</span></td>
+          <td class="r cell">
+            <div class="sc">
+              <span class="sc-empty">—</span>
+              <span class="sc-bar" style="border-style:dashed"><i style="width:0"></i></span>
+            </div>
+            <div class="pop">
+              <div class="pop-t">某新票 300xxx · 未评分</div>
+              <div class="pop-s">历史行没有存明细，无法还原每一项；只保留总分口径</div>
+              <div class="pop-foot"><span>总分 <b>—</b></span><span>重跑当日即可补上明细</span></div>
+            </div>
+          </td>
+          <td class="r num pos">0.80%</td>
+          <td><span class="mut">—</span></td>
+          <td class="r mut">—</td><td class="r mut">—</td><td class="r mut">—</td>
+          <td class="c"><span class="mut">待验证</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="note">
+      <b>读法</b>：色条按四项正贡献的比例切分，越靠左＝越靠前的因子；扣分项在右端用<b>斜纹</b>另画一段，
+      不跟正项混色（否则「分数高」会被读成「没扣分」）。悬浮面板给出 <code>权重 × 原始值 = 得分</code>
+      的完整算式与合计 / 满分，仓位那一行顺便说清「为什么它被折半」。
+      未评分的历史行退化为灰虚条 + “—”，<b>不猜</b>。
+    </p>
+  </div>
+</div>
+
+<!-- ============ 方案 B ============ -->
+<div class="plan">
+  <div class="plan-head">
+    <h2>方案 B · 点击「明细」展开整行</h2>
+    <span class="badge">信息最全</span>
+    <span class="plan-desc">列宽零增加，但一次只能看一只、且要点击</span>
+  </div>
+  <div class="plan-body">
+    <table class="et">
+      <colgroup>
+        <col style="width:48px"><col style="width:150px"><col style="width:72px"><col style="width:230px">
+        <col style="width:112px"><col style="width:100px"><col style="width:84px"><col style="width:112px">
+        <col style="width:86px"><col style="width:96px"><col style="width:86px"><col style="width:76px">
+      </colgroup>
+      <thead>
+        <tr>
+          <th class="c"><span>#</span></th><th><span>名称</span></th><th class="c"><span>连板</span></th>
+          <th><span>题材</span></th><th class="r"><span>封单强度</span></th>
+          <th class="r"><span>得分</span></th><th class="r"><span>建议仓位</span></th>
+          <th><span>警示</span></th><th class="r"><span>T+1跳空</span></th>
+          <th class="r"><span>打板收益</span></th><th class="r"><span>接盘收益</span></th>
+          <th class="c"><span>结果</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="c num">1</td>
+          <td><span class="nm">泰慕士</span> <span class="tag node">节点票</span></td>
+          <td class="c"><span class="board">5</span></td>
+          <td><span class="tag thm">纺织制造</span><span class="tag thm">跨境电商</span></td>
+          <td class="r num">318.40%</td>
+          <td class="r"><span class="num" style="color:var(--hi)">1.10</span> <span class="exp-toggle">明细 ▾</span></td>
+          <td class="r num pos">8.00%</td>
+          <td><span class="tag risk">一字缩量</span></td>
+          <td class="r num up">+7.12%</td><td class="r num up">+9.98%</td><td class="r num up">+2.67%</td>
+          <td class="c"><span class="tag node">晋级</span></td>
+        </tr>
+        <tr>
+          <td colspan="12" style="padding:0;background:#16202e">
+            <div class="detail">
+              <div class="dcard">
+                <div class="d-lab"><i class="dot" style="background:#fbbf24"></i>全场高度</div>
+                <div class="d-eq">0.50 × <b>5板 ÷ 最高5板</b></div>
+                <div class="d-val">+0.50</div>
+                <div class="d-mut">当日最高板 5（华资实业）</div>
+              </div>
+              <div class="dcard">
+                <div class="d-lab"><i class="dot" style="background:#38bdf8"></i>身位板</div>
+                <div class="d-eq">0.30 × <b>是</b>（题材内最高）</div>
+                <div class="d-val">+0.30</div>
+                <div class="d-mut">题材：纺织制造</div>
+              </div>
+              <div class="dcard">
+                <div class="d-lab"><i class="dot" style="background:#f87171"></i>节点</div>
+                <div class="d-eq">0.20 × <b>1.00</b></div>
+                <div class="d-val">+0.20</div>
+                <div class="d-mut">节点 #12 · D0 09-24 · 未录类型按启动计</div>
+              </div>
+              <div class="dcard">
+                <div class="d-lab"><i class="dot" style="background:#a78bfa"></i>早封板</div>
+                <div class="d-eq">0.10 × <b>是</b>（09:25）</div>
+                <div class="d-val">+0.10</div>
+                <div class="d-mut">门槛 10:00</div>
+              </div>
+              <div class="dcard">
+                <div class="d-lab"><i class="dot" style="background:#34d399"></i>风险扣分</div>
+                <div class="d-eq">−0.20 × <b>0</b></div>
+                <div class="d-val neg">−0.00</div>
+                <div class="d-mut">换手 3.2% · 成交额 2.4 亿</div>
+              </div>
+              <div class="d-sum">
+                合计 <b>1.10</b> / 满分 <b>1.10</b> &nbsp;·&nbsp; 仓位 = 8.0% × <b>1.10 ÷ 1.10</b> = <b>8.00%</b>
+                （无风险标记，不折半）&nbsp;·&nbsp; 当日最高分 1.10
+              </div>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td class="c num">2</td>
+          <td><span class="nm">华资实业</span></td>
+          <td class="c"><span class="board">3</span></td>
+          <td><span class="tag thm">农产品加工</span></td>
+          <td class="r num">82.15%</td>
+          <td class="r"><span class="num" style="color:var(--hi)">0.56</span> <span class="exp-toggle">明细 ▾</span></td>
+          <td class="r num pos">2.04%</td>
+          <td><span class="tag risk">一字缩量</span></td>
+          <td class="r num up">+3.05%</td><td class="r num up">+4.11%</td><td class="r num up">+1.03%</td>
+          <td class="c"><span class="tag" style="background:rgba(52,211,153,.9);color:#10251c">未连板</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="note">
+      <b>取舍</b>：五张卡片能把「原始值」也摆出来（板数、首封时间、换手、节点编号），是唯一能回答
+      「为什么这项没拿到分」的形态。代价是每看一只都要点一下，且展开会把列表顶下去；
+      适合<b>复盘单只票</b>，不适合<b>横扫十几只</b>。
+    </p>
+  </div>
+</div>
+
+<!-- ============ 方案 C ============ -->
+<div class="plan">
+  <div class="plan-head">
+    <h2>方案 C · 得分拆成 5 个子列</h2>
+    <span class="badge no">不推荐</span>
+    <span class="plan-desc">表格再加约 240px，右侧收益列必然被挤出去</span>
+  </div>
+  <div class="plan-body">
+    <table class="et sub">
+      <colgroup>
+        <col style="width:48px"><col style="width:130px"><col style="width:60px">
+        <col style="width:48px"><col style="width:48px"><col style="width:48px"><col style="width:48px"><col style="width:48px">
+        <col style="width:60px"><col style="width:112px"><col style="width:200px">
+      </colgroup>
+      <thead>
+        <tr>
+          <th class="c"><span>#</span></th><th><span>名称</span></th><th class="c"><span>连板</span></th>
+          <th class="r"><span>高度</span></th><th class="r"><span>身位</span></th><th class="r"><span>节点</span></th>
+          <th class="r"><span>早封</span></th><th class="r"><span>风险</span></th>
+          <th class="r"><span>合计</span></th><th class="r"><span>封单强度</span></th><th><span>题材</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="c num">1</td><td><span class="nm">泰慕士</span></td><td class="c"><span class="board">5</span></td>
+          <td class="r num">+0.50</td><td class="r num">+0.30</td><td class="r num">+0.20</td><td class="r num">+0.10</td>
+          <td class="r mut">−0.00</td><td class="r num"><b>1.10</b></td><td class="r num">318.40%</td>
+          <td><span class="tag thm">纺织制造</span></td></tr>
+        <tr><td class="c num">2</td><td><span class="nm">华资实业</span></td><td class="c"><span class="board">3</span></td>
+          <td class="r num">+0.30</td><td class="r num">+0.30</td><td class="r num">+0.16</td><td class="r mut">+0.00</td>
+          <td class="r num down">−0.20</td><td class="r num"><b>0.56</b></td><td class="r num">82.15%</td>
+          <td><span class="tag thm">农产品加工</span></td></tr>
+        <tr><td class="c num">3</td><td><span class="nm">大明电子</span></td><td class="c"><span class="board">4</span></td>
+          <td class="r num">+0.40</td><td class="r mut">+0.00</td><td class="r mut">+0.00</td><td class="r num">+0.10</td>
+          <td class="r mut">−0.00</td><td class="r num"><b>0.50</b></td><td class="r num">46.70%</td>
+          <td><span class="tag thm">汽车零部件</span></td></tr>
+      </tbody>
+    </table>
+    <p class="note">
+      <b>为什么不推荐</b>：候选池本来就 12 列（昨天刚把列宽收紧过），再加 5 列就 17 列，
+      横向必然滚动，而这张表的核心用法是<b>上下扫读</b>；更要命的是子列只有数字没有算式，
+      「0.30」到底是权重还是得分，得回头看表头才想得起来。
+    </p>
+  </div>
+</div>
+
+<div class="cmp">
+  <h3>三方案对比</h3>
+  <table>
+    <thead><tr><th style="width:110px">方案</th><th>列宽代价</th><th>扫读效率</th><th>能看出「为什么没拿到分」</th><th>实现成本</th></tr></thead>
+    <tbody>
+      <tr><td>A 迷你条+悬浮</td><td class="y">+26px</td><td class="y">高（构成一眼可比）</td><td class="y">部分（算式给全，原始值在悬浮里）</td><td class="y">中</td></tr>
+      <tr><td>B 展开行</td><td class="y">0</td><td class="n">低（一次一只）</td><td class="y">完全（含板数/时间/换手原始值）</td><td class="y">中</td></tr>
+      <tr><td>C 拆子列</td><td class="n">+240px</td><td class="n">低（需横向滚动）</td><td class="n">不能</td><td class="y">低</td></tr>
+    </tbody>
+  </table>
+  <p class="note">
+    <b>建议：A 为主 + B 兜底</b>——列表里用迷你条扫，想深究就点开 B 的展开行（两者共用同一份数据）。
+    <br>
+    <b>共同前提</b>：后端现在只落了总分，四项明细没存。需要在 <code>filterDetail()</code> 里补一段
+    <code>score_breakdown</code>（各项权重、原始值 board_part / top_of_topic / node_part / early_seal / risk_penalty、
+    以及当日的 max_board），随候选一起下发；前端<b>不重算</b>，只做展示——重算一旦与后端公式漂移，
+    页面上的数就成了第二次真相。历史行没有这段 JSON 时降级为「—」，重跑当日即可补齐。
+  </p>
+</div>
+
+</body>
+</html>
