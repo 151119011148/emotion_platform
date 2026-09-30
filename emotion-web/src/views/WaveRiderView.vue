@@ -55,168 +55,172 @@
         </div>
       </template>
 
-      <el-table :data="candidates" row-key="code" size="small" stripe :row-class-name="rowClass" style="width: 100%">
-        <el-table-column prop="rankNo" label="#" width="48" align="center" />
-        <el-table-column label="名称" min-width="150">
-          <template #default="{ row }">
-            <div class="nm">
-              <el-tooltip placement="top" :show-after="150">
-                <template #content>
-                  <div>代码 {{ row.code }}</div>
-                </template>
-                <span class="nm-text" @click="goTianti(row)">{{ row.name }}</span>
-              </el-tooltip>
-              <span class="nm-tags">
-                <el-tag v-for="t in nodeTagsOf(row)" :key="t.kind" size="small" effect="dark"
-                  :type="t.type" :title="t.title">{{ t.text }}</el-tag>
+      <!-- 表格宽度封顶：el-table 会把容器的富余宽度按 min-width 比例全塞给弹性列，
+           宽屏下「名称/题材」会被撑到 300~500px，内容却只有一小截。封顶后多出来的空间留在表右侧。 -->
+      <div class="tbl">
+        <el-table :data="candidates" row-key="code" size="small" stripe :row-class-name="rowClass" style="width: 100%">
+          <el-table-column prop="rankNo" label="#" width="48" align="center" />
+          <el-table-column label="名称" min-width="165">
+            <template #default="{ row }">
+              <div class="nm">
+                <el-tooltip placement="top" :show-after="150">
+                  <template #content>
+                    <div>代码 {{ row.code }}</div>
+                  </template>
+                  <span class="nm-text" @click="goTianti(row)">{{ row.name }}</span>
+                </el-tooltip>
+                <span class="nm-tags">
+                  <el-tag v-for="t in nodeTagsOf(row)" :key="t.kind" size="small" effect="dark"
+                    :type="t.type" :title="t.title">{{ t.text }}</el-tag>
+                </span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="连板" prop="board" width="72" align="center" sortable>
+            <template #default="{ row }">
+              <span class="board">{{ row.board }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="题材" min-width="235">
+            <template #default="{ row }">
+              <span v-if="row.tdxThemes && row.tdxThemes.length" class="thm">
+                <el-tag v-for="t in topThemes(row)" :key="t.name" size="small" effect="plain"
+                  class="tag-theme" :title="themeTip(t)">{{ t.name }}</el-tag>
+                <span v-if="restThemes(row).length" class="more"
+                  :title="restTip(row)">+{{ restThemes(row).length }}</span>
               </span>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="连板" prop="board" width="72" align="center" sortable>
-          <template #default="{ row }">
-            <span class="board">{{ row.board }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="题材" min-width="240">
-          <template #default="{ row }">
-            <span v-if="row.tdxThemes && row.tdxThemes.length" class="thm">
-              <el-tag v-for="t in topThemes(row)" :key="t.name" size="small" effect="plain"
-                class="tag-theme" :title="themeTip(t)">{{ t.name }}</el-tag>
-              <span v-if="restThemes(row).length" class="more"
-                :title="restTip(row)">+{{ restThemes(row).length }}</span>
-            </span>
-            <span v-else class="mut"
-              title="这只票在通达信题材索引里没有记录，退回引擎分组用的行业">{{ row.topic || '—' }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="封单强度" width="118" align="right" header-align="right" sortable
-          :sort-method="compareSeal">
-          <template #default="{ row }">
-            <span v-if="sealRatio(row) != null" class="num">{{ sealRatio(row).toFixed(2) }}%</span>
-            <span v-else class="mut">—</span>
-            <el-tag v-if="needQueue(row)" size="small" type="warning" effect="plain" class="qtag">排队</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="score" label="得分" width="112" align="right" header-align="right" sortable>
-          <template #header>
-            <span class="th-score">
-              得分
-              <el-tooltip placement="bottom" effect="dark" :disabled="!cfg">
-                <template #content>
-                  <div class="sr">
-                    <b class="sr-title">得分 = 四项相加 − 风险扣分（满分 {{ scoreRule.ceiling }}）</b>
-                    <div v-for="t in scoreRule.terms" :key="t.key" class="sr-term">
-                      <span class="sr-w">{{ t.weight }} ×</span>
-                      <span class="sr-body">
-                        <span class="sr-n">{{ t.name }}</span>
-                        <span class="sr-d">{{ t.desc }}</span>
-                      </span>
-                    </div>
-                    <div class="sr-term">
-                      <span class="sr-w">−{{ scoreRule.risk }} ×</span>
-                      <span class="sr-body">
-                        <span class="sr-n">风险</span>
-                        <span class="sr-d">缩量一字（换手&lt;2% 且成交额低于 {{ scoreRule.minAmount }} 亿）或换手&gt;30%；命中任一条即满扣，扣分上限 1</span>
-                      </span>
-                    </div>
-                    <div class="sr-note">
-                      得分不是默认排序依据（# 列走服务端封单强度降序），点本列表头可按得分升/降序。
-                      它决定建议仓位＝{{ scoreRule.maxPos }} × 得分 ÷ 当日最高分，带风险标记的再折半。
-                    </div>
-                  </div>
-                </template>
-                <span class="rule-mark">?</span>
-              </el-tooltip>
-            </span>
-          </template>
-          <template #default="{ row }">
-            <el-tooltip placement="left" effect="dark" :show-after="120">
-              <template #content>
-                <div class="sr">
-                  <b class="sr-title">{{ row.name }} · 得分构成</b>
-                  <template v-if="bdOf(row)">
-                    <div class="sr-note sr-note-top">
-                      满分 {{ fmt2(bdOf(row).ceiling) }}（四项正权重之和，不含扣分）
-                    </div>
-                    <div v-for="t in bdOf(row).terms" :key="t.key" class="sr-row">
-                      <span class="sr-w">{{ fmt2(t.weight) }} ×</span>
-                      <span class="sr-body">
-                        <span class="sr-n">{{ termName(t.key) }}</span>
-                        <span class="sr-d">{{ rawText(t) }}</span>
-                      </span>
-                      <span class="sr-v" :class="termCls(t.value)">{{ signed(t.value) }}</span>
-                    </div>
-                    <div class="sr-foot">
-                      合计 <b>{{ fmt2(bdOf(row).score) }}</b> / 满分 {{ fmt2(bdOf(row).ceiling) }}
-                      · 当日最高板 {{ bdOf(row).max_board }} 板
+              <span v-else class="mut"
+                title="这只票在通达信题材索引里没有记录，退回引擎分组用的行业">{{ row.topic || '—' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="封单强度" width="118" align="right" header-align="right" sortable
+            :sort-method="compareSeal">
+            <template #default="{ row }">
+              <span v-if="sealRatio(row) != null" class="num">{{ sealRatio(row).toFixed(2) }}%</span>
+              <span v-else class="mut">—</span>
+              <el-tag v-if="needQueue(row)" size="small" type="warning" effect="plain" class="qtag">排队</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="score" label="得分" width="112" align="right" header-align="right" sortable>
+            <template #header>
+              <span class="th-score">
+                得分
+                <el-tooltip placement="bottom" effect="dark" :disabled="!cfg">
+                  <template #content>
+                    <div class="sr">
+                      <b class="sr-title">得分 = 四项相加 − 风险扣分（满分 {{ scoreRule.ceiling }}）</b>
+                      <div v-for="t in scoreRule.terms" :key="t.key" class="sr-term">
+                        <span class="sr-w">{{ t.weight }} ×</span>
+                        <span class="sr-body">
+                          <span class="sr-n">{{ t.name }}</span>
+                          <span class="sr-d">{{ t.desc }}</span>
+                        </span>
+                      </div>
+                      <div class="sr-term">
+                        <span class="sr-w">−{{ scoreRule.risk }} ×</span>
+                        <span class="sr-body">
+                          <span class="sr-n">风险</span>
+                          <span class="sr-d">缩量一字（换手&lt;2% 且成交额低于 {{ scoreRule.minAmount }} 亿）或换手&gt;30%；命中任一条即满扣，扣分上限 1</span>
+                        </span>
+                      </div>
+                      <div class="sr-note">
+                        得分不是默认排序依据（# 列走服务端封单强度降序），点本列表头可按得分升/降序。
+                        它决定建议仓位＝{{ scoreRule.maxPos }} × 得分 ÷ 当日最高分，带风险标记的再折半。
+                      </div>
                     </div>
                   </template>
-                  <div v-else class="sr-note">
-                    这一行产出于明细功能之前，只存了总分；重跑当日即可补上构成，这里不猜。
-                  </div>
-                </div>
-              </template>
-              <span class="sc">
-                <span :class="['sc-val', { 'sc-empty': row.score == null }]">
-                  {{ row.score == null ? '—' : Number(row.score).toFixed(2) }}
-                </span>
-                <span :class="['sc-bar', { 'sc-bar-none': !bdOf(row) }]">
-                  <i v-for="(s, i) in segsOf(row)" :key="i" :class="{ pen: s.pen }"
-                    :style="{ width: s.width, background: s.pen ? '' : s.color }" />
-                </span>
+                  <span class="rule-mark">?</span>
+                </el-tooltip>
               </span>
-            </el-tooltip>
-          </template>
-        </el-table-column>
-        <el-table-column label="建议仓位" width="84" align="right" header-align="right">
-          <template #default="{ row }">
-            <span class="num pos">{{ posText(row.suggestPosition) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="警示" width="112">
-          <template #default="{ row }">
-            <span v-if="row.alertFlag || row.riskFlag" class="alerts">
-              <el-tag v-if="row.alertFlag" size="small" type="danger" effect="dark"
-                :title="alertTip(row.alertFlag)">{{ alertText(row.alertFlag) }}</el-tag>
-              <el-tag v-if="row.riskFlag" size="small" type="warning" effect="dark"
-                title="风险项参与仓位折算：带风险标的建议仓位折半">{{ riskText(row.riskFlag) }}</el-tag>
-            </span>
-            <span v-else class="mut">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="T+1 跳空" width="86" align="right" header-align="right">
-          <template #default="{ row }">
-            <span v-if="t1Of(row) && t1Of(row).gapPct != null" :class="['num', cls(t1Of(row).gapPct)]">
-              {{ pct(t1Of(row).gapPct) }}
-            </span>
-            <span v-else class="mut">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="打板收益" width="86" align="right" header-align="right">
-          <template #default="{ row }">
-            <span v-if="t1Of(row) && t1Of(row).t1ChangePct != null" :class="['num', cls(t1Of(row).t1ChangePct)]">
-              {{ pct(t1Of(row).t1ChangePct) }}
-            </span>
-            <span v-else class="mut">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="接盘收益" width="86" align="right" header-align="right">
-          <template #default="{ row }">
-            <span v-if="bPct(row) != null" :class="['num', cls(bPct(row))]">
-              <b>{{ pct(bPct(row)) }}</b>
-            </span>
-            <span v-else class="mut">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="结果" width="76" align="center">
-          <template #default="{ row }">
-            <span v-if="!t1Of(row)" class="mut">待验证</span>
-            <el-tag v-else-if="t1Of(row).promoted === 1" size="small" type="danger" effect="dark">晋级</el-tag>
-            <el-tag v-else size="small" type="success" effect="dark">未连板</el-tag>
-          </template>
-        </el-table-column>
-      </el-table>
+            </template>
+            <template #default="{ row }">
+              <el-tooltip placement="left" effect="dark" :show-after="120">
+                <template #content>
+                  <div class="sr">
+                    <b class="sr-title">{{ row.name }} · 得分构成</b>
+                    <template v-if="bdOf(row)">
+                      <div class="sr-note sr-note-top">
+                        满分 {{ fmt2(bdOf(row).ceiling) }}（四项正权重之和，不含扣分）
+                      </div>
+                      <div v-for="t in bdOf(row).terms" :key="t.key" class="sr-row">
+                        <span class="sr-w">{{ fmt2(t.weight) }} ×</span>
+                        <span class="sr-body">
+                          <span class="sr-n">{{ termName(t.key) }}</span>
+                          <span class="sr-d">{{ rawText(t) }}</span>
+                        </span>
+                        <span class="sr-v" :class="termCls(t.value)">{{ signed(t.value) }}</span>
+                      </div>
+                      <div class="sr-foot">
+                        合计 <b>{{ fmt2(bdOf(row).score) }}</b> / 满分 {{ fmt2(bdOf(row).ceiling) }}
+                        · 当日最高板 {{ bdOf(row).max_board }} 板
+                      </div>
+                    </template>
+                    <div v-else class="sr-note">
+                      这一行产出于明细功能之前，只存了总分；重跑当日即可补上构成，这里不猜。
+                    </div>
+                  </div>
+                </template>
+                <span class="sc">
+                  <span :class="['sc-val', { 'sc-empty': row.score == null }]">
+                    {{ row.score == null ? '—' : Number(row.score).toFixed(2) }}
+                  </span>
+                  <span :class="['sc-bar', { 'sc-bar-none': !bdOf(row) }]">
+                    <i v-for="(s, i) in segsOf(row)" :key="i" :class="{ pen: s.pen }"
+                      :style="{ width: s.width, background: s.pen ? '' : s.color }" />
+                  </span>
+                </span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
+          <el-table-column label="建议仓位" width="84" align="right" header-align="right">
+            <template #default="{ row }">
+              <span class="num pos">{{ posText(row.suggestPosition) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="警示" width="112">
+            <template #default="{ row }">
+              <span v-if="row.alertFlag || row.riskFlag" class="alerts">
+                <el-tag v-if="row.alertFlag" size="small" type="danger" effect="dark"
+                  :title="alertTip(row.alertFlag)">{{ alertText(row.alertFlag) }}</el-tag>
+                <el-tag v-if="row.riskFlag" size="small" type="warning" effect="dark"
+                  title="风险项参与仓位折算：带风险标的建议仓位折半">{{ riskText(row.riskFlag) }}</el-tag>
+              </span>
+              <span v-else class="mut">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="T+1 跳空" width="86" align="right" header-align="right">
+            <template #default="{ row }">
+              <span v-if="t1Of(row) && t1Of(row).gapPct != null" :class="['num', cls(t1Of(row).gapPct)]">
+                {{ pct(t1Of(row).gapPct) }}
+              </span>
+              <span v-else class="mut">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="打板收益" width="86" align="right" header-align="right">
+            <template #default="{ row }">
+              <span v-if="t1Of(row) && t1Of(row).t1ChangePct != null" :class="['num', cls(t1Of(row).t1ChangePct)]">
+                {{ pct(t1Of(row).t1ChangePct) }}
+              </span>
+              <span v-else class="mut">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="接盘收益" width="86" align="right" header-align="right">
+            <template #default="{ row }">
+              <span v-if="bPct(row) != null" :class="['num', cls(bPct(row))]">
+                <b>{{ pct(bPct(row)) }}</b>
+              </span>
+              <span v-else class="mut">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="结果" width="76" align="center">
+            <template #default="{ row }">
+              <span v-if="!t1Of(row)" class="mut">待验证</span>
+              <el-tag v-else-if="t1Of(row).promoted === 1" size="small" type="danger" effect="dark">晋级</el-tag>
+              <el-tag v-else size="small" type="success" effect="dark">未连板</el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
 
       <p class="fn">
         标签怎么看：名称后面 <b>节点票 / 锚定龙头 / D0候选</b>＝它出现在「节点追踪」的某条节点里，
@@ -871,6 +875,12 @@ onMounted(async () => {
   background: #1a2332;
   border: 1px solid #2d3748;
   margin-bottom: 14px;
+}
+
+/* 候选池表格的封顶宽度：随着窗口变宽只会让右侧留白变多，不会再把列撑开。
+   需要更宽/更窄只改这一处。 */
+.tbl {
+  max-width: 1400px;
 }
 .blk-head {
   display: flex;
