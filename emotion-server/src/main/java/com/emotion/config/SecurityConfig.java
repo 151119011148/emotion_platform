@@ -41,7 +41,15 @@ public class SecurityConfig {
             .sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             .and()
             .authorizeRequests()
-                .antMatchers("/api/auth/**").permitAll()
+                // 只有「换 token 那一步」必须放行：登录时手里还没有 token。
+                // 注册虽已收拢（仅超管可调），但它同样拿不到 token，也只能放行，
+                // 权限在 AuthController 里判——那里能给出「仅超级管理员可操作账号」这句人话，
+                // 而 Spring 的 hasRole 只会回一个空响应体的 403。
+                .antMatchers("/api/auth/login", "/api/auth/register").permitAll()
+                // /me 与 /logout 必须已登录：被互踢下来的旧 token 要在这里拿到 401/403，
+                // 前端拦截器才会清 localStorage 并跳回登录页。放行的话只会拿到业务码 400，
+                // 页面停在原处，用户看不出自己已经被顶下线了。
+                .antMatchers("/api/auth/**").authenticated()
                 .anyRequest().authenticated()
             .and()
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);

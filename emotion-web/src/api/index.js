@@ -29,9 +29,18 @@ api.interceptors.response.use(
   },
   error => {
     if (error.response?.status === 401 || error.response?.status === 403) {
-      localStorage.removeItem('token')
-      router.push('/login')
-      ElMessage.error('登录已过期，请重新登录')
+      // skipAuthRedirect：退出登录自己发的那个请求。它本来就是把 token 作废的，
+      // 若返回 401（token 其实早就失效了）再走一遍重定向+红条，等于把一次正常退出说成掉线。
+      if (!error.config?.skipAuthRedirect) {
+        // 单点登录：账号在别处登录（或被管理员强制下线）时也会走到这里——
+        // 旧 token 版本号对不上，后端一律按未登录回 401。
+        localStorage.removeItem('token')
+        localStorage.removeItem('username')
+        localStorage.removeItem('nickname')
+        localStorage.removeItem('role')
+        router.push('/login')
+        ElMessage.error('登录已失效，请重新登录')
+      }
     } else if (!error.config?.skipErrorToast) {
       ElMessage.error(error.message || '网络错误')
     }

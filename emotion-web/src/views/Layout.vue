@@ -50,9 +50,18 @@
           <el-icon><SetUp /></el-icon>
           <span>D11 打分配置</span>
         </el-menu-item>
+        <!-- 只对超级管理员露出：注册入口收拢之后，开户/管号就只有这一个入口。
+             隐藏只是少个点，真正的判据在后端（角色不符一律 400）。 -->
+        <el-menu-item v-if="userStore.isSuperAdmin" index="/admin">
+          <el-icon><UserFilled /></el-icon>
+          <span>账号管理</span>
+        </el-menu-item>
       </el-menu>
       <div class="sidebar-footer">
-        <span class="user-name">{{ userStore.nickname || userStore.username }}</span>
+        <span class="user-name">
+          {{ userStore.nickname || userStore.username }}
+          <span v-if="userStore.isSuperAdmin" class="role-tag">超管</span>
+        </span>
         <el-button text size="small" @click="handleLogout">退出</el-button>
       </div>
     </el-aside>
@@ -76,10 +85,14 @@ const scoringStore = useScoringStore()
 const activeMenu = computed(() => route.path)
 
 // 生效打分模型的维度/权重：进外壳就拉一次，供仪表盘卡片与复盘页用（读不到则退回本地兜底常量）。
-onMounted(() => scoringStore.load())
+// 顺带刷一次身份：角色被改过或被管理员强制下线时，不用来到下一页才发现菜单不对。
+onMounted(() => {
+  scoringStore.load()
+  userStore.loadMe().catch(() => {})
+})
 
-function handleLogout() {
-  userStore.logout()
+async function handleLogout() {
+  await userStore.logout()
   router.push('/login')
 }
 </script>
@@ -124,6 +137,14 @@ function handleLogout() {
 .user-name {
   color: #8899a6;
   font-size: 13px;
+}
+.role-tag {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid #7a3b3b;
+  color: #f78989;
+  font-size: 11px;
 }
 .main-content {
   background: #0f1419;

@@ -16,8 +16,9 @@
           </el-button>
         </el-form-item>
       </el-form>
+      <!-- 注册入口已收拢：账号由超级管理员在「账号管理」页开通，这里不再给自助入口。 -->
       <div class="auth-footer">
-        还没有账号？<router-link to="/register">立即注册</router-link>
+        没有账号？请联系超级管理员开通
       </div>
     </div>
   </div>
@@ -79,10 +80,6 @@ async function handleLogin() {
   text-align: center;
   margin-top: 16px;
   color: #8899a6;
-  font-size: 14px;
-}
-.auth-footer a {
-  color: #3b82f6;
-  text-decoration: none;
+  font-size: 13px;
 }
 </style>

@@ -7,11 +7,8 @@ const routes = [
     name: 'Login',
     component: () => import('../views/Login.vue')
   },
-  {
-    path: '/register',
-    name: 'Register',
-    component: () => import('../views/Register.vue')
-  },
+  // /register 已下线：注册入口收拢到「账号管理」页，由超级管理员开户。
+  // 后端 /api/auth/register 仍保留（要求超管身份），但不再有前端路由。
   {
     path: '/',
     component: () => import('../views/Layout.vue'),
@@ -67,6 +64,13 @@ const routes = [
         path: 'scoring',
         name: 'Scoring',
         component: () => import('../views/ScoringAdminView.vue')
+      },
+      {
+        // 路由本身不校验角色：后端会挡，前端这里也拦一道只是为了让地址栏直接敲
+        // /admin 的普通用户看到「无权限」而不是一个永远空着的表格
+        path: 'admin',
+        name: 'Admin',
+        component: () => import('../views/AdminView.vue')
       },
       {
         path: 'waverider',

@@ -2,7 +2,29 @@ import api from './index'
 
 export const authApi = {
   login: (data) => api.post('/auth/login', data),
-  register: (data) => api.post('/auth/register', data)
+  // 注册接口后端保留（已要求超管身份，前端无任何入口），这里只留契约，页面不再调用
+  register: (data) => api.post('/auth/register', data),
+  // 进外壳时拉一次：角色被改过、被强制下线，不用等下次登录才生效。
+  // 取不到时页面保持登录态（token 还在），由其它请求的 401 来决定要不要踢出去
+  me: () => api.get('/auth/me', { skipErrorToast: true }),
+  // 退出：让后端把令牌版本号 +1，这个 token 当场作废。
+  // skipAuthRedirect：这一步返回 401 属于正常（token 本就要作废），不该被说成掉线
+  logout: () => api.post('/auth/logout', null, { skipErrorToast: true, skipAuthRedirect: true })
+}
+
+/**
+ * 账号管理：/api/admin/users，只有 SUPER_ADMIN 能调。
+ *
+ * 前端的 v-if 只是少显示一个入口，真正的判据在后端（token 里的角色声明）——
+ * 手敲地址一样会被挡回来，返回 400「仅超级管理员可操作账号」。
+ */
+export const adminApi = {
+  users: () => api.get('/admin/users'),
+  createUser: (data) => api.post('/admin/users', data),
+  updateUser: (id, data) => api.put(`/admin/users/${id}`, data),
+  deleteUser: (id) => api.delete(`/admin/users/${id}`),
+  // 强制下线：只作废已签发的 token，账号与密码都不动
+  kickUser: (id) => api.post(`/admin/users/${id}/kick`)
 }
 
 export const recordApi = {
