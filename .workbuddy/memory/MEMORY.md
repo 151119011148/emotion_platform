@@ -45,6 +45,8 @@
 - 布局：jar `/opt/emotion/app/emotion-server.jar`、静默页 `/var/www/emotion-web`、服务 `emotion-server.service`（Restart=always，**启动失败会无限重启刷日志**）、nginx 反代 8080。
 - **不做两件事**：不跑 `init_full.sql`（每表 `DROP TABLE IF EXISTS`）、不覆盖远端 yml 的 JWT（重生成会让全员掉线）。**服务器上没有源码目录、没有历史 jar 备份** → 覆盖前先备份。
 - **探活别只用 8 秒**：Spring Boot 约 20 秒才 `Started EmotionApplication`，期间 `/api` 一律 502。要轮询到 `Started EmotionApplication` 或业务码。
+- **`deploy_alinux.py` 结尾那个「发版完成 ✔」不可信**（2026-09-30 实测）：它的健康检查打太早，拿到 nginx 的 502 页面却标成 `首页 HTTP=200` 就收工了。发版后自己再验一遍：SSH 轮询 `journalctl -u emotion-server` 等到 `Started EmotionApplication`，看 Flyway 那几行，再从本机打 `/api/auth/login` 端到端。
+- **脚本不备份旧 jar**（只做 `.new` + `mv`），而服务器上没有历史备份 → 发版前先 `cp -n emotion-server.jar emotion-server.jar.bak-<日期>`。
 - 端到端验证：`POST /api/auth/login`（gaofeng/123456）拿 token → 打目标接口；改动落库的先 `dryRun:true` 再真跑。
 
 ## 本机构建验证（详见 `MEMORY-build-verify.md`）
