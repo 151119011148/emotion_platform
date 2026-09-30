@@ -17,7 +17,8 @@
          写口是「整日替换」，所以这一天的每一行都会原样带上——包括没动的行。 -->
     <div class="edit-bar" v-if="dirtyCount">
       <b>{{ dirtyCount }} 行有改动</b>
-      <span class="mini">将整日重写 {{ latestDate }} 的 {{ todayRows.length }} 行持仓（旧行服务端自动快照进历史表）</span>
+      <span class="mini" v-if="pendingMoves.length">清仓按今天记账：{{ pendingMoves.length }} 行将在今天（{{ localToday() }}）建清仓行，{{ latestDate }} 快照恢复持仓中</span>
+      <span class="mini" v-else>将整日重写 {{ latestDate }} 的 {{ todayRows.length }} 行持仓（旧行服务端自动快照进历史表）</span>
       <el-button size="small" type="primary" plain :loading="saving" @click="saveEdits">保存</el-button>
       <el-button size="small" text @click="edits.clear()">放弃</el-button>
     </div>
@@ -65,7 +66,7 @@
     <div class="sec" v-if="tab === 'holding' || tab === 'all'">
       <div class="sec-hd">
         <h2>🏷 当前持仓（{{ holdingRows.length }} 只）</h2>
-        <div class="note">现价自动取行情表 · 卖价/卖出量/状态/纪律可就地改（状态改「今日清仓」只是台账更正，闭环仍用上方「标记执行」）</div>
+        <div class="note">现价自动取行情表 · 卖价/卖出量/状态/纪律可就地改 · 状态改「今日清仓」＝按今天真实清仓日记账（快照日早于今天时清仓行自动搬到今天）；更正历史某天请回那天的复盘页</div>
       </div>
       <div class="sec-bd">
         <el-table :data="holdingRows" style="width: 100%" empty-text="快照日无持仓中记录">
@@ -536,22 +537,67 @@ function discClass(v) {
   return v === '遵守' ? 'grn' : v === '违约' ? 'red' : v === '待执行' ? 'yel' : ''
 }
 
+/** 本地日期（非 UTC）：toISOString 在 0-8 点会掉到昨天，这里按本地时区拼。 */
+function localToday() {
+  const d = new Date()
+  const p = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+/** 一行转成整日替换的 payload：改动优先，缺省补 null（少一个键＝那一列被抹掉）。 */
+function payloadOf(r) {
+  const o = {}
+  POS_KEYS.forEach(k => { o[k] = fieldOf(r, k) === undefined ? null : fieldOf(r, k) })
+  return o
+}
+
+/** 清仓发生时的属性格：状态翻「今日清仓」时它们跟着清仓行搬到今天，不留在历史快照上。 */
+const CLEAR_KEYS = ['sellPrice', 'sellQty', 'delayDays', 'disciplineScore']
+
+/** 「今天点的清仓」：快照日早于今天、状态被改成今日清仓的行——保存时清仓会记到今天。 */
+const pendingMoves = computed(() => todayRows.value.filter(r => {
+  const e = edits.get(r.id)
+  return !!e && e.status === '今日清仓' && r.tradeDate < localToday()
+}))
+
 async function saveEdits() {
   const date = latestDate.value
   if (!date || !edits.size) return
-  const payload = todayRows.value.map(r => {
-    const o = {}
-    POS_KEYS.forEach(k => {
-      const v = fieldOf(r, k)
-      o[k] = v === undefined ? null : v
-    })
-    return o
-  })
+  const today = localToday()
   saving.value = true
   try {
-    await recordApi.savePositions(date, payload)
-    edits.clear()
-    ElMessage.success(`已整日重写 ${date} 的 ${payload.length} 行（旧行已自动快照）`)
+    if (!pendingMoves.value.length) {
+      const payload = todayRows.value.map(payloadOf)
+      await recordApi.savePositions(date, payload)
+      edits.clear()
+      ElMessage.success(`已整日重写 ${date} 的 ${payload.length} 行（旧行已自动快照）`)
+    } else {
+      const movedIds = new Set(pendingMoves.value.map(r => r.id))
+      // 旧快照日：被搬走的行恢复「持仓中」，清仓属性还原为原值；其余编辑照常保留
+      const oldPayload = todayRows.value.map(r => {
+        const o = {}
+        POS_KEYS.forEach(k => {
+          o[k] = movedIds.has(r.id) && CLEAR_KEYS.includes(k)
+            ? (r[k] === undefined ? null : r[k])
+            : (fieldOf(r, k) === undefined ? null : fieldOf(r, k))
+        })
+        if (movedIds.has(r.id)) o.status = '持仓中'
+        return o
+      })
+      // 今天：已有行原样带上；搬过去的行按当前视图复制成今天的清仓行
+      const newPayload = rows.value.filter(r => r.tradeDate === today).map(payloadOf)
+      for (const r of pendingMoves.value) {
+        const o = payloadOf(view(r))
+        o.status = '今日清仓'
+        const dup = newPayload.find(x => x.stockCode === r.stockCode)
+        if (dup) Object.assign(dup, o)   // 今天已有该标的的行：并入，不重复建行
+        else newPayload.push(o)
+      }
+      await recordApi.savePositions(date, oldPayload)
+      await recordApi.savePositions(today, newPayload)
+      edits.clear()
+      ElMessage.success(`清仓已记到今天 ${today}（${pendingMoves.value.length} 行），${date} 快照恢复持仓中`)
+    }
     await loadAll()
   } catch (e) { /* 拦截器已弹：改动留着，别让人重敲一遍 */ } finally { saving.value = false }
 }
