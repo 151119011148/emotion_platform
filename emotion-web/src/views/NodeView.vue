@@ -392,7 +392,8 @@
           <div class="plan-row">锚定龙头：{{ plan.anchorStock || '—' }}（{{ plan.anchorMaxBoard }}板）</div>
           <div class="plan-row">题材/板块：{{ plan.theme || '（可不填）' }}</div>
           <div class="plan-row">D0 日期：{{ plan.d0Date || '—' }}</div>
-          <div class="plan-row">候选票（D0 二板）：{{ plan.candsText }}</div>
+          <div class="plan-row">D0 当天二板（登记）：{{ plan.candsText }}</div>
+          <div class="plan-tip">复算的接位候选池按老龙放量日重定，未必是这一批——以面板上「候选 …」那枚为准</div>
           <div class="plan-row">前置过滤器：涨停{{ plan.limitUpCount ?? '未知' }} / 跌停{{ plan.limitDownCount ?? '未知' }}</div>
         </div>
       </template>
@@ -608,7 +609,7 @@ function pickedLeader() {
   const c = leaderChoices.value.find(x => x.ld.code === ladderPickedCode.value)
   return c ? c.ld : null
 }
-/** 天梯方案预览：以所选龙头为锚，候选取 D0 的二连板。板块节点（原系统B）已下线，不再产出同板块收敛版本。 */
+/** 天梯方案预览：以所选龙头为锚，把 D0 当天的二板预填进登记项。板块节点（原系统B）已下线，不再产出同板块收敛版本。 */
 const plan = computed(() => buildPlan(pickedLeader()))
 function buildPlan(ld) {
   const d0 = ladderPreview.value.date || ''
@@ -617,9 +618,9 @@ function buildPlan(ld) {
   if (!ld) {
     return { anchorStock: '', anchorMaxBoard: 0, theme: '', d0Date: d0, candsText: '', limitUpCount: limitUp, limitDownCount: limitDown, cands: [] }
   }
-  // §三「D0 候选＝当天的二板」，复算的分母也是这个口径。intel.leaders 是全场 ≥2 板，
-  // 整份存进 d0_candidates 会让策略选股页把 4 板、5 板也标成 D0 候选，跟复算表对不上。
-  // 只收二板，leaders 本身不动——龙头下拉要的是当日最高板。
+  // 预填的是 d0_candidates——他手工登记的那一格，取 D0 当天板数正好为 2 的那批：
+  // intel.leaders 是全场 ≥2 板，整份存进去会让策略选股页把 4 板、5 板也标成 D0 候选。
+  // 接位的候选池不由这里定：服务端复算按老龙放量日决定哪天、几板，页面不抄第二遍判据。
   const cands = ladderLeaders.value.filter(x => Number(x.board) === 2).map(x => x.name)
   const candsText = cands.length
     ? cands.slice(0, 6).join('、') + (cands.length > 6 ? ' 等' + cands.length + '只' : '')
@@ -1017,6 +1018,7 @@ onMounted(() => {
 .plan-card { background: #0f1720; border: 1px solid #2a3a52; border-radius: 10px; padding: 14px 16px; }
 .plan-title { color: #ffd166; font-weight: 600; font-size: 13px; margin-bottom: 10px; }
 .plan-row { color: #e1e8ed; font-size: 12px; line-height: 1.9; }
+.plan-tip { color: #8899a6; font-size: 11px; line-height: 1.6; margin: -4px 0 6px; }
 </style>
 
 <style>

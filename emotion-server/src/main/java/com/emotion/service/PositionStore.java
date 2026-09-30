@@ -132,6 +132,23 @@ public class PositionStore {
     }
 
     /**
+     * 最近 N 条<b>已裁决</b>持仓：executed=1 且回填了实际动作，按决策日降序。
+     *
+     * <p>仪表盘待裁决列表空了以后用它留一行痕迹——裁决一关就什么都不剩，
+     * 既回看不了「上次处理了什么」，也少了跳台账的入口。
+     * 只认回填了 actual_action 的行：executed=1 而动作是空的属于半闭环，不该被当成"处理过了"展示。
+     */
+    public List<Position> executedList(Long userId, int limit) {
+        return mapper.selectList(new LambdaQueryWrapper<Position>()
+                .eq(Position::getUserId, userId)
+                .eq(Position::getExecuted, 1)
+                .isNotNull(Position::getActualAction)
+                .orderByDesc(Position::getTradeDate)
+                .orderByAsc(Position::getId)
+                .last("LIMIT " + Math.max(1, limit)));
+    }
+
+    /**
      * 跨日全量台账（持仓与台账页）：该用户全部行，按日期升序、行序稳定。
      * days>0 时只取近 N 个自然日——标的维度生命周期与纪律统计要的就是这个跨日视角。
      */

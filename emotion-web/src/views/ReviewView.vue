@@ -320,7 +320,11 @@
                     class="pend-tier">{{ p.nextDayPlan }}</span>
             </span>
             <span class="pend-act">
-              <el-input v-model="pendingAct[p.id]" size="small" placeholder="今日实际动作" style="width: 150px" />
+              <el-select v-model="pendingAct[p.id].action" size="small" placeholder="今日实际动作" style="width: 118px">
+                <el-option v-for="a in PEND_ACTIONS" :key="a" :label="a" :value="a" />
+              </el-select>
+              <el-input-number v-if="pendNeedsPrice(pendingAct[p.id].action)" v-model="pendingAct[p.id].price"
+                size="small" :min="0" :precision="2" :controls="false" placeholder="成交价" style="width: 88px" />
               <el-button size="small" type="primary" plain :loading="markingPend" @click="markExecuted(p)">标记执行</el-button>
             </span>
           </div>
@@ -427,7 +431,7 @@
             <el-table-column label="股数" width="76">
               <template #default="{ row }">
                 <el-input-number v-model="row.quantity" size="small" :min="1" :step="100" :controls="false"
-                  style="width: 100%" placeholder="股数" />
+                  style="width: 100%" placeholder="股数" @change="syncStatus(row)" />
               </template>
             </el-table-column>
             <!-- 当日了结：卖价是你真卖出的那一笔，不是收盘价（现价那列是行情自动补的）。
@@ -445,7 +449,8 @@
             <el-table-column label="卖出量" width="80">
               <template #default="{ row }">
                 <el-input-number v-model="row.sellQty" size="small" :min="1" :step="100" :controls="false"
-                  style="width: 100%" :placeholder="row.status === '今日清仓' && row.quantity ? String(row.quantity) : '减仓'" />
+                  style="width: 100%" :placeholder="row.status === '今日清仓' && row.quantity ? String(row.quantity) : '减仓'"
+                  @change="syncStatus(row)" />
               </template>
             </el-table-column>
             <el-table-column label="浮动%" width="78">
@@ -726,6 +731,11 @@ const pendingCarry = ref([])
 const pendingCarryDate = ref('')
 const pendingAct = ref({})
 const markingPend = ref(false)
+/* 遗留决策的实际动作走下拉：涉及成交的三档要记成交价，持有不动没有价 */
+const PEND_ACTIONS = ['清仓', '减仓', '加仓', '持有不动']
+function pendNeedsPrice(action) {
+  return !!action && action !== '持有不动'
+}
 
 async function loadRecord(date) {
   formReady.value = false
@@ -960,6 +970,17 @@ function removePos(row) {
 function onStatusChange(row) {
   if (row.status !== '今日清仓') { row.delayDays = null; row.disciplineScore = null }
 }
+/** 卖量 ≥ 股数 → 自动切清仓；反过来改回持仓中。省得每次手拉下拉框。 */
+function syncStatus(row) {
+  const q = Number(row.quantity) || 0
+  const s = Number(row.sellQty) || 0
+  if (q > 0 && s >= q) {
+    row.status = '今日清仓'
+  } else if (row.status === '今日清仓' && s < q) {
+    row.status = '持仓中'
+    onStatusChange(row)
+  }
+}
 
 function round2(v) { return Math.round(Number(v) * 100) / 100 }
 
@@ -1041,15 +1062,19 @@ async function loadPendingCarry(date) {
   pendingCarry.value = list
   pendingCarryDate.value = list.length ? (list[0].tradeDate || '').slice(0, 10) : ''
   const acts = {}
-  for (const p of list) acts[p.id] = p.actualAction || ''
+  for (const p of list) acts[p.id] = { action: '', price: null }
   pendingAct.value = acts
 }
 
 /* 外溢闭环：标记执行，回填实际动作，关闭裁决 */
 async function markExecuted(p) {
+  const pick = pendingAct.value[p.id] || { action: '', price: null }
+  if (!pick.action) { ElMessage.warning('请先选择今日实际动作'); return }
+  const action = pendNeedsPrice(pick.action) && pick.price != null
+    ? `${pick.action} @ ${pick.price}` : pick.action
   markingPend.value = true
   try {
-    await recordApi.markPositionExecuted(p.id, pendingAct.value[p.id] || '')
+    await recordApi.markPositionExecuted(p.id, action)
     ElMessage.success(`${p.stockName} 今日处理已记录，裁决关闭`)
     await loadPendingCarry(form.tradeDate)
     loadPositions(form.tradeDate).catch(() => {})

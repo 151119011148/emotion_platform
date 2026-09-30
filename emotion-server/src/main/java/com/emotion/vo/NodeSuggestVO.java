@@ -32,7 +32,7 @@ public class NodeSuggestVO {
     /** 状态来路细分原因：有效·强/有效·中等/有效·板块达标；反包失效/晋级清零失效。采纳时写进 conclusion_reason。 */
     private String conclusionReason;
 
-    // ---- 建议写入的九个字段（今天前端一个字都写不进去的那九个），全部与实体同名同类型 ----
+    // ---- 建议写入的十个字段（今天前端一个字都写不进去的那十个），全部与实体同名同类型 ----
     private LocalDate t1Date;
     private Integer t1AnchorRepack;
     private Integer t1PromotionCount;
@@ -56,6 +56,16 @@ public class NodeSuggestVO {
     /** {@link #repairStatus} 的中文展示名，进破壁分支指纹的就是这一份。 */
     private String repairStatusLabel;
 
+    // ---- 接位候选池：哪一天、取几板，由老龙的放量日决定，不是写死的"D0 二板" ----
+    /** 候选日：老龙断板前一日已放量＝D0，隔天才放量＝那个放量日。破壁分支恒 null。 */
+    private LocalDate candidateDate;
+    /** 候选板数：跟 {@link #candidateDate} 同源，2＝二连板，1＝首板。 */
+    private Integer candidateBoard;
+    /** 候选池的规范标签（{@code 2026-09-23 首板}），采纳落库、进高低切指纹的第十键。 */
+    private String candidatePool;
+    /** 放量依据一句白话：比的哪两天、各多少亿、几倍，为什么取这天的这个板。 */
+    private String heavyBasis;
+
     private Promotion promotion;
     private List<FilterItem> filter = new ArrayList<>();
     /** 四条前置过滤器全过才 true；有读数缺就 null——兜成 false 会把"未知"讲成"不通过"。 */
@@ -65,7 +75,7 @@ public class NodeSuggestVO {
     private List<String> missing = new ArrayList<>();
 
     /**
-     * 九个建议值 + 建议状态的规范 JSON。采纳时必须原样带回来，服务端重算后逐字段比对。
+     * 十个建议值 + 建议状态的规范 JSON。采纳时必须原样带回来，服务端重算后逐字段比对。
      *
      * <p>用一串规范文本而不是让前端回传八个字段：他要点的就是"这个结论"，中间不该再有一次
      * 序列化把 50.00 变成 50、把 有效 变成别的东西。指纹不一致 ⇒ 那天的盘面在这期间被回补过 ⇒ 拒。

@@ -20,6 +20,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -141,6 +142,44 @@ public class DailyRecordService {
         dailyRecordMapper.updateById(record);
         resequence(userId);
         return record;
+    }
+
+    /**
+     * 定时任务专用的录入：<b>只写客观数据</b>。
+     *
+     * <p>那天没有记录就补一行空壳（只有 user_id + trade_date；客观九数由 {@code fillMarketDefaults}
+     * 从 t_market_daily 回填，五维/温度/阶段带交给引擎算），有记录就只重算派生列。
+     * 十三项主观字段（主线/龙头/轮动/复盘笔记/明日计划/仓位/manual_*）与持仓台账一个字都不碰——
+     * 那些归他人工维护，机器代填等于把「没判断」伪装成「判断过了」。
+     *
+     * <p>刻意不走 {@link #createOrUpdate}：那条路 {@code copyFields} 的 else 分支会把
+     * {@code stage_overridden} 洗成 0，一个空请求打上去就抹掉了他改判过的标记。
+     *
+     * <p>改判过的阶段带按 {@link #importManual} 的同一套读法保住，机器算出来的 stage 盖不上去。
+     *
+     * @return true = 新建了一行；false = 本来就有（只重算）
+     */
+    public boolean ensureObjectiveRecord(Long userId, LocalDate date) {
+        DailyRecord existing = rawByDate(userId, date);
+        DailyRecord record = existing != null ? existing : blank(userId, date);
+
+        boolean overridden = existing != null && existing.getStageOverridden() != null
+                && existing.getStageOverridden() == 1 && !isBlank(existing.getStage());
+        String manualStage = overridden ? existing.getStage() : null;
+
+        scoreAndPlace(userId, date, record);
+        if (manualStage != null) {
+            record.setStage(manualStage);
+        }
+
+        save(userId, date, record, existing);
+        return existing == null;
+    }
+
+    /** 写过复盘的账号名单：定时任务只给这些人补客观行，不给没用过复盘的账号凭空建行。 */
+    public List<Long> reviewerUserIds() {
+        List<Long> ids = dailyRecordMapper.listReviewerUserIds();
+        return ids == null ? Collections.emptyList() : ids;
     }
 
     /** 按日期升序逐日重算：prevTemperature 读的是上一条，倒着跑会让前一天的温差取自一个还没更新的数。 */

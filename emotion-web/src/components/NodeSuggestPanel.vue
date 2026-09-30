@@ -6,6 +6,10 @@
         <el-tag :type="statusType(s.suggestedStatus)" size="small">建议 {{ s.suggestedStatus }}</el-tag>
         <!-- 类型是采纳要落的第九个值，进指纹：看不见就点采纳，点的就是个假的采纳 -->
         <span class="ntag" v-if="s.nodeType" :class="'nt-' + s.nodeType">建议 {{ s.nodeTypeLabel }}</span>
+        <!-- 候选池是采纳要落的第十格：接位认的是哪一天的几板，看不见就点采纳等于签了个不知道对象的结论 -->
+        <el-tag v-if="s.candidatePool" size="small" effect="plain" type="info">
+          候选 {{ s.candidatePool }}
+        </el-tag>
         <!-- 续板判定只有破壁两行有，它进指纹：没看见就点采纳，采纳的就是个假的那一格 -->
         <el-tag v-if="s.repairStatusLabel" size="small" :type="repairType(s.repairStatus)" effect="plain">
           续板 {{ s.repairStatusLabel }}
@@ -38,6 +42,7 @@
     </p>
 
     <template v-if="s && s.promotion">
+      <p class="basis" v-if="s.heavyBasis">放量依据：{{ s.heavyBasis }}</p>
       <p class="basis">{{ s.promotion.basis }}</p>
       <p class="basis">判据：{{ s.promotion.threshold }}</p>
       <el-table v-if="s.promotion.items && s.promotion.items.length" :data="s.promotion.items"

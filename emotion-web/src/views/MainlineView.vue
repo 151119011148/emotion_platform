@@ -177,29 +177,29 @@
         <h4 class="radar-sub">板块表 <span class="sub">全量行业 · {{ vo.radar?.length || 0 }} 个 · 只显示前 5</span></h4>
         <el-empty v-if="!vo.radar?.length" description="当日无涨停行业" :image-size="60" />
         <el-table v-else :data="boardView" size="small" class="radar-table">
-          <el-table-column type="index" label="排名" width="56" align="center" :index="rankIndex" />
-          <el-table-column prop="industry" label="行业" min-width="110" show-overflow-tooltip>
+          <el-table-column type="index" label="排名" width="52" align="center" :index="rankIndex" />
+          <el-table-column prop="industry" label="行业" min-width="90" show-overflow-tooltip>
             <template #default="{ row }">
               <span :class="{ 'main-row': row.industry === vo.mainIndustry }">{{ row.industry }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="涨停" width="64" align="center">
+          <el-table-column label="涨停" width="58" align="center">
             <template #default="{ row }">{{ row.zt }}</template>
           </el-table-column>
-          <el-table-column label="聚集%" width="72" align="right">
+          <el-table-column label="聚集%" width="68" align="right">
             <template #default="{ row }">{{ row.ztGatherPct != null ? Number(row.ztGatherPct).toFixed(1) : '—' }}</template>
           </el-table-column>
-          <el-table-column label="最高板" width="64" align="center">
+          <el-table-column label="最高板" width="60" align="center">
             <template #default="{ row }">{{ nz(row.maxBoard) }}</template>
           </el-table-column>
-          <el-table-column label="连续" width="80" align="center">
+          <el-table-column label="连续" width="82" align="center">
             <template #default="{ row }">
               <el-tag :type="FLAG_TYPE[row.flag] || 'info'" size="small" effect="plain">
                 {{ row.persistenceDays }} 天{{ row.flag === 'NEW' ? ' 🆕' : row.flag === 'MAIN' ? ' ⭐主线' : '' }}
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="板块龙头" min-width="120">
+          <el-table-column label="板块龙头" min-width="180">
             <template #default="{ row }">
               <template v-if="row.leader">
                 {{ row.leader.name }}（{{ row.leader.code }} · {{ nz(row.leader.board) }}板）
@@ -207,7 +207,7 @@
               <span v-else class="missing">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="96" align="center">
+          <el-table-column label="操作" width="90" align="center">
             <template #default="{ row }">
               <el-button v-if="isCurrentManual(row)" size="small" type="danger" plain :loading="busy" @click="cancelPromote(row.industry)">取消升级</el-button>
               <el-button v-else size="small" type="primary" plain :loading="busy" @click="promote(row.industry)">升级</el-button>
@@ -221,20 +221,20 @@
           :title="`今日全市场涨停 ${nz(themesData.totalZt)} 只，已归类 ${nz(themesData.assigned)} 只，未归类 ${nz(themesData.unassigned)} 只`" />
         <el-empty v-if="themeLoading" description="题材表读取中…" :image-size="60" />
         <el-table v-else-if="themesData?.themes?.length" :data="themesView" size="small" class="radar-table">
-          <el-table-column type="index" label="排名" width="52" align="center" :index="rankIndex" />
-          <el-table-column label="题材" min-width="108" show-overflow-tooltip>
+          <el-table-column type="index" label="排名" width="48" align="center" :index="rankIndex" />
+          <el-table-column label="题材" min-width="90" show-overflow-tooltip>
             <template #default="{ row }">
               <!-- 与板块表一致用纯文字：el-tag effect=plain 的浅色底在深色表里显白 -->
               <span :class="{ 'main-row': row.mainLine }">{{ row.name }}{{ row.mainLine ? ' ⭐主线' : '' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="涨停" width="56" align="center">
+          <el-table-column label="涨停" width="52" align="center">
             <template #default="{ row }">{{ row.ztCount }}</template>
           </el-table-column>
-          <el-table-column label="强度" width="64" align="right">
+          <el-table-column label="强度" width="58" align="right">
             <template #default="{ row }">{{ Number(row.strength).toFixed(1) }}</template>
           </el-table-column>
-          <el-table-column label="最高板" width="58" align="center">
+          <el-table-column label="最高板" width="56" align="center">
             <template #default="{ row }">{{ nz(row.maxBoard || 0) }}</template>
           </el-table-column>
           <el-table-column label="连续" width="82" align="center">
@@ -249,15 +249,15 @@
               <el-rate :model-value="row.hardness || 0" disabled size="small" text-color="#fbbf24" />
             </template>
           </el-table-column>
-          <el-table-column label="生命周期" width="74" align="center">
+          <el-table-column label="生命周期" width="72" align="center">
             <template #default="{ row }">
               <el-tag size="small" :type="STAGE_TYPE[row.status] || 'info'" effect="dark">{{ row.status }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="关联板块" min-width="128" show-overflow-tooltip>
+          <el-table-column label="关联板块" min-width="180" show-overflow-tooltip>
             <template #default="{ row }">{{ (row.industries || []).join(' + ') || '—' }}</template>
           </el-table-column>
-          <el-table-column label="题材龙头" min-width="118">
+          <el-table-column label="题材龙头" min-width="160">
             <template #default="{ row }">
               <template v-if="row.leader">{{ row.leader.name }}（{{ row.leader.code }} · {{ nz(row.leader.board) }}板）</template>
               <span v-else class="missing">—</span>

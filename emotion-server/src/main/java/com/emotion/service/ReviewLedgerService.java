@@ -249,6 +249,16 @@ public class ReviewLedgerService {
     }
 
     /**
+     * 仪表盘「最近已裁决」痕迹行：已标记执行并回填了实际动作的最近 N 条。
+     *
+     * <p>刻意不 {@link #backfill}：痕迹行只显示名称、实际动作与决策日，
+     * 行情/行业/板数那几次回填在这里是白跑的。
+     */
+    public List<Position> executedPositions(Long userId, int limit) {
+        return positionStore.executedList(userId, limit);
+    }
+
+    /**
      * 跨日全量台账（持仓与台账页）：days 缺省=365 自然日，0=不限。
      * 行是各日快照原样返回，按标的聚合生命周期/纪律统计放在页面做——
      * 聚合口径跟着页面改时不用每次都动接口。
