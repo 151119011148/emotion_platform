@@ -270,12 +270,14 @@ function goLedger() {
 const executedList = ref([])
 async function loadExecuted() {
   try {
+    // 痕迹行说的是「上一次裁决」，不是「最近三条」：只认最新那个决策日的那批。
+    // 判据不碰实际动作的文本——「水下已割」「竞价走了半仓，炸板走了半仓」这类手记说法
+    // 筛不掉，09-11 / 09-14 那种早就出干净的行就会一直挂着；那属于历史流水，归 D10 管。
+    // 多取几条：一个裁决日往往不止一行。
     const res = await recordApi.executedPositions(10)
-    // 清仓＝仓位已经出干净了，没有还要回台账改的东西，摆在这里只是噪音。
-    // 多取几条再筛：只取 3 条的话，连着三条都是清仓就整行空掉了。
-    executedList.value = (res?.data || [])
-      .filter((p) => !(p.actualAction || '').includes('清仓'))
-      .slice(0, 3)
+    const all = res?.data || []
+    const lastDay = all.length ? all[0].tradeDate : null
+    executedList.value = all.filter((p) => p.tradeDate === lastDay && p.status !== '今日清仓')
   } catch (e) { executedList.value = [] }
 }
 
