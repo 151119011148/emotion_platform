@@ -15,4 +15,8 @@ public interface TradingHolidayMapper extends BaseMapper<TradingHoliday> {
     @Select("SELECT trade_date FROM t_trading_holidays "
             + "WHERE trade_date >= #{from} AND trade_date <= #{to} ORDER BY trade_date")
     List<LocalDate> listBetween(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /** 整张表，升序。给日期面板用：未来段的休市日也要知道，不能只到今天为止。 */
+    @Select("SELECT trade_date FROM t_trading_holidays ORDER BY trade_date")
+    List<LocalDate> listAll();
 }

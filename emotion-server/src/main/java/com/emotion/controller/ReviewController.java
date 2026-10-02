@@ -140,6 +140,20 @@ public class ReviewController {
         return ApiResponse.ok(days);
     }
 
+    /**
+     * 整张休市表，升序，含今天之后的官方休市日。
+     * 日期面板要拿它分清「休市」和「未到」两种不可选日——/trading-days 只给到今天为止，
+     * 未来那段的国庆/元旦落在工作日时会被当成「未到」，标识就错了。
+     */
+    @GetMapping("/holidays")
+    public ApiResponse<List<String>> holidays() {
+        List<String> out = new ArrayList<>();
+        for (LocalDate d : tradingHolidayMapper.listAll()) {
+            out.add(d.toString());
+        }
+        return ApiResponse.ok(out);
+    }
+
     /** 股票远程搜索（A股字典 t_stock）：按代码前缀 / 名称模糊，供持仓台账选股下拉使用。 */
     @GetMapping("/stocks/search")
     public ApiResponse<List<com.emotion.entity.Stock>> searchStocks(@RequestParam String kw) {

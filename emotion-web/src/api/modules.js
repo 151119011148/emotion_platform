@@ -33,7 +33,8 @@ export const recordApi = {
   getToday: () => api.get('/records/today'),
   // 仪表盘点曲线回看历史日：某天确实没录时页面自己降级，不弹红条
   getByDate: (date) => api.get(`/records/date/${date}`, { skipErrorToast: true }),
-  getRange: (start, end) => api.get('/records/range', { params: { start, end } }),
+  // config 可选：后台静默取数（算分位带那条）要能压掉红条
+  getRange: (start, end, config) => api.get('/records/range', { params: { start, end }, ...config }),
   getLatest: (days = 20) => api.get('/records/latest', { params: { days } }),
   getAdvice: () => api.get('/records/advice'),
   getCurve: (days = 20) => api.get('/records/curve', { params: { days } }),
@@ -92,8 +93,12 @@ export const nodeApi = {
  */
 export const prdApi = {
   tianti: (date) => api.get('/tianti', { params: { date }, timeout: 25000, skipErrorToast: true }),
-  // 连板高度曲线：日期区间内每天最高连板高度及对应个股
-  heightRange: (start, end) => api.get('/tianti/height-range', { params: { start, end }, skipErrorToast: true }),
+  // 连板高度曲线：日期区间内每天最高连板高度及对应个股；ladder=true 才带当天 2 板以上的完整名单（节点页算轨迹用，天梯页不传）
+  heightRange: (start, end, ladder) =>
+    api.get('/tianti/height-range', {
+      params: ladder ? { start, end, ladder: true } : { start, end },
+      skipErrorToast: true
+    }),
   /**
    * 破壁详情：曲线上 ☆（试探）/★（破壁成功）那天的助攻、盘口、情绪闸门与次日结算。
    * 判定读的仍是服务端那一份，这里只是把那一天摆全；null 是"不知道"不是 0 只，页面照原样留空。
@@ -216,6 +221,8 @@ export const reviewApi = {
   conceptsStatus: () => api.get('/review/concepts/status', { skipErrorToast: true }),
   // 近 N 个月可复盘交易日（有涨停明细的日，降序，第一个=最近交易日）
   tradingDays: () => api.get('/review/trading-days', { skipErrorToast: true }),
+  // 整张官方休市表（含今天之后的），供日期面板分清「休市」与「未到」两种标识
+  holidays: () => api.get('/review/holidays', { skipErrorToast: true }),
   // 股票远程搜索（A股字典 t_stock）：按代码前缀/名称模糊，供持仓台账选股下拉
   searchStocks: (kw) => api.get('/review/stocks/search', { params: { kw }, skipErrorToast: true })
 }

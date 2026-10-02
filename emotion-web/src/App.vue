@@ -239,30 +239,42 @@ body {
   color: #ffd166;
 }
 
-/* ===== 日历格子：非交易日 vs 还没到的交易日 =====
-   class 由 utils/tradingCalendar.js 的 cellClass() 打到 td 上（后端只给到今天为止，
-   未来某天是否休市无从判断，故未来工作日一律按「未到」处理）。 */
-.el-date-table td.day-non-trading .el-date-table-cell {
-  background-color: rgba(255, 255, 255, .035);
-}
-.el-date-table td.day-non-trading .el-date-table-cell__text {
-  color: #56657a;
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
-  text-decoration-color: #56657a;
-}
+/* ===== 日历格子：两种不可选日，两种标识 =====
+   class 由 utils/tradingCalendar.js 的 cellClass() 打到 td 上。
+   休市=实心灰球＋划掉（周末或官方节假日，这一天永远不会有数据）；
+   未到=虚线空心球（今天之后的工作日，会有，只是还没到）。
+   EP 给 disabled 格子的整片浅灰底会把两种标记糊成一片，先清掉。 */
+.el-date-table td.day-non-trading .el-date-table-cell,
 .el-date-table td.day-future .el-date-table-cell {
   background-color: transparent;
 }
+.el-date-table td.day-non-trading .el-date-table-cell__text {
+  color: #5f6e80;
+  background-color: #2b3648;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  text-decoration-color: rgba(203, 213, 224, .5);
+}
 .el-date-table td.day-future .el-date-table-cell__text {
-  color: #5aa9c9;
-  border: 1px dashed rgba(90, 169, 201, .55);
+  color: #6f8ba3;
+  border: 1px dashed rgba(111, 139, 163, .7);
   box-sizing: border-box;
   line-height: 22px;
 }
-/* 面板底部一行图例，省得猜虚线/删除线什么意思（纯 CSS 注入，不动组件） */
+/* 跨月溢出的那几行 EP 已压暗表示「不在这个月」，再套标识会让面板凭空多出十来个格子 */
+.el-date-table td.prev-month.day-non-trading .el-date-table-cell__text,
+.el-date-table td.next-month.day-non-trading .el-date-table-cell__text {
+  background-color: transparent;
+  text-decoration: none;
+}
+.el-date-table td.prev-month.day-future .el-date-table-cell__text,
+.el-date-table td.next-month.day-future .el-date-table-cell__text {
+  border: none;
+  line-height: 24px;
+}
+/* 面板底部一行图例，省得猜实心/虚线什么意思（纯 CSS 注入，不动组件） */
 .el-date-picker .el-picker-panel__content::after {
-  content: '虚线圈 = 未到的交易日（暂无数据） ·  划掉的 = 休市 / 周末';
+  content: '实心划掉 = 休市（周末/节假日） 虚线圈 = 未到（今日之后） 两种都点不了';
   display: block;
   margin-top: 10px;
   font-size: 11px;
