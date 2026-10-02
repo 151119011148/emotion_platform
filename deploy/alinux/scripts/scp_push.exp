@@ -15,7 +15,8 @@
 # 注意：远端目录必须已存在——scp 不会帮我们创建目录，
 #       deploy.sh 里会先 ssh_run.exp "mkdir -p xxx" 再上传。
 # ============================================================================
-set timeout 300
+# 后端 fat jar 已 37 MB，300s 要求上行稳在 ~125 KB/s，实测会半路断（SCP_TIMEOUT）
+set timeout 1800
 
 set host [lindex $argv 0]
 set user [lindex $argv 1]
