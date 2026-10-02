@@ -82,7 +82,7 @@
         </div>
         <div class="score-meta">
           <span>温度 {{ fmtScore(score.temperature) }}</span>
-          <el-tag v-if="score.stage" size="small" :type="stageTagType">{{ score.stage }}</el-tag>
+          <el-tag v-if="headBand" size="small" :type="stageTagType">{{ headBand }}</el-tag>
           <el-tag v-if="score.forcedEbb === 1" size="small" type="danger" effect="dark">强制退潮</el-tag>
           <span v-if="score.scoredDims != null" class="muted">已评 {{ score.scoredDims }}/5 维</span>
         </div>
@@ -570,6 +570,7 @@ import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { recordApi, importApi, reviewApi, prdApi, d5Api, marketApi, anchorsApi } from '../api/modules'
 import { useTradingCalendar } from '../utils/tradingCalendar'
+import { bandOfPoint } from '../utils/stages'
 import { pnlOf, yuan, realizedOf } from '../utils/money'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import EditableStatCard from '../components/EditableStatCard.vue'
@@ -717,9 +718,13 @@ const FORM_OWNED_KEYS = ['upCount', 'downCount',
   'manualThemePersistenceDays', 'manualFirstPremiumPct', 'manualFirstSealedRate',
   'manualAnchorSupervisionDiscount', 'manualTopHighTurnoverPct', 'manualTopHighBreak']
 
+/** 复盘页那枚带名与仪表盘同源：库里落的还是绝对四条线，同一天的两处不能说两种话。 */
+const headBand = computed(() =>
+  bandOfPoint(score.value?.temperature, score.value?.scoredDims, score.value?.stage))
+
 const stageTagType = computed(() => {
-  const map = { '退潮': 'info', '混沌': '', '发酵': 'warning', '高潮': 'danger', '退潮(强制)': 'danger' }
-  return map[savedRecord.value?.stage] || 'info'
+  const map = { 冰点: 'primary', 退潮: 'info', 混沌: '', 发酵: 'warning', 沸点: 'danger', '退潮(强制)': 'danger' }
+  return map[headBand.value] || 'info'
 })
 
 const DISCIPLINES = ['遵守', '违约', '待执行']

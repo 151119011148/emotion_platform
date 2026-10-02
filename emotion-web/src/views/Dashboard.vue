@@ -95,7 +95,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { recordApi } from '../api/modules'
 import { useScoringStore } from '../stores/scoring'
-import { stageColorOf, seqOnly } from '../utils/stages'
+import { stageColorOf, seqOnly, bandOfRecord } from '../utils/stages'
+import { useTemperatureBands } from '../utils/temperatureBands'
 import TemperatureChart from '../components/TemperatureChart.vue'
 import IndicatorCards from '../components/IndicatorCards.vue'
 import StageLocator from '../components/StageLocator.vue'
@@ -113,6 +114,7 @@ const curveData = ref({ dates: [], temperatures: [], stages: [] })
 const advice = ref(null)
 const loadError = ref('')
 const scoring = useScoringStore()
+const { loadBands } = useTemperatureBands()
 
 /** MyBatis 的报错整串是带换行的堆栈，页面上只要中间那句 Cause；取不到就截断兜底。 */
 const loadErrorShort = computed(() => {
@@ -159,7 +161,7 @@ const currentTemp = computed(() => {
   return t.toFixed(1)
 })
 
-const currentStage = computed(() => headRecord.value?.stage || '')
+const currentStage = computed(() => bandOfRecord(headRecord.value))
 const delta = computed(() => {
   // 页头显示现算值时，落库的 prev_temperature 与它不同源，相减出来的 ± 是假信号
   if (tempDrift.value) return null
@@ -305,6 +307,7 @@ function backToToday() {
 }
 
 onMounted(() => {
+  loadBands()
   scoring.load()
   loadHead().then(loadDay)
   loadCurve()

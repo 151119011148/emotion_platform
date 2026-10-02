@@ -2,21 +2,28 @@
  * 「这一天是怎么被定成这个交易带的」+「今天亮着哪些结构信号」。
  *
  * 两个都只是读、不改分不改带；把已经算出来的结论后面那句没说出口的话补上。
- * 阈值/判据抄后端 BoardScoreCalculator，改那边必须改这里。
+ * 带位边界不在这份文件里抄：分位线由 utils/temperatureBands 现算，判带走 utils/stages。
+ * 结构信号（signal_flags）与强制退潮的判据仍在后端 BoardScoreCalculator，改那边要改这里。
  *
  * <p>旧 7 阶段时代的「反弹一/二/三段」「Δ 阈值 12°」都随 CycleStageMachine 下线；
  * record.stagePhase / stageSeq 保留字段但不再更新，本模块也不再读它们。
  */
+import { bandNameOf } from './stages'
+import { useTemperatureBands } from './temperatureBands'
 
-/** 与 BoardScoreCalculator 一致的 4 带下界；命中区间返回带名。 */
+const { cuts, bandSample } = useTemperatureBands()
+
+/** 分 → 带名（相对冷热定带）。 */
 export function stageBandOf(total) {
-  if (total == null) return ''
-  const v = Number(total)
-  if (Number.isNaN(v)) return ''
-  if (v >= 85) return '高潮'
-  if (v >= 60) return '发酵'
-  if (v >= 40) return '混沌'
-  return '退潮'
+  return bandNameOf(total)
+}
+
+/** 四条分位线一行写完：定带用的是哪几个数、样本多大，这句就是全部依据。 */
+function cutText() {
+  const [ice, ebb, ferment, climax] = cuts.value
+  const s = bandSample.value
+  return `分位带 冰点<${ice} / 退潮<${ebb} / 混沌<${ferment} / 发酵<${climax} / 沸点≥${climax}`
+    + `（${s.source}，${s.n} 个可比日）`
 }
 
 /**
@@ -35,7 +42,7 @@ export function stageBasis(record) {
   const tail = prev == null
     ? '（无前一日可比）'
     : `（较前一日 Δ ${(t - prev).toFixed(1)}，方向按 ±3 判定）`
-  return `水位触发：总分 ${t.toFixed(1)} 落在 4 带（<40 退潮 / 40-59 混沌 / 60-84 发酵 / ≥85 高潮）${tail}`
+  return `水位触发：总分 ${t.toFixed(1)} → ${bandNameOf(t)}，${cutText()}${tail}`
 }
 
 /**

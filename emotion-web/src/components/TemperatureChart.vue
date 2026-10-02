@@ -20,7 +20,10 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import * as echarts from 'echarts'
 import AxisZoomBar from './AxisZoomBar.vue'
 import { useCurveZoom, MIN_SPAN } from '../utils/curveZoom'
-import { STAGE_COLORS, NO_STAGE_COLOR } from '../utils/stages'
+import { STAGE_COLORS, NO_STAGE_COLOR, bandRanges, bandOfPoint } from '../utils/stages'
+import { useTemperatureBands } from '../utils/temperatureBands'
+
+const { cuts } = useTemperatureBands()
 
 const props = defineProps({
   data: { type: Object, default: () => ({ dates: [], temperatures: [], stages: [] }) },
@@ -55,21 +58,23 @@ function visibleView() {
 /**
  * 动态 y 量程：把坐标压到数据附近，日间波动才看得见（0-100 全量程会把 ±8° 的波动压成 8% 画布高度）。
  * 约束：
- *  - 40/60 两条带下界必须留在视野内（min(vMin,38)/max(vMax,62) 兜底），放大波动不能丢位置参照；
+ *  - 中间两条分位线（混沌带的上下边：退潮上界 / 混沌上界）必须留在视野内，
+ *    放大波动不能把位置参照丢掉；
  *  - 数据里有负温度（旧引擎每维 -1 分可到 -33.3）时下界必须 ≤0，否则负数段会被裁掉；
- *  - 85 线数据够高才进视野，够不到就不画（markLine 超界自动不渲染）。
+ *  - 上下两条带线（冰点上界 / 沸点线）数据够得到才进视野，够不到就不画（markLine 超界自动不渲染）。
  */
 function yRange(temperatures) {
   const values = (temperatures || []).filter((t) => t != null)
   if (!values.length) return { yMin: 0, yMax: 100 }
+  const [, ebb, ferment] = cuts.value
   const vMin = Math.min(...values)
   const vMax = Math.max(...values)
   const hasNegative = values.some((v) => v < 0)
   return {
     yMin: hasNegative
-      ? Math.min(0, Math.floor(Math.min(vMin, 38) - 4))
-      : Math.max(0, Math.floor(Math.min(vMin, 38) - 4)),
-    yMax: Math.min(100, Math.ceil(Math.max(vMax, 62) + 4))
+      ? Math.min(0, Math.floor(Math.min(vMin, ebb - 2) - 4))
+      : Math.max(0, Math.floor(Math.min(vMin, ebb - 2) - 4)),
+    yMax: Math.min(100, Math.ceil(Math.max(vMax, ferment + 2) + 4))
   }
 }
 
@@ -85,6 +90,8 @@ function buildOption() {
   const { dates, temperatures, stages, summaries, dims, labels, isoDates } = visibleView()
 
   const { yMin, yMax } = yRange(temperatures)
+  // 四条分位线：冰点上界 / 退潮上界 / 混沌上界 / 沸点下界
+  const [ice, ebb, ferment, climax] = cuts.value
 
   // 日变化：今日-昨日温度差；前后任一为空=该日无柱。正=升温(暖橙) 负=降温(冷蓝)
   // 先按全量算再切片，否则缩放后最左那天的柱子会因为邻居被切掉而凭空消失
@@ -95,22 +102,31 @@ function buildOption() {
   }))
   const dMax = Math.max(...deltas.filter((v) => v != null).map(Math.abs), 5)
 
-  // 阈值背景带：随动态量程裁剪，超界的带（如数据从未到 85）自然消失
-  const bands = [
-    { label: '退潮', start: yMin, end: 40, color: 'rgba(24,144,255,0.05)' },
-    { label: '混沌', start: 40, end: 60, color: 'rgba(148,163,184,0.06)' },
-    { label: '发酵', start: 60, end: 85, color: 'rgba(250,173,20,0.07)' },
-    { label: '高潮', start: 85, end: yMax, color: 'rgba(245,34,45,0.09)' }
-  ].filter((b) => b.end - b.start > 0.5)
+  // 阈值背景带：边界是当前分位线（bandRanges），随动态量程裁剪，超界的带自然消失
+  const BAND_FILL = {
+    冰点: 'rgba(30,64,175,0.11)',
+    退潮: 'rgba(24,144,255,0.05)',
+    混沌: 'rgba(148,163,184,0.06)',
+    发酵: 'rgba(250,173,20,0.07)',
+    沸点: 'rgba(245,34,45,0.09)'
+  }
+  const ranges = bandRanges()
+  const bands = ranges.map((b) => ({
+    label: b.name,
+    start: Math.max(b.min, yMin),
+    end: Math.min(b.max, yMax),
+    color: BAND_FILL[b.name]
+  })).filter((b) => b.end - b.start > 0.5)
 
   // 面积渐变：低处冷蓝 → 高处暖红（温度语义，不是股价的红涨绿跌），
-  // 渐变档位锚在 40/60/85 的实际像素位置，动态量程下不会错位
+  // 渐变档位锚在分位线的实际像素位置，动态量程下不会错位
   const areaStops = [
     { offset: 0, color: 'rgba(245,34,45,0.32)' },
     ...[
-      [85, 'rgba(250,173,20,0.24)'],
-      [60, 'rgba(250,173,20,0.13)'],
-      [40, 'rgba(148,163,184,0.06)']
+      [climax, 'rgba(250,173,20,0.24)'],
+      [ferment, 'rgba(250,173,20,0.13)'],
+      [ebb, 'rgba(148,163,184,0.06)'],
+      [ice, 'rgba(30,64,175,0.10)']
     ]
       .filter(([v]) => v > yMin && v < yMax)
       .map(([v, c]) => ({ offset: valueToOffset(v, yMin, yMax), color: c })),
@@ -133,12 +149,13 @@ function buildOption() {
 
   // 逐点着色而不是 visualMap：阶段是"哪个点属于哪个阶段"，
   // 用 y 值分档去反推阶段，温度相同而阶段不同的两个点就会被画成同一个颜色。
+  const pointBands = temperatures.map((t, i) => bandOfPoint(t, dims[i], stages[i]))
   const points = temperatures.map((t, i) => ({
     value: t,
     symbolSize: i === activeIdx ? 14 : 9,
     itemStyle: i === activeIdx
       ? { color: '#fbbf24', borderColor: '#fff', borderWidth: 1.5 }
-      : { color: stages[i] ? (STAGE_COLORS[stages[i]] || NO_STAGE_COLOR) : NO_STAGE_COLOR }
+      : { color: pointBands[i] ? (STAGE_COLORS[pointBands[i]] || NO_STAGE_COLOR) : NO_STAGE_COLOR }
   }))
 
   return {
@@ -152,7 +169,7 @@ function buildOption() {
         const bar = params.find((x) => x.seriesName === '日变化')
         const i = (temp || bar || params[0])?.dataIndex ?? 0
         // 子段标签是整串「退潮 · 一阶段」，主阶段已经在里面了，再拼一次就读成「分歧 · 分歧 · 三阶段」
-        const stageText = (labels && labels[i]) || stages[i] || '数据不足'
+        const stageText = (labels && labels[i]) || pointBands[i] || '数据不足'
         const lines = [
           `${params[0]?.name ?? ''}`,
           `温度: <b>${temp && temp.value != null ? temp.value : '—'}</b>`,
@@ -260,11 +277,18 @@ function buildOption() {
           symbol: 'none',
           lineStyle: { type: 'dashed', color: '#2d3748' },
           data: [
-            // 五维双层模型 4 带下界：<40 退潮 / ≥40 混沌 / ≥60 发酵 / ≥85 高潮。
-            // 标签写的是"跨过这条线就进入哪个带"，与 BoardScoreCalculator.stageOf 一一对应。
-            { yAxis: 40, label: { formatter: '混沌 40', color: '#0891b2', position: 'insideEndTop', fontSize: 10 } },
-            { yAxis: 60, label: { formatter: '发酵 60', color: '#d97706', position: 'insideEndTop', fontSize: 10 } },
-            { yAxis: 85, label: { formatter: '高潮 85', color: '#dc2626', position: 'insideEndTop', fontSize: 10 } },
+            // 四条分位线：跨过哪条就进入哪个带。边界由 utils/temperatureBands 现算，
+            // 不是写死的 40/60/85——所以标签带上实际数值。
+            ...[
+              [ebb, '混沌', '#0891b2'],
+              [ferment, '发酵', '#d97706'],
+              [climax, '沸点', '#dc2626'],
+              [ice, '冰点', '#1e40af']
+            ].filter(([v]) => v > yMin && v < yMax)
+              .map(([v, name, color]) => ({
+                yAxis: v,
+                label: { formatter: `${name} ${v}`, color, position: 'insideEndTop', fontSize: 10 }
+              })),
             ...(activeIdx >= 0
               ? [{
                   // 点击曲线点后：金色竖线标出仪表盘当前看的是哪一天
@@ -307,7 +331,8 @@ function renderChart() {
 
 const onResize = () => chart?.resize()
 
-watch([() => props.data, () => props.activeDate], renderChart, { deep: true })
+// cuts 是异步算的：首帧先按兜底分位画，取数回来那一下必须重画一次
+watch([() => props.data, () => props.activeDate, cuts], renderChart, { deep: true })
 onMounted(() => {
   renderChart()
   window.addEventListener('resize', onResize)
