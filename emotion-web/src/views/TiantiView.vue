@@ -204,6 +204,10 @@
                   :title="`一字断魂刀：今日+昨日连续锁死(首封≤93030且0炸板)，流通市值约 ${r.floatMv != null ? yiText(r.floatMv) : '-'}亿，换手 ${r.turnoverRate ?? '-'}%，封成比 ${r.sealRatio ?? '-'}`">
                   一字断魂刀
                 </el-tag>
+                <el-tag v-if="r.highControl" size="small" type="danger" effect="dark" class="oneword-badge"
+                  :title="`高控庄票：连板≥2 且 换手<5% 且 一字锁死(首封≤93030且0炸板)，首板日流通市值 ${r.firstBoardFloatMv != null ? yiText(r.firstBoardFloatMv) : '-'}亿`">
+                  高控庄票
+                </el-tag>
                 <span v-if="r.breakCount != null && r.breakCount > 0" class="chip-reseal"
                   :title="`日内开板 ${r.breakCount} 次后封住（炸后回封）`">
                   开板{{ r.breakCount }}次↩回封

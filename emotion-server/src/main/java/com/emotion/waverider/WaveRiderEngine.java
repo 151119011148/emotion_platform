@@ -9,6 +9,7 @@ import com.emotion.entity.NodeEvent;
 import com.emotion.entity.Stock;
 import com.emotion.entity.Strategy;
 import com.emotion.entity.StrategyRun;
+import com.emotion.market.HighControlStock;
 import com.emotion.market.TencentClient;
 import com.emotion.mapper.CandidateStockMapper;
 import com.emotion.mapper.CandidateT1Mapper;
@@ -368,9 +369,17 @@ public class WaveRiderEngine {
         List<CandidateStock> rows = new ArrayList<>();
         double maxScore = Double.NEGATIVE_INFINITY;
         List<Double> scores = new ArrayList<>();
+        Set<String> pickedCodes = new HashSet<>();
         for (MarketStock m : picked) {
-            double riskPenalty = riskPenalty(m, cfg);
-            String riskFlag = riskFlag(m, cfg, riskPenalty);
+            pickedCodes.add(m.getCode());
+        }
+        Map<String, BigDecimal> firstBoardMv = HighControlStock.firstBoardFloatMv(
+                marketStockMapper, pickedCodes, tradeDate);
+        for (MarketStock m : picked) {
+            BigDecimal fbMv = firstBoardMv.get(m.getCode());
+            boolean highControl = HighControlStock.isHighControl(m, fbMv);
+            double riskPenalty = riskPenalty(m, cfg, highControl);
+            String riskFlag = riskFlag(m, cfg, riskPenalty, highControl);
             boolean isTopOfTopic = nz(m.getConsecutive()) >= topicTop.getOrDefault(topic(m), 0);
             NodeEvent node = nodeStocks.get(m.getCode());
             double nodePart = nodePart(node, cfg.getNodeTypeWeights());
@@ -394,7 +403,7 @@ public class WaveRiderEngine {
             c.setPositionType(topic(m) + (isTopOfTopic ? " 最高板" : " " + nz(m.getConsecutive()) + " 板"));
             c.setScore(BigDecimal.valueOf(score).setScale(2, RoundingMode.HALF_UP));
             c.setRiskFlag(riskFlag);
-            c.setFilterDetailJson(filterDetail(m, cfg,
+            c.setFilterDetailJson(filterDetail(m, cfg, fbMv, highControl,
                     scoreDetail(cfg, m, maxBoard, boardPart, isTopOfTopic, node, nodePart,
                             early, riskPenalty, riskFlag, score)));
             c.setCreatedAt(LocalDateTime.now());
@@ -573,10 +582,14 @@ public class WaveRiderEngine {
      *
      * <p>YIZI_THIN 的口径按 PRD：换手 &lt; 2% 且成交额低于下限——这是「缩量一字」，
      * 与「封单锁死」不是一回事：后者是买不进（出池），前者是流动性差（保留但折算仓位）。
+     *
+     * <p>HIGH_CONTROL（高控庄票）与 YIZI_THIN 同档扣分，但判据更具体：
+     * 连板≥2 + 换手&lt;5% + 首板日流通市值≤35亿 + 一字锁死。
+     * 两者可能同时成立（高控庄票通常也满足缩量一字），此时 HIGH_CONTROL 优先。
      */
-    private double riskPenalty(MarketStock m, WaveRiderConfig cfg) {
+    private double riskPenalty(MarketStock m, WaveRiderConfig cfg, boolean highControl) {
         double p = 0;
-        if (isYiziThin(m, cfg)) {
+        if (highControl || isYiziThin(m, cfg)) {
             p += 1;
         }
         if (m.getTurnoverRate() != null && m.getTurnoverRate().doubleValue() > 30) {
@@ -585,9 +598,12 @@ public class WaveRiderEngine {
         return Math.min(p, 1);
     }
 
-    private String riskFlag(MarketStock m, WaveRiderConfig cfg, double penalty) {
+    private String riskFlag(MarketStock m, WaveRiderConfig cfg, double penalty, boolean highControl) {
         if (penalty <= 0) {
             return null;
+        }
+        if (highControl) {
+            return CandidateStock.RISK_HIGH_CONTROL;
         }
         if (isYiziThin(m, cfg)) {
             return CandidateStock.RISK_YIZI_THIN;
@@ -603,7 +619,9 @@ public class WaveRiderEngine {
     }
 
     /** 过滤器逐条判定明细 + 得分构成。界面「点开追溯」看到的就是它。 */
-    private String filterDetail(MarketStock m, WaveRiderConfig cfg, Map<String, Object> scoreDetail) {
+    private String filterDetail(MarketStock m, WaveRiderConfig cfg,
+                                BigDecimal firstBoardFloatMv, boolean highControl,
+                                Map<String, Object> scoreDetail) {
         Map<String, Object> d = new LinkedHashMap<>();
         d.put("code", m.getCode());
         d.put("board", m.getConsecutive());
@@ -618,6 +636,8 @@ public class WaveRiderEngine {
         d.put("filter_min_amount_yi", cfg.getFilterMinAmount());
         d.put("entry_gap_max", cfg.getEntryGapMax());
         d.put("position_mode", cfg.getPositionMode());
+        d.put("first_board_float_mv_yi", firstBoardFloatMv == null ? null : yi(firstBoardFloatMv));
+        d.put("high_control", highControl);
         d.put("score_breakdown", scoreDetail);
         return toJson(d);
     }

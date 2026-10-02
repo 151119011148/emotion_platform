@@ -85,6 +85,10 @@ public class TiantiVO {
         private BigDecimal sealRatio;
         /** 一字断魂刀打标：今日+昨日连续锁死(≤93030&0炸板) 且 流通≤35亿 且 封足额/封成比≥3 且 换手<5%。 */
         private Boolean oneWordKilling;
+        /** 高控庄票：连板≥2 且 换手<5% 且 首板日流通市值≤35亿 且 一字锁死(首封≤93030且0炸板)。 */
+        private Boolean highControl;
+        /** 首板日流通市值（元），供高控庄票 tooltip 显示用。 */
+        private BigDecimal firstBoardFloatMv;
     }
 
     /** 晋级失败：昨日 n-1 板，今日未封住 n 板。 */

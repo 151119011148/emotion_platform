@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.emotion.entity.MarketStock;
 import com.emotion.mapper.MarketStockMapper;
+import com.emotion.market.HighControlStock;
 import com.emotion.market.StockPatterns;
 import com.emotion.vo.TiantiVO;
 
@@ -143,10 +144,16 @@ public class TiantiService {
         String manualLeader = manualLeaderService.codeOf(userId, date);
 
         // 天梯：n 从 H 往下到 2，每层独立判晋级
+        Set<String> ztCodes = new HashSet<>();
+        for (MarketStock row : zt) {
+            ztCodes.add(row.getCode());
+        }
+        Map<String, BigDecimal> firstBoardMv = HighControlStock.firstBoardFloatMv(
+                marketStockMapper, ztCodes, date);
         List<TiantiVO.Level> levels = new ArrayList<>();
         for (int n = h; n >= 2; n--) {
             levels.add(level(n, h, zt, prevZT, prevBoard, todayZtByCode, todayZbByCode, todayDtByCode, snap,
-                    zong, zhongJun, kaWeiCode, fanBao, manualLeader));
+                    zong, zhongJun, kaWeiCode, fanBao, manualLeader, firstBoardMv));
         }
         // 最新交易日：三池都没覆盖到的失败股，用腾讯实时报价兜底当日涨跌幅（历史日快照回溯不了）
         fillGoneQuotes(date, levels);
@@ -684,7 +691,8 @@ public class TiantiService {
                                  Map<String, MarketStock> todayDtByCode,
                                  PrdMetricsService.Snapshot snap,
                                  Set<String> zong, Set<String> zhongJun, String kaWeiCode, Set<String> fanBao,
-                                 String manualLeader) {
+                                 String manualLeader,
+                                 Map<String, BigDecimal> firstBoardMv) {
         TiantiVO.Level lvl = new TiantiVO.Level();
         lvl.setBoard(n);
         lvl.setLayerLabel(LAYER_LABELS[LadderMetricsService.layerIndex(n, h)]);
@@ -722,6 +730,9 @@ public class TiantiService {
             r.setSealForm(sealForm(row.getFirstSealTime(), row.getBreakCount()));
             r.setSealRatio(sealRatio(row.getSealAmount(), row.getAmount()));
             r.setOneWordKilling(isDuanDao(row, prevZT));
+            BigDecimal fbMv = firstBoardMv == null ? null : firstBoardMv.get(row.getCode());
+            r.setFirstBoardFloatMv(fbMv);
+            r.setHighControl(HighControlStock.isHighControl(row, fbMv));
             rows.add(r);
             if (prevN != null && prevN == n - 1) {
                 successCodes.add(r.getCode());

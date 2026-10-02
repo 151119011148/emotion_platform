@@ -37,6 +37,8 @@ public class CandidateStock {
     public static final String RISK_HIGH_TURNOVER = "HIGH_TURNOVER";
     /** 龙头断板。 */
     public static final String RISK_DRAGON_DEAD = "DRAGON_DEAD";
+    /** 高控庄票：缩量独走连板 + 首板日小市值 + 一字锁死。 */
+    public static final String RISK_HIGH_CONTROL = "HIGH_CONTROL";
 
     /** 一字断魂刀：执行预警，不是风险扣分——见 {@link #alertFlag}。 */
     public static final String ALERT_DUANDAO = "DUANDAO";
