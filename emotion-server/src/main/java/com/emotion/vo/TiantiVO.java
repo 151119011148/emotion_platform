@@ -4,7 +4,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 
 /**
@@ -79,7 +79,7 @@ public class TiantiVO {
         private BigDecimal floatMv;
         /** 换手率 %，东财 hs；仅涨停池有，历史行可能 null。 */
         private BigDecimal turnoverRate;
-        /** 封板形态分档：一字/早盘秒板/早盘直线/早盘板/上午板/午后板/尾盘板（回头n）。 */
+        /** 封板形态分档：一字/T字（一字当天开过板）/早盘秒板/早盘直线/早盘板/上午板/午后板/尾盘板，开过板带（回头n）。 */
         private String sealForm;
         /** 封成比 = 封单额/成交额（无量纲），显示"封单虚高"用。 */
         private BigDecimal sealRatio;
@@ -152,10 +152,12 @@ public class TiantiVO {
          */
         private Integer oldDragonHeight;
         /**
-         * 当天 2 板及以上的完整连板名单（含各自板高），只喂给破壁判定，不进 JSON。
-         * 为 null 时判定退回用 {@link #stocks}（并列最高板即当天最高板）。
+         * 当天 2 板及以上的完整连板名单（含各自板高）。破壁判定<b>永远</b>读它；
+         * 要不要出 JSON 由调用方决定（{@code height-range?ladder=true}），不要时服务端置 null，
+         * 这里 NON_NULL 就是为了让"没带"和"带了个空名单"在响应里分得开——天梯页一次拉 500 天，
+         * 白送几千个对象不值当。为 null 时判定退回用 {@link #stocks}（并列最高板即当天最高板）。
          */
-        @JsonIgnore
+        @JsonInclude(JsonInclude.Include.NON_NULL)
         private List<LadderStock> ladder;
     }
 

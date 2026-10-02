@@ -174,6 +174,16 @@ public class TiantiService {
      * 最高板只剩 2 板的退潮日并列数十只也不裁）。排序是为了两次刷新名单顺序稳定。
      */
     public List<TiantiVO.HeightPoint> heightRange(LocalDate from, LocalDate to) {
+        return heightRange(from, to, false);
+    }
+
+    /**
+     * @param includeLadder 要不要把「当天 2 板及以上、各自几板」的名单带进 JSON。
+     *                      节点页要它在前端算龙头票／节点票的逐日轨迹（后端不必为此新开接口）；
+     *                      天梯页不读，一次拉 500 天，白送几千个对象不值当。
+     *                      破壁判定与此无关：{@link #detectBreaks} 永远吃全量名单，判完才按需抹掉。
+     */
+    public List<TiantiVO.HeightPoint> heightRange(LocalDate from, LocalDate to, boolean includeLadder) {
         Map<LocalDate, TiantiVO.HeightPoint> byDate = new LinkedHashMap<>();
         for (MarketStockMapper.MaxBoardRow r : marketStockMapper.listMaxBoardRange(from, to)) {
             TiantiVO.HeightPoint p = byDate.get(r.getTradeDate());
@@ -200,6 +210,11 @@ public class TiantiService {
             p.setStockCount(p.getStocks().size());
         }
         detectBreaks(out);
+        if (!includeLadder) {
+            for (TiantiVO.HeightPoint p : out) {
+                p.setLadder(null);
+            }
+        }
         return out;
     }
 
@@ -880,7 +895,12 @@ public class TiantiService {
                 .eq(MarketStock::getPool, pool));
     }
 
-    /** 封板形态分档：一字/早盘秒板/早盘直线/早盘板/上午板/午后板/尾盘板；炸板 n 次回显"(回头n)"。首封时间缺失返回 null。 */
+    /**
+     * 封板形态分档：一字/早盘秒板/早盘直线/早盘板/上午板/午后板/尾盘板；炸板 n 次回显"(回头n)"。
+     * 首封时间缺失返回 null。
+     * <p>一字当天开过板就不是「一字」而是「T字」（与 {@link com.emotion.market.StockPatterns} 同口径：
+     * 开盘封死、盘中开过又回封），所以这一档直接印成 T字，回头次数仍带出来。
+     */
     static String sealForm(Integer firstSealTime, Integer breakCount) {
         if (firstSealTime == null) {
             return null;
@@ -903,7 +923,10 @@ public class TiantiService {
             form = "尾盘板";
         }
         int brk = breakCount == null ? 0 : breakCount;
-        return brk > 0 ? form + "(回头" + brk + ")" : form;
+        if (brk <= 0) {
+            return form;
+        }
+        return ("一字".equals(form) ? "T字" : form) + "(回头" + brk + ")";
     }
 
     /** 封成比 = 封单额 / 成交额（元/元，无量纲），防除零返回 null。 */

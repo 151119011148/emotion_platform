@@ -62,11 +62,16 @@ public class PrdController {
     /**
      * 连板高度曲线：日期区间内每天一个点，y=当日最高板，附并列最高板个股。
      * 前端画"连板高度走势"用，一条 SQL 出 N 天数据，hover 看个股、破前高标点。
+     *
+     * <p>{@code ladder=true} 才把当天 2 板以上的完整名单带回来：节点页靠它在前端算龙头票／节点票
+     * 的逐日轨迹。默认不带——天梯页一次拉 500 天，用不上还得多传几千个对象。
      */
     @GetMapping("/tianti/height-range")
     public ApiResponse<List<TiantiVO.HeightPoint>> heightRange(@RequestParam String start,
-                                                               @RequestParam String end) {
-        return ApiResponse.ok(tiantiService.heightRange(parse(start), parse(end)));
+                                                              @RequestParam String end,
+                                                              @RequestParam(name = "ladder", defaultValue = "false")
+                                                              boolean ladder) {
+        return ApiResponse.ok(tiantiService.heightRange(parse(start), parse(end), ladder));
     }
 
     /** 破壁详情：曲线上 ☆（试探）/★（破壁成功）那天的助攻、盘口、情绪闸门与次日结算。 */

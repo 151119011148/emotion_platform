@@ -182,7 +182,10 @@ class TiantiServiceTest {
         assertEquals("上午板", TiantiService.sealForm(113000, 0));
         assertEquals("午后板", TiantiService.sealForm(140000, 0));
         assertEquals("尾盘板", TiantiService.sealForm(143001, 0));
-        assertEquals("一字(回头2)", TiantiService.sealForm(92000, 2));
+        // 一字当天开过板就是 T字（与 StockPatterns 的 ONE_LINE/T_SHAPE 分档同一口径），回头次数仍带出来
+        assertEquals("T字(回头2)", TiantiService.sealForm(92000, 2));
+        // 只有「一字」这一档开板改名 T字；秒板/直线等档照旧带后缀
+        assertEquals("早盘秒板(回头1)", TiantiService.sealForm(93000, 1));
         assertNull(TiantiService.sealForm(null, 0));
     }
 
@@ -809,5 +812,43 @@ class TiantiServiceTest {
         assertEquals(Integer.valueOf(4), TiantiService.minAbsBreak(2));
         assertEquals(Integer.valueOf(5), TiantiService.minAbsBreak(4));
         assertEquals(Integer.valueOf(6), TiantiService.minAbsBreak(5));
+    }
+
+    /**
+     * 当天 2 板以上的名单出不出 JSON。节点页那两条轨迹（●龙头票 / ◆节点票）全靠它在前端算：
+     * 2026-10-02 这一枚被 {@code @JsonIgnore} 挡在响应外，前端拿回 122 天空名单，
+     * 一条轨迹都落不了点，页面却<b>看不出任何异常</b>——只是悄悄退回天梯页那种单线画法。
+     */
+    @Test
+    void heightRange_ladderFlagDecidesWhatGoesOutInJson() throws Exception {
+        MarketStockMapper mapper = mock(MarketStockMapper.class);
+        MarketStockMapper.MaxBoardRow max = new MarketStockMapper.MaxBoardRow();
+        max.setTradeDate(LocalDate.parse("2026-09-23"));
+        max.setMaxHeight(4);
+        max.setCode("601811");
+        max.setName("新华文轩");
+        MarketStockMapper.LadderRow lad = new MarketStockMapper.LadderRow();
+        lad.setTradeDate(LocalDate.parse("2026-09-23"));
+        lad.setBoard(4);
+        lad.setCode("601811");
+        lad.setName("新华文轩");
+        when(mapper.listMaxBoardRange(any(), any())).thenReturn(Collections.singletonList(max));
+        when(mapper.listLadderRange(any(), any())).thenReturn(Collections.singletonList(lad));
+        TiantiService svc = new TiantiService(null, mapper, null, null, null, null);
+        com.fasterxml.jackson.databind.ObjectMapper om =
+                new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
+        LocalDate from = LocalDate.parse("2026-09-01");
+        LocalDate to = LocalDate.parse("2026-09-30");
+
+        com.fasterxml.jackson.databind.JsonNode asked =
+                om.readTree(om.writeValueAsString(svc.heightRange(from, to, true))).get(0);
+        assertEquals(4, asked.get("ladder").get(0).get("board").asInt(), "节点页要按这份名单算轨迹，必须真出 JSON");
+        assertEquals("601811", asked.get("ladder").get(0).get("code").asText());
+
+        com.fasterxml.jackson.databind.JsonNode notAsked =
+                om.readTree(om.writeValueAsString(svc.heightRange(from, to))).get(0);
+        assertFalse(notAsked.has("ladder"),
+                "天梯页一次拉 500 天不读名单：整个键省掉，而不是发个 null 过去让它自己判");
+        assertEquals(4, notAsked.get("maxHeight").asInt(), "省名单不能顺手把曲线自己的读数也省了");
     }
 }

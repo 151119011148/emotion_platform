@@ -22,7 +22,14 @@
       <div class="evolution-hint" v-else>该节点未记 D0 情绪分，无法定位周期位置</div>
     </div>
 
-    <!-- ⑤ 中间区：节点高度曲线（点＝节点票）＋复算采纳；节点列表已并进下面的历史节点表 -->
+    <!-- ⑤ 节点高度曲线：自成一张卡，置顶在节点演变路径下面，不与下面的复算卡片混在一张卡里。
+         组件自己就带卡壳（背景/圆角/20px 内边距），这里不再套一层 div，否则内边距叠加、卡中卡 -->
+    <BoardHeightCurve v-if="nodeList.length || activeNode" class="node-curve-card"
+      :rows="curveRows" :selected="panelNode ? panelNode.d0Date : ''"
+      :node-tracks="nodeTracks" :focus-node="focusId" :day-points="false" :break-lines="false"
+      :height="320" :y-min="1" name="节点高度曲线" zoom-group="node-curve" @select-node="toggleFocus" />
+
+    <!-- ⑥ 节点标签 ＋ 平台复算采纳 -->
     <div class="current-node" v-if="nodeList.length || activeNode">
       <div class="current-head" v-if="panelNode">
         <div class="current-tags">
@@ -37,10 +44,6 @@
           <template v-else>历史节点，不在追踪中</template>
         </span>
       </div>
-
-      <BoardHeightCurve :rows="curveRows" :selected="panelNode ? panelNode.d0Date : ''"
-        :node-marks="nodeMarks" :focus-node="focusId" :day-points="false" :break-lines="false"
-        name="节点高度曲线" zoom-group="node-curve" @select-node="toggleFocus" />
 
       <NodeSuggestPanel v-if="panelNode" :node="panelNode" @adopted="loadNodes" />
     </div>
@@ -99,18 +102,6 @@
           </template>
         </el-table-column>
         <el-table-column prop="d0Date" label="D0日期" width="104" />
-        <el-table-column label="状态 · 类型" width="140">
-          <template #default="{ row }">
-            <div class="nc st-ty">
-              <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
-              <span class="ntag" :class="nodeTypeClass(row)">{{ nodeTypeLabel(row) }}</span>
-            </div>
-            <div class="reason-tags" v-if="reasonTags(row).length">
-              <el-tag v-for="t in reasonTags(row)" :key="t" size="small"
-                :type="row.status === '失效' ? 'danger' : 'success'" class="reason-tag">{{ reasonLabel(t) }}</el-tag>
-            </div>
-          </template>
-        </el-table-column>
         <el-table-column label="锚定龙头" min-width="126" show-overflow-tooltip>
           <template #default="{ row }">
             <div class="nc">
@@ -133,6 +124,26 @@
             </div>
           </template>
         </el-table-column>
+        <el-table-column label="状态 · 类型" width="140">
+          <template #default="{ row }">
+            <div class="nc st-ty">
+              <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
+              <span class="ntag" :class="nodeTypeClass(row)">{{ nodeTypeLabel(row) }}</span>
+            </div>
+            <div class="reason-tags" v-if="reasonTags(row).length">
+              <el-tag v-for="t in reasonTags(row)" :key="t" size="small"
+                :type="row.status === '失效' ? 'danger' : 'success'" class="reason-tag">{{ reasonLabel(t) }}</el-tag>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="候选池 · 题材 · D0 情绪" min-width="158">
+          <template #default="{ row }">
+            <div class="cp-line" :title="row.candidatePool || ''">{{ row.candidatePool || '未采纳' }}</div>
+            <div class="cp-sub">
+              {{ row.theme || '—' }} · {{ row.d0Score != null ? row.d0Score + '分' : '情绪未记' }}
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="T+1" width="112">
           <template #default="{ row }">
             <div class="cp-line">
@@ -144,14 +155,6 @@
               {{ row.breakBoard != null ? `追 ${row.breakBoard} 板破壁线` : '破壁线未知' }}
             </div>
             <div class="cp-sub" v-else-if="row.t1Date">{{ row.t1Date.slice(5) }} 验证</div>
-          </template>
-        </el-table-column>
-        <el-table-column label="候选池 · 题材 · D0 情绪" min-width="158">
-          <template #default="{ row }">
-            <div class="cp-line" :title="row.candidatePool || ''">{{ row.candidatePool || '未采纳' }}</div>
-            <div class="cp-sub">
-              {{ row.theme || '—' }} · {{ row.d0Score != null ? row.d0Score + '分' : '情绪未记' }}
-            </div>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="104" fixed="right">
@@ -321,7 +324,7 @@ import { useTradingCalendar } from '../utils/tradingCalendar'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import NodeSuggestPanel from '../components/NodeSuggestPanel.vue'
 import BoardHeightCurve from '../components/BoardHeightCurve.vue'
-import { buildNodeMarks } from '../utils/nodeMarks'
+import { buildNodeTracks } from '../utils/nodeTracks'
 
 const { disabledDate, cellClass, loadTradingDays } = useTradingCalendar()
 
@@ -452,8 +455,8 @@ function shiftDays(iso, days) {
 
 /**
  * height-range 的一行 → 曲线判定点。字段与天梯页那一份同形，两边画的才是同一条线；
- * 多出的一枚 ladder 是天梯页不读的——节点标要的正是「当天 2 板及以上、各自几板」，
- * ◆节点票那枚标的位置全靠它在本地算出来。
+ * 多出的一枚 ladder 是天梯页不读的——它给的是「当天 2 板及以上、各自几板」，
+ * 龙头票与节点票那两条轨迹的每一天（以及不在梯的那些断口）全靠它在本地算出来。
  */
 function mapHeightRow(r) {
   return {
@@ -475,27 +478,14 @@ function mapHeightRow(r) {
 }
 
 async function loadCurve() {
-  const res = await prdApi.heightRange(shiftDays(todayStr, LOOKBACK_DAYS), todayStr).catch(() => null)
+  // 第三个参数不能省：不带 ladder 每天名单就是空的，两条轨迹一个点都算不出来，
+  // 曲线会一声不响退回天梯页那种画法（只剩最高板那条线）。
+  const res = await prdApi.heightRange(shiftDays(todayStr, LOOKBACK_DAYS), todayStr, true).catch(() => null)
   heightAll.value = ((res && res.data) || []).map(mapHeightRow)
 }
 
-/** hover 浮层要补的读数：卡片删掉之后，这些数只剩这一处放得下。 */
-function markInfo(n) {
-  return {
-    status: n.status,
-    typeLabel: nodeTypeLabel(n),
-    theme: n.theme,
-    d0: n.d0Date,
-    score: n.d0Score,
-    cycle: n.d0Cycle,
-    pool: n.candidatePool || '未采纳',
-    verify: isSpaceNode(n)
-      ? `续板判定 ${repairText(n.repairStatus)}${n.breakBoard != null ? ` · 追 ${n.breakBoard} 板破壁线` : ''}`
-      : `T+1 ${n.t1Date || '待走完'} · 晋级 ${n.t1PromotionCount ?? '—'} 只（${fmtRate(n.t1PromotionRate)}%）· 老龙反包 ${t1Repack(n.t1AnchorRepack)}`
-  }
-}
-
-const nodeMarks = computed(() => buildNodeMarks(nodeList.value, heightAll.value, markInfo))
+/** 曲线上的两条轨迹（●龙头票 / ◆节点票）：逐日板高、关键日、断板日全在前端按 ladder 算。 */
+const nodeTracks = computed(() => buildNodeTracks(nodeList.value, heightAll.value))
 
 /** T+1 那一格：一句读完的验证话——晋级只数与晋级率。空间节点走续板判定那枚标签，不从这里出。 */
 function t1Text(n) {
@@ -916,7 +906,11 @@ onMounted(() => {
 .evolution-hint { color: #8899a6; font-size: 12px; margin-top: 8px; }
 .evolution-hint b { color: #e1e8ed; }
 
-/* 中间区：曲线＋节点列表（六格卡片区与三段式时间轴已整块撤下，读数搬进曲线浮层） */
+/* ⑤ 节点高度曲线：组件自带卡壳，这里只补本页卡片统一的那道边与内边距。
+   双类提特异性——与组件自己 scoped 的 .height-curve 打平的话，谁生效就取决于样式注入顺序了 */
+.node-curve-card.height-curve { padding: 20px 24px; border: 1px solid #2a3a52; }
+
+/* ⑥ 节点标签＋平台复算（六格卡片区与三段式时间轴已整块撤下，读数搬进曲线浮层） */
 .current-node {
   background: #1a2332; border-radius: 12px; padding: 20px 24px; margin-bottom: 20px;
   border: 1px solid #2a3a52;
