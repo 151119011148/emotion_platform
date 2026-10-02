@@ -662,6 +662,7 @@ function cls(v) {
 }
 
 function riskText(flag) {
+  if (flag === 'HIGH_CONTROL') return '高控庄票'
   if (flag === 'YIZI_THIN') return '一字缩量'
   if (flag === 'HIGH_TURNOVER') return '过度换手'
   if (flag === 'DRAGON_DEAD') return '龙头断板'
