@@ -22,7 +22,7 @@
       <div class="evolution-hint" v-else>该节点未记 D0 情绪分，无法定位周期位置</div>
     </div>
 
-    <!-- ⑤ 中间区：连板高度曲线（点换成锚定龙头 ▼ / 节点票 ◆）＋节点列表＋复算采纳 -->
+    <!-- ⑤ 中间区：节点高度曲线（点＝节点票）＋复算采纳；节点列表已并进下面的历史节点表 -->
     <div class="current-node" v-if="nodeList.length || activeNode">
       <div class="current-head" v-if="panelNode">
         <div class="current-tags">
@@ -40,32 +40,7 @@
 
       <BoardHeightCurve :rows="curveRows" :selected="panelNode ? panelNode.d0Date : ''"
         :node-marks="nodeMarks" :focus-node="focusId" :day-points="false" :break-lines="false"
-        name="连板高度 · 节点" zoom-group="node-curve" @select-node="toggleFocus" />
-
-      <div class="nlist">
-        <div class="nl-cap">节点列表 · 曲线上的标就是这几行，点一行只看它那两个标，再点一下恢复全部</div>
-        <div class="nl-row nl-hd">
-          <span>编号</span><span>状态 · 类型</span><span>▼ 锚定龙头</span><span>◆ 节点票</span>
-          <span>D0</span><span>T+1</span><span>候选池 · 题材 · D0 情绪</span>
-        </div>
-        <div v-for="n in nodeList" :key="n.id" class="nl-row"
-          :class="{ sel: focusId === n.id, inv: n.status === '失效' }" @click="toggleFocus(n.id)">
-          <span class="nl-id">#{{ n.id }}<em v-if="n.id === activeId"> 活跃</em></span>
-          <span><el-tag :type="statusType(n.status)" size="small">{{ n.status }}</el-tag> {{ nodeTypeLabel(n) }}</span>
-          <span class="nl-stk">
-            <b>{{ n.anchorName || n.anchorStock || '—' }}</b>
-            <i v-if="markOf(n.id, 'anchor')">{{ markOf(n.id, 'anchor').board }}板 {{ markOf(n.id, 'anchor').date.slice(5) }}</i>
-          </span>
-          <span class="nl-stk">
-            <b>{{ n.nodeStock || '待确认' }}</b>
-            <i v-if="markOf(n.id, 'stock')">{{ markOf(n.id, 'stock').board }}板 {{ markOf(n.id, 'stock').date.slice(5) }}</i>
-            <em v-if="n.nodeStockStatus" :class="onLadder(n.nodeStockStatus) ? 'lad-on' : 'lad-off'">{{ n.nodeStockStatus }}</em>
-          </span>
-          <span>{{ (n.d0Date || '—').slice(5) }}</span>
-          <span>{{ t1Text(n) }}</span>
-          <span>{{ n.candidatePool || '—' }} · {{ n.theme || '—' }} · {{ n.d0Score != null ? n.d0Score + '分' : '情绪未记' }}</span>
-        </div>
-      </div>
+        name="节点高度曲线" zoom-group="node-curve" @select-node="toggleFocus" />
 
       <NodeSuggestPanel v-if="panelNode" :node="panelNode" @adopted="loadNodes" />
     </div>
@@ -124,16 +99,19 @@
           </template>
         </el-table-column>
         <el-table-column prop="d0Date" label="D0日期" width="104" />
-        <el-table-column label="节点类型" width="128">
+        <el-table-column label="状态 · 类型" width="140">
           <template #default="{ row }">
-            <span class="ntag" :class="nodeTypeClass(row)">{{ nodeTypeLabel(row) }}</span>
-            <!-- 破壁两行的结论挂在续板判定上：类型只说它是哪一天，这一格说那天成了没有 -->
-            <div class="reason-tags" v-if="row.repairStatus">
-              <el-tag size="small" :type="repairType(row.repairStatus)" effect="plain">{{ repairText(row.repairStatus) }}</el-tag>
+            <div class="nc st-ty">
+              <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
+              <span class="ntag" :class="nodeTypeClass(row)">{{ nodeTypeLabel(row) }}</span>
+            </div>
+            <div class="reason-tags" v-if="reasonTags(row).length">
+              <el-tag v-for="t in reasonTags(row)" :key="t" size="small"
+                :type="row.status === '失效' ? 'danger' : 'success'" class="reason-tag">{{ reasonLabel(t) }}</el-tag>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="锚定龙头" min-width="150" show-overflow-tooltip>
+        <el-table-column label="锚定龙头" min-width="126" show-overflow-tooltip>
           <template #default="{ row }">
             <div class="nc">
               <span>{{ row.anchorName || row.anchorStock || '—' }}</span>
@@ -143,7 +121,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="节点票" min-width="170" show-overflow-tooltip>
+        <el-table-column label="节点票" min-width="146" show-overflow-tooltip>
           <template #default="{ row }">
             <div class="node-stock">
               <div class="ns-name" :title="row.nodeStock || ''">{{ row.nodeStock || '—' }}</div>
@@ -155,26 +133,28 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="126">
+        <el-table-column label="T+1" width="112">
           <template #default="{ row }">
-            <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
-            <div class="reason-tags" v-if="reasonTags(row).length">
-              <el-tag v-for="t in reasonTags(row)" :key="t" size="small"
-                :type="row.status === '失效' ? 'danger' : 'success'" class="reason-tag">{{ reasonLabel(t) }}</el-tag>
+            <div class="cp-line">
+              <el-tag v-if="isSpaceNode(row)" size="small" effect="plain"
+                :type="repairType(row.repairStatus)">{{ repairText(row.repairStatus) }}</el-tag>
+              <template v-else>{{ t1Text(row) }}</template>
+            </div>
+            <div class="cp-sub" v-if="isSpaceNode(row)">
+              {{ row.breakBoard != null ? `追 ${row.breakBoard} 板破壁线` : '破壁线未知' }}
+            </div>
+            <div class="cp-sub" v-else-if="row.t1Date">{{ row.t1Date.slice(5) }} 验证</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="候选池 · 题材 · D0 情绪" min-width="158">
+          <template #default="{ row }">
+            <div class="cp-line" :title="row.candidatePool || ''">{{ row.candidatePool || '未采纳' }}</div>
+            <div class="cp-sub">
+              {{ row.theme || '—' }} · {{ row.d0Score != null ? row.d0Score + '分' : '情绪未记' }}
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="D0情绪" width="62">
-          <template #default="{ row }">
-            <span v-if="row.d0Score != null">
-              <el-tooltip :content="row.d0Cycle || ''" placement="top" :disabled="!row.d0Cycle">
-                <span>{{ row.d0Score }}分</span>
-              </el-tooltip>
-            </span>
-            <span v-else>—</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" min-width="120" fixed="right">
+        <el-table-column label="操作" width="104" fixed="right">
           <template #default="{ row }">
             <div class="nc">
               <el-button size="small" text type="primary" @click="openSuggest(row)">复算</el-button>
@@ -450,7 +430,7 @@ const EVOLVE = [
 const activeNode = computed(() => currentNode.value)
 const activeId = computed(() => activeNode.value?.id ?? null)
 
-/* ---------- 中间区：连板高度曲线（点换成节点标）＋节点列表 ---------- */
+/* ---------- 中间区：节点高度曲线（点＝节点票）＋复算采纳 ---------- */
 
 /**
  * 取数窗口：要能一路往左翻到最早那节节点的龙头。180 个自然日 ≈ 120 个交易日，
@@ -461,7 +441,7 @@ const todayStr = new Date().toLocaleDateString('en-CA')
 const heightAll = ref([])
 /** 右端不按某一天截：节点页看的就是窗口里全部节点，往左翻交给 −/≪ 按钮 */
 const curveRows = computed(() => heightAll.value)
-/** null＝全部节点一起看；给了 id 就只留它那两枚标，其余淡到读不出形状 */
+/** null＝全部节点一起看；给了 id 就只留它那枚标，其余淡到读不出形状 */
 const focusId = ref(null)
 
 function shiftDays(iso, days) {
@@ -473,7 +453,7 @@ function shiftDays(iso, days) {
 /**
  * height-range 的一行 → 曲线判定点。字段与天梯页那一份同形，两边画的才是同一条线；
  * 多出的一枚 ladder 是天梯页不读的——节点标要的正是「当天 2 板及以上、各自几板」，
- * ▼锚定龙头与◆节点票那两枚标的位置全靠它在本地算出来。
+ * ◆节点票那枚标的位置全靠它在本地算出来。
  */
 function mapHeightRow(r) {
   return {
@@ -517,13 +497,8 @@ function markInfo(n) {
 
 const nodeMarks = computed(() => buildNodeMarks(nodeList.value, heightAll.value, markInfo))
 
-function markOf(nodeId, kind) {
-  return nodeMarks.value.find((m) => m.id === nodeId && m.kind === kind) || null
-}
-
-/** 列表那格只放一句读完的验证话：空间轴报续板，其余报晋级只数与晋级率。 */
+/** T+1 那一格：一句读完的验证话——晋级只数与晋级率。空间节点走续板判定那枚标签，不从这里出。 */
 function t1Text(n) {
-  if (isSpaceNode(n)) return repairText(n.repairStatus)
   if (n.t1PromotionRate == null) return '待验证'
   return `${n.t1PromotionCount ?? '—'} 只 · ${n.t1PromotionRate}%`
 }
@@ -953,27 +928,9 @@ onMounted(() => {
 /* 节点类型标签的 .ntag / .nt-* 配色在全局 App.vue：NodeSuggestPanel 也要用同一份，
    放 scoped 里它读不到。别再往这里抄一遍。 */
 
-.nlist { margin: 2px 0 14px; }
-.nl-cap { color: #8899a6; font-size: 11px; margin-bottom: 8px; }
-.nl-row {
-  display: grid; gap: 8px; align-items: center;
-  grid-template-columns: 62px 138px 1.1fr 1.3fr 54px 92px 1.8fr;
-  padding: 6px 8px; border-radius: 8px; cursor: pointer;
-  color: #c6d2de; font-size: 12px;
-}
-.nl-row:hover { background: #223046; }
-.nl-hd { color: #8899a6; font-size: 11px; cursor: default; }
-.nl-hd:hover { background: none; }
-.nl-row.sel { background: rgba(251, 209, 102, .12); box-shadow: inset 0 0 0 1px #ffd166; }
-.nl-row.inv { color: #7d8ea1; }
-.nl-id { color: #e1e8ed; }
-.nl-id em { color: #ffd166; font-style: normal; font-size: 11px; margin-left: 2px; }
-.nl-stk { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.nl-stk b { color: #e6ecf2; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nl-stk i, .nl-stk em { font-style: normal; font-size: 11px; }
-.nl-stk i { color: #9fb2c6; }
-.lad-on { color: #4ade80; }
-.lad-off { color: #fca5a5; }
+.st-ty { flex-wrap: wrap; gap: 4px; }
+.cp-line { color: #e6ecf2; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-sub { color: #9fb2c6; font-size: 11px; margin-top: 2px; }
 :deep(.row-focus > td.el-table__cell) { background: rgba(251, 209, 102, .1); }
 
 /* 空状态 */
