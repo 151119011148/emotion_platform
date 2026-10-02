@@ -1,7 +1,12 @@
 <template>
   <section class="height-curve">
     <div class="curve-head">
-      <h3>{{ name }} <span class="sub">近 {{ visibleCount }} 个交易日 · 共 {{ rows.length }} 天可回看 · 点任意一天切日期 · <i class="lk probe">☆</i>试探 <i class="lk break">★</i>破壁成功 <i class="lk line" :style="{ color: focusedColor }">- -</i>破壁线{{ originNote }}</span></h3>
+      <h3>{{ name }}
+        <span class="sub" v-if="isNodeMode">近 {{ visibleCount }} 个交易日 · 共 {{ rows.length }} 天可回看 ·
+          <i class="lk anchor">▼</i>锚定龙头 <i class="lk stock">◆</i>节点票 ·
+          实心＝有效 虚线＝待验证 灰＝失效 · 点标切节点</span>
+        <span class="sub" v-else>近 {{ visibleCount }} 个交易日 · 共 {{ rows.length }} 天可回看 · 点任意一天切日期 · <i class="lk probe">☆</i>试探 <i class="lk break">★</i>破壁成功 <i class="lk line" :style="{ color: focusedColor }">- -</i>破壁线{{ originNote }}</span>
+      </h3>
     </div>
     <el-empty v-if="!rows.length" description="暂无连板高度数据" :image-size="60" />
     <div v-else ref="chartRef" class="canvas"></div>
@@ -47,9 +52,20 @@ const props = defineProps({
   /** 标题名 */
   name: { type: String, default: '连板高度' },
   /** 联动组名：同名的曲线共用一份缩放窗口（连板生态页与分数曲线同组） */
-  zoomGroup: { type: String, default: '' }
+  zoomGroup: { type: String, default: '' },
+  /**
+   * 节点页专用：把曲线上的点换成「锚定龙头 → 节点票」。
+   * [{id, kind:'anchor'|'stock', date, board, name, code, status}]，日期不在窗口里的由调用方滤掉。
+   */
+  nodeMarks: { type: Array, default: () => [] },
+  /** 只看这一个节点的标（其余淡到读不出形状）；null = 全部一起看 */
+  focusNode: { type: [Number, String], default: null },
+  /** 每天的琥珀圆点画不画：节点页用节点标替掉它，天梯页保持 true */
+  dayPoints: { type: Boolean, default: true },
+  /** 破壁虚线段与 ☆/★ 星画不画：节点页只留高度线＋节点标，天梯页保持 true */
+  breakLines: { type: Boolean, default: true }
 })
-const emit = defineEmits(['select'])
+const emit = defineEmits(['select', 'select-node'])
 
 const chartRef = ref(null)
 let chart = null
@@ -123,6 +139,200 @@ function colorOf(r) {
 }
 
 const focusedColor = computed(() => (focusedRow.value ? colorOf(focusedRow.value) : LINE_GREY))
+
+const isNodeMode = computed(() => (props.nodeMarks || []).length > 0)
+
+/** ECharts 内置只有 triangle 朝上，接位那枚要朝下，两枚都自己给 path。 */
+const MARK_PATH = {
+  anchor: 'path://M0,0 L12,0 L6,9.5 Z',
+  stock: 'path://M6,0 L12,6 L6,12 L0,6 Z'
+}
+const MARK_COLOR = { anchor: '#60a5fa', stock: '#22c55e' }
+/** 失效不是另一种票，是没兑现的票：形状留着、颜色退灰、整枚压暗。 */
+const MARK_INVALID = '#7d8ea1'
+
+function markColor(m) {
+  return m.status === '失效' ? MARK_INVALID : MARK_COLOR[m.kind]
+}
+
+/**
+ * 节点标落位：日期不在当前窗口里的那几枚不硬画，改在左上角出一行「◀ 在窗口外」的牌子。
+ * 标签按像素位置排一遍队：龙头在上、票在下，相邻两天的标很容易压在同一个水平带上。
+ * @returns {{on: Array, off: Array}} on 带像素坐标，off 只带原始字段
+ */
+function buildNodeMarks(rows, dates, yMin, yMax) {
+  const cv = chartRef.value
+  const W = (cv && cv.clientWidth) || 900
+  const H = (cv && cv.clientHeight) || 200
+  // grid 是 {left:40, right:30, top:30, bottom:26}，像素换算必须跟它一致
+  const innerW = Math.max(W - 70, 120)
+  const innerH = Math.max(H - 56, 60)
+  const pxPerDay = innerW / Math.max(rows.length - 1, 1)
+
+  const on = []
+  const off = []
+  for (const m of props.nodeMarks || []) {
+    const i = dates.indexOf(m.date)
+    if (i < 0) { off.push(m); continue }
+    on.push({
+      ...m, i,
+      x: i * pxPerDay,
+      y: ((yMax - m.board) / (yMax - yMin)) * innerH
+    })
+  }
+
+  on.forEach((m) => {
+    // 同一天同板高的两枚标（上一节的票＝下一节的龙头）横向错开，叠一起读不出形状
+    const same = on.filter((z) => z.i === m.i && z.board === m.board)
+    m.dx = same.length > 1 ? (m.kind === 'anchor' ? -8 : 8) : 0
+    m.dim = props.focusNode != null && String(m.id) !== String(props.focusNode)
+    m.text = `${m.kind === 'anchor' ? '锚' : '票'} ${m.name} ${m.board}板`
+    const cjk = (m.text.match(/[^\x00-\xff]/g) || []).length
+    m.w = cjk * 10.5 + (m.text.length - cjk) * 6
+    // 退潮期票掉到 2 板 = Y 轴底，标签朝下就压进日期刻度行，这时翻上去
+    m.side = m.kind === 'anchor' ? -1 : (innerH - m.y >= 20 ? 1 : -1)
+    m.dist = 13
+  })
+
+  for (let pass = 0; pass < 5; pass++) {
+    let moved = false
+    for (let a = 0; a < on.length; a++) {
+      for (let b = a + 1; b < on.length; b++) {
+        const p = on[a]
+        const q = on[b]
+        const py = p.y + p.side * p.dist
+        const qy = q.y + q.side * q.dist
+        if (Math.abs(py - qy) < 12 && Math.abs(p.x - q.x) < (p.w + q.w) / 2) {
+          p.dist += 9
+          q.dist += 9
+          moved = true
+        }
+      }
+    }
+    if (!moved) break
+  }
+  on.forEach((m) => {
+    // 上面留 20px 顶边距可用，下面不许越过网格底（再下去就是日期刻度）
+    const limit = m.side < 0 ? m.y + 20 : innerH - m.y
+    m.dist = Math.max(12, Math.min(m.dist, Math.max(12, limit)))
+  })
+  return { on, off }
+}
+
+/** 窗口外的标：不硬画在曲线上，左上角出一行牌子说它去哪了——往左平移窗口才看得到。 */
+function offscreenGraphic(off) {
+  const show = off.slice(0, 3)
+  const g = show.map((m, k) => ({
+    type: 'text',
+    left: 44,
+    top: 2 + k * 13,
+    silent: true,
+    style: {
+      text: `◀ ${m.kind === 'anchor' ? '锚' : '票'} ${m.name} ${m.board}板 · ${m.date.slice(5)} 在窗口外`,
+      fill: markColor(m),
+      fontSize: 10,
+      backgroundColor: 'rgba(26,35,50,0.88)',
+      padding: [1, 4],
+      borderRadius: 3,
+      opacity: props.focusNode != null && String(m.id) !== String(props.focusNode) ? 0.25 : 0.9
+    }
+  }))
+  if (off.length > show.length) {
+    g.push({
+      type: 'text',
+      left: 44,
+      top: 2 + show.length * 13,
+      silent: true,
+      style: { text: `另有 ${off.length - show.length} 枚在窗口外`, fill: '#8899a6', fontSize: 10 }
+    })
+  }
+  return g
+}
+
+/**
+ * 节点标两枚 + 接位连线。连线的笔色放在闭包数组里按 dataIndex 取：
+ * custom 系列的 api.style() 会把 itemStyle 的 color 当填充、边框另算，
+ * 而这条线要的正是「stroke＋虚线＋透明度」三样，绕开那层映射少一类意外。
+ */
+function nodeMarkSeries(rows, dates, yMin, yMax) {
+  const { on, off } = buildNodeMarks(rows, dates, yMin, yMax)
+
+  const data = on.map((m) => ({
+    value: [dates[m.i], m.board],
+    nodeId: m.id,
+    nodeKind: m.kind,
+    info: m.info || null,
+    symbol: MARK_PATH[m.kind],
+    symbolSize: m.kind === 'anchor' ? 13 : 12,
+    symbolOffset: [m.dx, 0],
+    symbolKeepAspect: true,
+    itemStyle: {
+      color: m.status === '待验证' ? '#12203a' : markColor(m),
+      borderColor: markColor(m),
+      borderWidth: 1.8,
+      borderType: m.status === '待验证' ? 'dashed' : 'solid',
+      opacity: (m.dim ? 0.16 : 1) * (m.status === '失效' ? 0.55 : 1)
+    },
+    label: {
+      show: !m.dim,
+      formatter: m.text,
+      position: [0, m.side * m.dist],
+      align: 'center',
+      verticalAlign: m.side < 0 ? 'bottom' : 'top',
+      color: markColor(m),
+      fontSize: 10.5,
+      fontWeight: props.focusNode != null && String(m.id) === String(props.focusNode) ? 700 : 400,
+      opacity: m.status === '失效' ? 0.8 : 1,
+      backgroundColor: 'rgba(26,35,50,0.85)',
+      padding: [1, 3],
+      borderRadius: 3
+    }
+  }))
+
+  const links = []
+  on.forEach((a) => {
+    if (a.kind !== 'anchor') return
+    const b = on.find((z) => z.id === a.id && z.kind === 'stock')
+    if (!b) return
+    links.push({
+      value: [a.i, a.board, b.i, b.board],
+      color: a.status === '失效' || b.status === '失效' ? MARK_INVALID : '#3f5f86',
+      width: a.dim ? 1 : 1.2,
+      opacity: a.dim ? 0.2 : 0.75
+    })
+  })
+  const linkSeries = {
+    id: 'nodeLink',
+    type: 'custom',
+    name: '接位连线',
+    z: 4,
+    silent: true,
+    tooltip: { show: false },
+    encode: { x: [0, 2], y: [1, 3] },
+    data: links,
+    renderItem(params, api) {
+      const L = links[params.dataIndex]
+      if (!L) return null
+      const p = api.coord([api.value(0), api.value(1)])
+      const q = api.coord([api.value(2), api.value(3)])
+      const mx = (p[0] + q[0]) / 2
+      const my = Math.min(p[1], q[1]) - 24
+      return {
+        type: 'group',
+        children: [{
+          type: 'bezierCurve',
+          shape: { x1: p[0], y1: p[1], cpx1: mx, cpy1: my, cpx2: mx, cpy2: my, x2: q[0], y2: q[1] },
+          style: { stroke: L.color, lineWidth: L.width, lineDash: [2, 4], opacity: L.opacity, fill: 'none' }
+        }]
+      }
+    }
+  }
+
+  return {
+    graphic: offscreenGraphic(off),
+    series: [{ id: 'nodeMark', type: 'scatter', name: '节点标', z: 6, data }, linkSeries]
+  }
+}
 
 /** 改窗口 → 重画：buildOption 按新窗口重新切片，Y 轴量程跟着可见数据走。
  *  重画由下面对 zoom.state 的 watch 统一触发，本图的按钮也走同一条路，
@@ -234,7 +444,8 @@ function buildOption() {
       fontWeight: 'bold'
     }
   }))
-  const marks = probePoints.concat(breakPoints)
+  const marks = props.breakLines ? probePoints.concat(breakPoints) : []
+  const nodeMarks = isNodeMode.value ? nodeMarkSeries(rows, dates, yMin, yMax) : { series: [], graphic: [] }
 
   // 选中日期竖线：必须两点式。单点 {xAxis} 的端点贴着网格底，标签会被钳进 X 轴刻度行
   // （选最左一天时实测 y182-194，与首个刻度标签正面重叠）；锚到 yMax 后恒在 y157-167。
@@ -267,7 +478,7 @@ function buildOption() {
    * 段首标出来源（「08-28 深中华A」）：段宽放得下、且不压到已经占位的标签才标，
    * 放大到全量 59 个来源时只留颜色＋那颗点；选中那天所在的那段和窗口尾段永远标，读者靠它认色。
    */
-  const lineRuns = readLineRuns(rows)
+  const lineRuns = props.breakLines ? readLineRuns(rows) : []
   const innerW = Math.max((chartRef.value ? chartRef.value.clientWidth : 0) - 70, 120)
   const pxPerDay = innerW / Math.max(rows.length - 1, 1)
   const meta = lineRuns.map((run, n) => {
@@ -352,6 +563,18 @@ function buildOption() {
         if (!p) return ''
         const r = rows[p.dataIndex]
         if (!r) return ''
+        // 节点页：卡片那六格里剩下的读数只有这里放得下，标本身已经说了谁、几板、哪天
+        const hit = params.find((q) => q.seriesId === 'nodeMark' && q.data && q.data.info)
+        if (hit) {
+          const i = hit.data.info
+          const ls = [`<b>${r.date}</b> 节点 #${hit.data.nodeId}`]
+          ls.push([i.status, i.typeLabel, i.theme].filter(Boolean).join(' · '))
+          if (i.d0) ls.push(`D0 ${i.d0}`)
+          ls.push(`D0 情绪 ${i.score != null ? i.score + ' 分' : '未记'}${i.cycle ? ' · ' + i.cycle : ''}`)
+          if (i.verify) ls.push(i.verify)
+          if (i.pool) ls.push(`候选池 ${i.pool}`)
+          return ls.join('<br/>')
+        }
         // 只报日期和当天并列打到最高板的票：破壁线、试探/破壁判定这些图上已有点和标签，
         // 再在 hover 里铺一遍就把这块 300px 高的浮层撑成一屏说明文
         const lines = [r.date]
@@ -385,13 +608,14 @@ function buildOption() {
       name: '板高',
       nameTextStyle: { color: '#8899a6', fontSize: 10 }
     },
+    graphic: nodeMarks.graphic,
     series: [
       {
         name: '最高连板',
         type: 'line',
         data: heights,
         smooth: 0.3,
-        symbol: 'circle',
+        symbol: props.dayPoints ? 'circle' : 'none',
         symbolSize: 8,
         showAllSymbol: true,
         lineStyle: { width: 2.5, color: '#fbbf24' },
@@ -413,8 +637,9 @@ function buildOption() {
           data: selectedLine
         } : undefined
       },
-      ...lineSeries
+      ...lineSeries,
       // 上面按来源切的每一段各一条；这里不再有一条全量的破壁线系列
+      ...nodeMarks.series
     ]
   }
 }
@@ -438,13 +663,19 @@ function renderChart() {
       const date = rows[i]?.date
       if (date) emit('select', date)
     })
+    // 点标切节点：页脚的日期高亮是「看哪天」，这一路是「看哪个节点」，两件事两套事件
+    chart.on('click', (p) => {
+      if (p.componentType === 'series' && p.seriesId === 'nodeMark' && p.data) {
+        emit('select-node', p.data.nodeId)
+      }
+    })
   }
   chart.setOption(buildOption(), true)
 }
 
 const onResize = () => chart?.resize()
 
-watch(() => [props.rows, props.selected], renderChart, { deep: true, flush: 'post' })
+watch(() => [props.rows, props.selected, props.nodeMarks, props.focusNode], renderChart, { deep: true, flush: 'post' })
 // 窗口状态可能在同组另一条曲线的按钮上被改，所以重画挂在状态上，不挂在本图的点击上
 watch(() => [zoom.state.back, zoom.state.span], renderChart, { flush: 'post' })
 onMounted(() => {
@@ -495,6 +726,12 @@ onUnmounted(() => {
 }
 .lk.probe {
   color: #ef4444;
+}
+.lk.anchor {
+  color: #60a5fa;
+}
+.lk.stock {
+  color: #22c55e;
 }
 .lk.break {
   color: #ef4444;

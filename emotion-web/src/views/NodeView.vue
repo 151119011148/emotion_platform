@@ -22,135 +22,59 @@
       <div class="evolution-hint" v-else>该节点未记 D0 情绪分，无法定位周期位置</div>
     </div>
 
-    <!-- ⑤ 活跃节点卡片区（顶替空状态占位）：有活跃节点才出现 -->
-    <div class="current-node" v-if="activeNode">
-      <div class="current-head">
+    <!-- ⑤ 中间区：连板高度曲线（点换成锚定龙头 ▼ / 节点票 ◆）＋节点列表＋复算采纳 -->
+    <div class="current-node" v-if="nodeList.length || activeNode">
+      <div class="current-head" v-if="panelNode">
         <div class="current-tags">
-          <el-tag :type="statusType(activeNode.status)" size="small">{{ activeNode.status }}</el-tag>
+          <el-tag :type="statusType(panelNode.status)" size="small">{{ panelNode.status }}</el-tag>
           <!-- 类型轴：五个具体 node_type；策略没识别出来显示「未识别」，不回落「普通节点」 -->
-          <span class="ntag" :class="nodeTypeClass(activeNode)">{{ nodeTypeLabel(activeNode) }}</span>
-          <el-tag v-if="activeNode.theme" size="small" type="info">{{ activeNode.theme }}</el-tag>
+          <span class="ntag" :class="nodeTypeClass(panelNode)">{{ nodeTypeLabel(panelNode) }}</span>
+          <el-tag v-if="panelNode.theme" size="small" type="info">{{ panelNode.theme }}</el-tag>
         </div>
-        <span class="recalc">上次复算：{{ fmtTime(activeNode.lastRecalcAt) || '—' }}</span>
+        <span class="recalc">
+          节点 #{{ panelNode.id }} · D0 {{ panelNode.d0Date || '—' }} ·
+          <template v-if="panelNode.id === activeId">上次复算：{{ fmtTime(panelNode.lastRecalcAt) || '—' }}</template>
+          <template v-else>历史节点，不在追踪中</template>
+        </span>
       </div>
 
-      <div class="card-grid">
-        <div class="card-cell">
-          <span class="k">D0 日期</span>
-          <span class="v">{{ activeNode.d0Date || '—' }}</span>
-        </div>
-        <div class="card-cell">
-          <span class="k">锚定龙头</span>
-          <span class="v">
-            <template v-if="activeNode.anchorName">
-              {{ activeNode.anchorName }}
-              <el-tag size="small" type="success" class="role">{{ activeNode.anchorRoleLabel }}</el-tag>
-              <span class="muted" v-if="activeNode.anchorEndDate == null">· 生效中</span>
-            </template>
-            <span v-else>{{ activeNode.anchorStock || '—' }}</span>
-          </span>
-        </div>
-        <div class="card-cell">
-          <span class="k">节点票（当前）</span>
-          <span class="v">
-            <span v-if="activeNode.nodeStock">{{ activeNode.nodeStock }}</span>
-            <span v-else>—</span>
-            <el-tag v-if="activeNode.nodeStockStatus" size="small"
-              :type="onLadder(activeNode.nodeStockStatus) ? 'success' : 'danger'">
-              {{ activeNode.nodeStockStatus }}
-            </el-tag>
-          </span>
-        </div>
-        <div class="card-cell">
-          <span class="k">D0 情绪</span>
-          <span class="v">
-            <template v-if="activeNode.d0Score != null">{{ activeNode.d0Score }} 分</template>
-            <template v-else>无读数</template>
-            <span class="muted" v-if="activeNode.d0Cycle">· {{ activeNode.d0Cycle }}</span>
-          </span>
-        </div>
-        <div class="card-cell">
-          <span class="k">T+1 验证</span>
-          <span class="v">
-            <template v-if="activeNode.suggestion && activeNode.suggestion.ready">
-              <el-tag :type="statusType(activeNode.suggestion.suggestedStatus)" size="small">
-                建议 {{ activeNode.suggestion.suggestedStatus }}
-              </el-tag>
-              <span class="muted">（待采纳）</span>
-            </template>
-            <template v-else>明日待走完 / 判据未齐</template>
-          </span>
-        </div>
-        <div class="card-cell">
-          <span class="k">监管标记</span>
-          <span class="v">
-            <el-tag v-if="activeNode.surveillance" type="danger" size="small">⚠ 监管</el-tag>
-            <span v-else>—</span>
-          </span>
-        </div>
-      </div>
-      <p class="surv-desc" v-if="activeNode.surveillanceDesc">{{ activeNode.surveillanceDesc }}</p>
+      <BoardHeightCurve :rows="curveRows" :selected="panelNode ? panelNode.d0Date : ''"
+        :node-marks="nodeMarks" :focus-node="focusId" :day-points="false" :break-lines="false"
+        name="连板高度 · 节点" zoom-group="node-curve" @select-node="toggleFocus" />
 
-      <div class="node-timeline">
-        <div class="timeline-step" :class="{ active: true, observe: isObserveDay(activeNode) }">
-          <div class="step-dot d0" :class="{ observe: isObserveDay(activeNode) }"></div>
-          <div class="step-content">
-            <span class="step-label">D0（断板日）</span>
-            <span class="step-date">{{ activeNode.d0Date }}</span>
-            <span class="step-desc">
-              锚定龙头：{{ activeNode.anchorName || activeNode.anchorStock }}（{{ activeNode.anchorMaxBoard }}板）
-            </span>
-            <div class="candidates" v-if="parsedCandidates.length">
-              <el-tag v-for="c in parsedCandidates" :key="c" size="small" type="info">{{ c }}</el-tag>
-            </div>
-            <!-- 试探破壁＝观察日：不产候选池是规则本身，但当天<b>有</b>一票——追线的那只，看它次日续不续板 -->
-            <div class="observe-note" v-else-if="isObserveDay(activeNode)">◌ 观察日 · 只看追线那只续不续板，不产候选</div>
-          </div>
+      <div class="nlist">
+        <div class="nl-cap">节点列表 · 曲线上的标就是这几行，点一行只看它那两个标，再点一下恢复全部</div>
+        <div class="nl-row nl-hd">
+          <span>编号</span><span>状态 · 类型</span><span>▼ 锚定龙头</span><span>◆ 节点票</span>
+          <span>D0</span><span>T+1</span><span>候选池 · 题材 · D0 情绪</span>
         </div>
-        <div class="timeline-step" :class="{ active: activeNode.t1Date }">
-          <div class="step-dot t1"></div>
-          <div class="step-content">
-            <span class="step-label">T+1（验证日）</span>
-            <span class="step-date">{{ activeNode.t1Date || '待验证' }}</span>
-            <template v-if="activeNode.t1Date">
-              <template v-if="isSpaceNode(activeNode)">
-                <span class="step-desc">续板判定：{{ repairText(activeNode.repairStatus) }}</span>
-                <span class="step-desc" v-if="activeNode.breakBoard != null">
-                  追的破壁线：{{ activeNode.breakBoard }} 板
-                </span>
-              </template>
-              <template v-else>
-                <span class="step-desc">
-                  老龙反包：{{ t1Repack(activeNode.t1AnchorRepack) }}
-                </span>
-                <span class="step-desc">
-                  晋级数量：{{ activeNode.t1PromotionCount }}只（{{ fmtRate(activeNode.t1PromotionRate) }}%）
-                </span>
-              </template>
-            </template>
-          </div>
-        </div>
-        <div class="timeline-step" :class="{ active: activeNode.nodeStock }">
-          <div class="step-dot t2"></div>
-          <div class="step-content">
-            <span class="step-label">确认</span>
-            <span class="step-desc" v-if="activeNode.nodeStock">
-              节点票：{{ activeNode.nodeStock }}
-              <span v-if="activeNode.nodeStockMaxBoard">（最高{{ activeNode.nodeStockMaxBoard }}板）</span>
-            </span>
-            <span class="step-desc" v-else>待确认</span>
-          </div>
+        <div v-for="n in nodeList" :key="n.id" class="nl-row"
+          :class="{ sel: focusId === n.id, inv: n.status === '失效' }" @click="toggleFocus(n.id)">
+          <span class="nl-id">#{{ n.id }}<em v-if="n.id === activeId"> 活跃</em></span>
+          <span><el-tag :type="statusType(n.status)" size="small">{{ n.status }}</el-tag> {{ nodeTypeLabel(n) }}</span>
+          <span class="nl-stk">
+            <b>{{ n.anchorName || n.anchorStock || '—' }}</b>
+            <i v-if="markOf(n.id, 'anchor')">{{ markOf(n.id, 'anchor').board }}板 {{ markOf(n.id, 'anchor').date.slice(5) }}</i>
+          </span>
+          <span class="nl-stk">
+            <b>{{ n.nodeStock || '待确认' }}</b>
+            <i v-if="markOf(n.id, 'stock')">{{ markOf(n.id, 'stock').board }}板 {{ markOf(n.id, 'stock').date.slice(5) }}</i>
+            <em v-if="n.nodeStockStatus" :class="onLadder(n.nodeStockStatus) ? 'lad-on' : 'lad-off'">{{ n.nodeStockStatus }}</em>
+          </span>
+          <span>{{ (n.d0Date || '—').slice(5) }}</span>
+          <span>{{ t1Text(n) }}</span>
+          <span>{{ n.candidatePool || '—' }} · {{ n.theme || '—' }} · {{ n.d0Score != null ? n.d0Score + '分' : '情绪未记' }}</span>
         </div>
       </div>
 
-      <NodeSuggestPanel :node="activeNode" @adopted="loadNodes" />
+      <NodeSuggestPanel v-if="panelNode" :node="panelNode" @adopted="loadNodes" />
     </div>
 
     <!-- 无活跃节点：空状态 + 引导按钮，而不是一个孤立插图 -->
     <div v-else class="empty-box">
       <div class="empty-emoji">◌</div>
       <div class="empty-title">暂无追踪中的节点事件</div>
-      <div class="empty-sub">系统里已有历史节点；从今日天梯新增一个节点，或先关联人工阵眼，追踪即从这里开始</div>
+      <div class="empty-sub">还没有任何节点事件；从今日天梯新增一个节点，或先关联人工阵眼，追踪与这条曲线都从这里开始</div>
       <div class="empty-actions">
         <el-button type="primary" @click="goTianti">从今日天梯新增节点</el-button>
         <el-button @click="goHighEco">关联人工阵眼</el-button>
@@ -180,7 +104,9 @@
         </div>
       </div>
 
-      <el-table :data="filteredNodes" style="width: 100%">
+      <el-table :data="filteredNodes" style="width: 100%"
+        :row-class-name="({ row }) => (row.id === focusId ? 'row-focus' : '')"
+        @row-click="onRowClick">
         <el-table-column type="expand">
           <template #default="{ row }">
             <div class="expand-detail">
@@ -410,10 +336,12 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { nodeApi, anchorsApi } from '../api/modules'
+import { nodeApi, anchorsApi, prdApi } from '../api/modules'
 import { useTradingCalendar } from '../utils/tradingCalendar'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import NodeSuggestPanel from '../components/NodeSuggestPanel.vue'
+import BoardHeightCurve from '../components/BoardHeightCurve.vue'
+import { buildNodeMarks } from '../utils/nodeMarks'
 
 const { disabledDate, cellClass, loadTradingDays } = useTradingCalendar()
 
@@ -495,11 +423,6 @@ function nodeTypeClass(row) {
   const t = row?.nodeType
   return 'nt-' + (t && KNOWN_NODE_TYPES.has(t) ? t : 'none')
 }
-/** 观察日（试探破壁）：这天不产候选池，只有追线的那一只，结论等它次日续不续板。 */
-function isObserveDay(row) {
-  return row?.nodeType === 'SPACE_BREAK'
-}
-
 /** 空间轴两行：它们的验证格是「续板判定」，不是高低切的老龙反包与晋级率。 */
 function isSpaceNode(row) {
   return row?.nodeType === 'SPACE_BREAK' || row?.nodeType === 'SPACE_BREAK_NEXT'
@@ -525,17 +448,100 @@ const EVOLVE = [
 ]
 
 const activeNode = computed(() => currentNode.value)
+const activeId = computed(() => activeNode.value?.id ?? null)
 
-const parsedCandidates = computed(() => {
-  const raw = activeNode.value?.d0Candidates
-  if (!raw) return []
-  try {
-    const arr = JSON.parse(raw)
-    return Array.isArray(arr) ? arr : []
-  } catch {
-    return raw.split(',').map(s => s.trim()).filter(Boolean)
+/* ---------- 中间区：连板高度曲线（点换成节点标）＋节点列表 ---------- */
+
+/**
+ * 取数窗口：要能一路往左翻到最早那节节点的龙头。180 个自然日 ≈ 120 个交易日，
+ * 覆盖现有全部节点，又比天梯页那 760 天拉得快。
+ */
+const LOOKBACK_DAYS = 180
+const todayStr = new Date().toLocaleDateString('en-CA')
+const heightAll = ref([])
+/** 右端不按某一天截：节点页看的就是窗口里全部节点，往左翻交给 −/≪ 按钮 */
+const curveRows = computed(() => heightAll.value)
+/** null＝全部节点一起看；给了 id 就只留它那两枚标，其余淡到读不出形状 */
+const focusId = ref(null)
+
+function shiftDays(iso, days) {
+  const d = new Date(iso)
+  d.setDate(d.getDate() - days)
+  return d.toLocaleDateString('en-CA')
+}
+
+/**
+ * height-range 的一行 → 曲线判定点。字段与天梯页那一份同形，两边画的才是同一条线；
+ * 多出的一枚 ladder 是天梯页不读的——节点标要的正是「当天 2 板及以上、各自几板」，
+ * ▼锚定龙头与◆节点票那两枚标的位置全靠它在本地算出来。
+ */
+function mapHeightRow(r) {
+  return {
+    date: r.tradeDate,
+    maxHeight: r.maxHeight,
+    stockCount: r.stockCount,
+    stocks: r.stocks || [],
+    ladder: r.ladder || [],
+    ceiling: r.ceiling,
+    lineStock: r.lineStock || null,
+    lineOriginDate: r.lineOriginDate || null,
+    lineOriginStock: r.lineOriginStock || null,
+    isProbe: !!r.isProbe,
+    probeStock: r.probeStock || null,
+    isBreak: !!r.isBreak,
+    prevHigh: r.prevHigh,
+    breakStock: r.breakStock || null
   }
+}
+
+async function loadCurve() {
+  const res = await prdApi.heightRange(shiftDays(todayStr, LOOKBACK_DAYS), todayStr).catch(() => null)
+  heightAll.value = ((res && res.data) || []).map(mapHeightRow)
+}
+
+/** hover 浮层要补的读数：卡片删掉之后，这些数只剩这一处放得下。 */
+function markInfo(n) {
+  return {
+    status: n.status,
+    typeLabel: nodeTypeLabel(n),
+    theme: n.theme,
+    d0: n.d0Date,
+    score: n.d0Score,
+    cycle: n.d0Cycle,
+    pool: n.candidatePool || '未采纳',
+    verify: isSpaceNode(n)
+      ? `续板判定 ${repairText(n.repairStatus)}${n.breakBoard != null ? ` · 追 ${n.breakBoard} 板破壁线` : ''}`
+      : `T+1 ${n.t1Date || '待走完'} · 晋级 ${n.t1PromotionCount ?? '—'} 只（${fmtRate(n.t1PromotionRate)}%）· 老龙反包 ${t1Repack(n.t1AnchorRepack)}`
+  }
+}
+
+const nodeMarks = computed(() => buildNodeMarks(nodeList.value, heightAll.value, markInfo))
+
+function markOf(nodeId, kind) {
+  return nodeMarks.value.find((m) => m.id === nodeId && m.kind === kind) || null
+}
+
+/** 列表那格只放一句读完的验证话：空间轴报续板，其余报晋级只数与晋级率。 */
+function t1Text(n) {
+  if (isSpaceNode(n)) return repairText(n.repairStatus)
+  if (n.t1PromotionRate == null) return '待验证'
+  return `${n.t1PromotionCount ?? '—'} 只 · ${n.t1PromotionRate}%`
+}
+
+/** 曲线高亮竖线与判据面板跟着的那一节：点定的那节 → 活跃那节 → 最新那节。 */
+const panelNode = computed(() => {
+  if (focusId.value != null) return nodeList.value.find((n) => n.id === focusId.value) || null
+  return activeNode.value || nodeList.value[0] || null
 })
+
+function toggleFocus(id) {
+  focusId.value = focusId.value === id ? null : id
+}
+/** 点表格一行＝点列表一行。操作列那两个按钮不算：它们各自有自己的事要做。 */
+function onRowClick(row, col, e) {
+  if (e && e.target && e.target.closest && e.target.closest('button')) return
+  toggleFocus(row.id)
+}
 
 function openSuggest(row) {
   suggestNode.value = row
@@ -917,6 +923,7 @@ async function handleCreateNode() {
 onMounted(() => {
   loadTradingDays()
   loadNodes()
+  loadCurve()
 })
 </script>
 
@@ -934,7 +941,7 @@ onMounted(() => {
 .evolution-hint { color: #8899a6; font-size: 12px; margin-top: 8px; }
 .evolution-hint b { color: #e1e8ed; }
 
-/* 平安：活跃节点卡片 */
+/* 中间区：曲线＋节点列表（六格卡片区与三段式时间轴已整块撤下，读数搬进曲线浮层） */
 .current-node {
   background: #1a2332; border-radius: 12px; padding: 20px 24px; margin-bottom: 20px;
   border: 1px solid #2a3a52;
@@ -942,40 +949,32 @@ onMounted(() => {
 .current-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .current-tags { display: flex; gap: 8px; }
 .recalc { color: #8899a6; font-size: 12px; }
-.card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 8px; }
-.card-cell { display: flex; flex-direction: column; gap: 4px; }
-.card-cell .k { color: #8899a6; font-size: 12px; }
-.card-cell .v { color: #e1e8ed; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.role { margin-left: 2px; }
-.muted { color: #8899a6; font-weight: 400; font-size: 12px; }
-.surv-desc { color: #f87171; font-size: 12px; margin: 6px 0 0; }
 
 /* 节点类型标签的 .ntag / .nt-* 配色在全局 App.vue：NodeSuggestPanel 也要用同一份，
    放 scoped 里它读不到。别再往这里抄一遍。 */
 
-.node-timeline { display: flex; position: relative; margin: 16px 0; }
-.timeline-step { flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; padding: 0 12px; }
-.step-dot { width: 16px; height: 16px; border-radius: 50%; margin-bottom: 12px; z-index: 1; }
-.step-dot.d0 { background: #3b82f6; }
-.step-dot.t1 { background: #f59e0b; }
-.step-dot.t2 { background: #2d8a4e; }
-.timeline-step:not(.active) .step-dot { background: #4a5568; }
-
-/* 观察日（破局日）态：空心紫圈 + 虚线连接。
-   语义要和上面的灰点彻底分开：灰点＝这一步还没走到；空心紫＝走到了，
-   但规则要求这一天不出手。两者复用会让「为什么今天没票」变成一笔糊涂账。 */
-.step-dot.observe { background: transparent; border: 3px solid var(--node-sb, #a78bfa); }
-.timeline-step.observe::before {
-  content: ''; position: absolute; top: 7px; left: 0; width: 100%; height: 0;
-  border-top: 1px dashed var(--node-sb, #a78bfa); opacity: .55;
+.nlist { margin: 2px 0 14px; }
+.nl-cap { color: #8899a6; font-size: 11px; margin-bottom: 8px; }
+.nl-row {
+  display: grid; gap: 8px; align-items: center;
+  grid-template-columns: 62px 138px 1.1fr 1.3fr 54px 92px 1.8fr;
+  padding: 6px 8px; border-radius: 8px; cursor: pointer;
+  color: #c6d2de; font-size: 12px;
 }
-.observe-note { color: var(--node-sb, #a78bfa); font-size: 12px; margin-top: 8px; }
-.step-content { text-align: center; display: flex; flex-direction: column; gap: 4px; }
-.step-label { color: #e1e8ed; font-weight: 600; font-size: 14px; }
-.step-date { color: #8899a6; font-size: 13px; }
-.step-desc { color: #8899a6; font-size: 12px; }
-.candidates { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; margin-top: 8px; }
-.signal { color: #8899a6; font-size: 12px; margin: 0; }
+.nl-row:hover { background: #223046; }
+.nl-hd { color: #8899a6; font-size: 11px; cursor: default; }
+.nl-hd:hover { background: none; }
+.nl-row.sel { background: rgba(251, 209, 102, .12); box-shadow: inset 0 0 0 1px #ffd166; }
+.nl-row.inv { color: #7d8ea1; }
+.nl-id { color: #e1e8ed; }
+.nl-id em { color: #ffd166; font-style: normal; font-size: 11px; margin-left: 2px; }
+.nl-stk { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.nl-stk b { color: #e6ecf2; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nl-stk i, .nl-stk em { font-style: normal; font-size: 11px; }
+.nl-stk i { color: #9fb2c6; }
+.lad-on { color: #4ade80; }
+.lad-off { color: #fca5a5; }
+:deep(.row-focus > td.el-table__cell) { background: rgba(251, 209, 102, .1); }
 
 /* 空状态 */
 .empty-box {
