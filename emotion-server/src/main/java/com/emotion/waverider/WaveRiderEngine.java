@@ -3,6 +3,7 @@ package com.emotion.waverider;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.emotion.entity.CandidateStock;
 import com.emotion.entity.CandidateT1;
+import com.emotion.entity.DailyRecord;
 import com.emotion.entity.MarketStock;
 import com.emotion.entity.NodeDetect;
 import com.emotion.entity.NodeEvent;
@@ -13,6 +14,7 @@ import com.emotion.market.HighControlStock;
 import com.emotion.market.TencentClient;
 import com.emotion.mapper.CandidateStockMapper;
 import com.emotion.mapper.CandidateT1Mapper;
+import com.emotion.mapper.DailyRecordMapper;
 import com.emotion.mapper.MarketStockMapper;
 import com.emotion.mapper.NodeDetectMapper;
 import com.emotion.mapper.StockMapper;
@@ -80,6 +82,8 @@ public class WaveRiderEngine {
     private final CandidateStockMapper candidateMapper;
     private final CandidateT1Mapper t1Mapper;
     private final StrategyRunMapper runMapper;
+    /** 情绪温度的出处。t_daily_record 按 user_id 分行，同一天多个复盘人各有一份、值可以差好几度。 */
+    private final DailyRecordMapper dailyRecordMapper;
     private final DailyBarService dailyBarService;
     /** 节点票身份的唯一出处：与策略选股页那个「节点票」标共用一套匹配，见 {@link #build}。 */
     private final NodeService nodeService;
@@ -92,6 +96,7 @@ public class WaveRiderEngine {
                            CandidateStockMapper candidateMapper,
                            CandidateT1Mapper t1Mapper,
                            StrategyRunMapper runMapper,
+                           DailyRecordMapper dailyRecordMapper,
                            DailyBarService dailyBarService,
                            NodeService nodeService,
                            ObjectMapper objectMapper) {
@@ -102,6 +107,7 @@ public class WaveRiderEngine {
         this.candidateMapper = candidateMapper;
         this.t1Mapper = t1Mapper;
         this.runMapper = runMapper;
+        this.dailyRecordMapper = dailyRecordMapper;
         this.dailyBarService = dailyBarService;
         this.nodeService = nodeService;
         this.objectMapper = objectMapper;
@@ -288,7 +294,18 @@ public class WaveRiderEngine {
         List<MarketStock> picked = pickPositions(step, cfg);
         funnel.put("取身位", picked.size());
 
-        List<CandidateStock> rows = build(strategyId, userId, tradeDate, runId, cfg, picked);
+        // ---- 情绪温度 → 仓位系数（PRD §6/§17）。市场级变量，同日全部候选共享同一取值，
+        // 所以在这儿算一次就够；它不进个股评分——§12.4.3：对「选哪只」没有区分度。
+        Double temperature = temperatureOf(userId, tradeDate);
+        Double tempScale = null;
+        if (temperature == null) {
+            warnings.add("NO_TEMPERATURE");
+        } else {
+            tempScale = cfg.temperatureScale(temperature);
+        }
+
+        List<CandidateStock> rows = build(strategyId, userId, tradeDate, runId, cfg, picked,
+                temperature, tempScale);
 
         // ---- 清单长度上限（相对当日涨停池）。
         // 必须放在【排序之后】截断。放在排序之前，砍掉的是「题材遍历顺序靠后」的票——
@@ -303,6 +320,29 @@ public class WaveRiderEngine {
             funnel.put("清单上限", rows.size());
         }
         return rows;
+    }
+
+    /**
+     * 当日情绪温度；<strong>拿不到时返回 {@code null}</strong>。
+     *
+     * <p>{@code null} 不是 0。PRD §13 的异常分支写得很明确：「T 日无情绪温度记录」时候选池
+     * <strong>照常产出</strong>，{@code suggest_position} <strong>置空</strong>并标
+     * {@code NO_TEMPERATURE}，不按 0 仓位处理。
+     *
+     * <p>为什么不能把温度做成候选池的前置条件（§12.4.8「落地障碍」）：温度不是纯自动产物，
+     * {@code manual_first_sealed_rate}、{@code manual_top_high_break} 等子指标必须人工填写，
+     * 实测 19 个交易日里只有 14 天有温度。一旦当前置条件，用户某天没复盘当天就整片不可用。
+     *
+     * <p>取的是<strong>策略属主自己那行</strong>：{@code uk_user_date} 保证 (user_id, trade_date)
+     * 唯一，而同一天不同复盘人的温度可以差出好几度（2026-09-30：user 1 = 57.4、user 2 = 52.8），
+     * 差到跨档就会给出不同系数——所以这里必须跟着引擎其余部分一样按 userId 作用域取。
+     */
+    private Double temperatureOf(Long userId, LocalDate tradeDate) {
+        DailyRecord rec = dailyRecordMapper.selectOne(new LambdaQueryWrapper<DailyRecord>()
+                .eq(DailyRecord::getUserId, userId)
+                .eq(DailyRecord::getTradeDate, tradeDate));
+        BigDecimal t = rec == null ? null : rec.getTemperature();
+        return t == null ? null : t.doubleValue();
     }
 
     /**
@@ -343,9 +383,17 @@ public class WaveRiderEngine {
         return out;
     }
 
-    /** 组装候选行：算分、算仓位、打风险标、排展示顺序。 */
+    /**
+     * 组装候选行：算分、算仓位、打风险标、排展示顺序。
+     *
+     * <p>{@code temperature} / {@code tempScale} 是当日的情绪温度原值与换算出的仓位系数，
+     * 两者只在算仓位与写追溯明细时用得上——<strong>不参与算分</strong>（§12.4.3：温度是市场级变量，
+     * 同日全部候选共享同一取值，对「选哪只」没有区分度）。拿不到温度时两者都为 {@code null}，
+     * 此时仓位一律置空而不是按 0 处理。
+     */
     private List<CandidateStock> build(Long strategyId, Long userId, LocalDate tradeDate, Long runId,
-                                       WaveRiderConfig cfg, List<MarketStock> picked) {
+                                       WaveRiderConfig cfg, List<MarketStock> picked,
+                                       Double temperature, Double tempScale) {
         if (picked.isEmpty()) {
             return new ArrayList<>();
         }
@@ -403,23 +451,28 @@ public class WaveRiderEngine {
             c.setPositionType(topic(m) + (isTopOfTopic ? " 最高板" : " " + nz(m.getConsecutive()) + " 板"));
             c.setScore(BigDecimal.valueOf(score).setScale(2, RoundingMode.HALF_UP));
             c.setRiskFlag(riskFlag);
-            c.setFilterDetailJson(filterDetail(m, cfg, fbMv, highControl,
+            c.setFilterDetailJson(filterDetail(m, cfg, fbMv, highControl, temperature, tempScale,
                     scoreDetail(cfg, m, maxBoard, boardPart, isTopOfTopic, node, nodePart,
                             early, riskPenalty, riskFlag, score)));
             c.setCreatedAt(LocalDateTime.now());
             rows.add(c);
         }
 
-        // 建议仓位：等权基准 × (分数/最高分)，带风险标记的再折半
+        // 建议仓位：等权基准 × (分数/最高分) × 温度系数，带风险标记的再折半
         for (int i = 0; i < rows.size(); i++) {
             CandidateStock c = rows.get(i);
+            if (tempScale == null) {
+                // 当日没有情绪温度记录：仓位置空，不按 0 处理（PRD §13 的 NO_TEMPERATURE 分支）。
+                // 行本身照常产出——温度只是仓位的调节项，不是候选池的前置条件。
+                continue;
+            }
             double ratio = maxScore > 0 ? scores.get(i) / maxScore : 1.0;
             if (ratio <= 0) {
                 // 分数为负说明风险扣分吃掉了全部加成，给个地板而不是 0——
                 // 仓位 0 在界面上和「没选中」长得一样，容易误读。
                 ratio = 0.1;
             }
-            double w = cfg.getMaxPositionPerStock() * ratio;
+            double w = cfg.getMaxPositionPerStock() * ratio * tempScale;
             if (c.getRiskFlag() != null) {
                 w = w * 0.5;
             }
@@ -578,18 +631,38 @@ public class WaveRiderEngine {
     }
 
     /**
-     * 风险扣分，上限 1。
+     * 高控庄票的扣分系数：普通风险项的两倍。
+     *
+     * <p>和 YIZI_THIN 扣一样的分说不通——缩量独走连板＋首板日小市值＋一字锁死是「庄在里头」，
+     * 崩起来没有承接；缩量一字只是流动性差。判据更狠，扣分也得跟着更狠。
+     *
+     * <p>取 2 而不是别的数：整数倍好念（界面上就是「按两倍扣」），且在现行权重下
+     * （W_risk=0.20、满分 1.10）扣掉 0.40、约占满分 36%，狠但还不至于把命中项全压成负分。
+     */
+    static final double HIGH_CONTROL_PENALTY = 2;
+
+    /**
+     * 风险扣分系数，实际扣分 = W_risk × 本系数。
+     *
+     * <p>普通风险项（缩量一字 / 换手&gt;30%）各记 1、封顶 1；
+     * 高控庄票单独一档，直接取 {@link #HIGH_CONTROL_PENALTY}。
      *
      * <p>YIZI_THIN 的口径按 PRD：换手 &lt; 2% 且成交额低于下限——这是「缩量一字」，
      * 与「封单锁死」不是一回事：后者是买不进（出池），前者是流动性差（保留但折算仓位）。
      *
-     * <p>HIGH_CONTROL（高控庄票）与 YIZI_THIN 同档扣分，但判据更具体：
-     * 连板≥2 + 换手&lt;5% + 首板日流通市值≤35亿 + 一字锁死。
-     * 两者可能同时成立（高控庄票通常也满足缩量一字），此时 HIGH_CONTROL 优先。
+     * <p>HIGH_CONTROL 的判据见 {@link HighControlStock}：连板≥2 + 换手&lt;5% +
+     * 首板日流通市值≤35亿 + 一字锁死。它要求换手&lt;5%，与「换手&gt;30%」互斥，
+     * 所以命中即走高档、不参与下面两条的相加与封顶。
+     *
+     * <p>系数可以 &gt;1，得分因此可能为负。建议仓位那侧已有地板（{@code ratio<=0} 取 0.1），
+     * 不会算出负仓位。
      */
-    private double riskPenalty(MarketStock m, WaveRiderConfig cfg, boolean highControl) {
+    static double riskPenalty(MarketStock m, WaveRiderConfig cfg, boolean highControl) {
+        if (highControl) {
+            return HIGH_CONTROL_PENALTY;
+        }
         double p = 0;
-        if (highControl || isYiziThin(m, cfg)) {
+        if (isYiziThin(m, cfg)) {
             p += 1;
         }
         if (m.getTurnoverRate() != null && m.getTurnoverRate().doubleValue() > 30) {
@@ -611,7 +684,7 @@ public class WaveRiderEngine {
         return CandidateStock.RISK_HIGH_TURNOVER;
     }
 
-    private boolean isYiziThin(MarketStock m, WaveRiderConfig cfg) {
+    private static boolean isYiziThin(MarketStock m, WaveRiderConfig cfg) {
         boolean lowTurnover = m.getTurnoverRate() != null && m.getTurnoverRate().doubleValue() < 2;
         boolean lowAmount = m.getAmount() == null
                 || m.getAmount().doubleValue() < cfg.getFilterMinAmount() * 1e8;
@@ -621,6 +694,7 @@ public class WaveRiderEngine {
     /** 过滤器逐条判定明细 + 得分构成。界面「点开追溯」看到的就是它。 */
     private String filterDetail(MarketStock m, WaveRiderConfig cfg,
                                 BigDecimal firstBoardFloatMv, boolean highControl,
+                                Double temperature, Double tempScale,
                                 Map<String, Object> scoreDetail) {
         Map<String, Object> d = new LinkedHashMap<>();
         d.put("code", m.getCode());
@@ -638,6 +712,8 @@ public class WaveRiderEngine {
         d.put("position_mode", cfg.getPositionMode());
         d.put("first_board_float_mv_yi", firstBoardFloatMv == null ? null : yi(firstBoardFloatMv));
         d.put("high_control", highControl);
+        d.put("temperature", temperature);
+        d.put("temperature_scale", tempScale);
         d.put("score_breakdown", scoreDetail);
         return toJson(d);
     }

@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * WaveRider 的全部可调参数。落库形态是 {@code t_strategy_version.config_json}。
@@ -214,6 +215,34 @@ public class WaveRiderConfig {
     private double maxPositionPerStock = 0.05;
 
     /**
+     * 情绪温度 → 建议仓位系数（PRD §6 / §17 {@code position_scale_by_temperature}）。
+     *
+     * <p>键是温度档的<strong>下界（含）</strong>，值是系数；取值规则见 {@link #temperatureScale}。
+     * 默认四档就是 PRD 写死的那张表：&lt;55 → 0.5、55~60 → 0.6、60~70 → 0.8、≥70 → 1.0。
+     *
+     * <p><strong>只降不做 0</strong>——系数一律落在 (0,1]，{@link #validate} 卡死。
+     * 温度是「用多大仓位、准备承担多大波动」的调节器，<strong>不是「做不做」的开关</strong>：
+     * §12.4.6 实测「T≥60 才做」把日均收益从 +3.26% 提到 +4.24%，累计却从 +56.59% 掉到 +39.52%，
+     * 因为剔掉的日子里含 09-04（42.5°）那种冰点修复日，而冰点期恰恰是身位板赔率最高的位置。
+     *
+     * <p>温度<strong>不进个股评分</strong>：它是市场级变量，同日全部候选共享同一取值，
+     * 对「选哪只」没有区分度（§12.4.3），只参与仓位。§6 v1.4 冻结权重时，
+     * 唯一明确保留的就是这一条。
+     */
+    @JsonProperty("position_scale_by_temperature")
+    private Map<String, Double> positionScaleByTemperature = defaultTemperatureScales();
+
+    /** 温度档位的默认值，唯一的一份。 */
+    public static Map<String, Double> defaultTemperatureScales() {
+        Map<String, Double> s = new LinkedHashMap<>();
+        s.put("0", 0.5);
+        s.put("55", 0.6);
+        s.put("60", 0.8);
+        s.put("70", 1.0);
+        return s;
+    }
+
+    /**
      * 收益起算价基准。{@code open_next}=T+1 开盘价（唯一可成交的口径）。
      *
      * <p>候选池的定义是「T 日已涨停」，所以 T 日收盘价在实盘是买不到的。
@@ -231,6 +260,34 @@ public class WaveRiderConfig {
     @JsonProperty("reject_unbuyable_open")
     private boolean rejectUnbuyableOpen = true;
 
+    /**
+     * 温度 → 仓位系数：取「下界 ≤ 温度的那些档里，下界最大的一个」。
+     *
+     * <p>键一律按<strong>数值</strong>排序，不依赖 JSON 里的书写顺序——配置是给人手改的，
+     * 指望别人一定按升序写等于给自己埋雷。
+     *
+     * <p>温度低于最小下界时退回<strong>最低档</strong>而不是 0：PRD 的 {@code <55 → 0.5}
+     * 就是这个意思，再低也不做 0（只降不做 0，理由见 {@link #positionScaleByTemperature}）。
+     */
+    public double temperatureScale(double temperature) {
+        TreeMap<Double, Double> tiers = new TreeMap<>();
+        for (Map.Entry<String, Double> e : positionScaleByTemperature.entrySet()) {
+            if (e.getValue() == null) {
+                continue;
+            }
+            try {
+                tiers.put(Double.parseDouble(e.getKey().trim()), e.getValue());
+            } catch (RuntimeException ignore) {
+                // 非法键由 validate() 拦在写入之前；读路径上碰到就跳过，不拿它当档位。
+            }
+        }
+        if (tiers.isEmpty()) {
+            return 1.0;
+        }
+        Map.Entry<Double, Double> hit = tiers.floorEntry(temperature);
+        return (hit == null ? tiers.firstEntry() : hit).getValue();
+    }
+
     /** 配置合法性检查。返回人话描述的问题清单，空表示没问题。 */
     public List<String> validate() {
         List<String> errs = new ArrayList<>();
@@ -246,6 +303,27 @@ public class WaveRiderConfig {
         }
         if (maxPositionPerStock <= 0 || maxPositionPerStock > 1) {
             errs.add("max_position_per_stock 应在 (0,1]，实得：" + maxPositionPerStock);
+        }
+        if (positionScaleByTemperature == null || positionScaleByTemperature.isEmpty()) {
+            errs.add("position_scale_by_temperature 不能为空（不需要温度调节就把各档都填 1.0）");
+        } else {
+            for (Map.Entry<String, Double> e : positionScaleByTemperature.entrySet()) {
+                double lower;
+                try {
+                    lower = Double.parseDouble(e.getKey().trim());
+                } catch (RuntimeException ex) {
+                    errs.add("position_scale_by_temperature 的键必须是温度下界数字，实得：" + e.getKey());
+                    continue;
+                }
+                if (Double.isNaN(lower) || Double.isInfinite(lower)) {
+                    errs.add("position_scale_by_temperature 的键必须是有限数字，实得：" + e.getKey());
+                }
+                Double v = e.getValue();
+                // 「只降不做 0」：系数为 0 等于把温度做成了开关，而 §12.4.6 实测那是负贡献。
+                if (v == null || v <= 0 || v > 1 || v.isNaN() || v.isInfinite()) {
+                    errs.add("position_scale_by_temperature[" + e.getKey() + "] 应在 (0,1]，实得：" + v);
+                }
+            }
         }
         if (filterMinAmount < 0) {
             errs.add("filter_min_amount 不能为负，实得：" + filterMinAmount);

@@ -24,8 +24,8 @@
 
       <span class="lab">交易日</span>
       <el-date-picker v-model="date" type="date" size="small" value-format="YYYY-MM-DD"
-        placeholder="取最近一个已产出的交易日" :cell-class-name="cellClass" style="width: 170px"
-        @change="loadCandidates" />
+        placeholder="取最近一个已产出的交易日" :disabled-date="disabledDate" :cell-class-name="cellClass"
+        style="width: 170px" @change="loadCandidates" />
 
       <span class="lab">导出</span>
       <el-button size="small" text @click="doExport('md')">md</el-button>
@@ -55,12 +55,35 @@
         </div>
       </template>
 
-      <!-- 表格宽度封顶：el-table 会把容器的富余宽度按 min-width 比例全塞给弹性列，
+      <!-- 列宽预算（下面每个数都是实测，不是估的）。
+           可用宽 = 视口 − 200（el-aside）− 48（.main-content 左右 padding）
+                   − 42（el-card：1px 边框×2 + 20px body padding×2）＝ 视口 − 290。
+           实测 1440 屏只剩 1150px（容易漏掉 card 那 42px，按 1192 算会乐观 42px）。
+           固定列合计 728 + 弹性列 min-width 合计 330 = 1058 是表格的最小宽度：
+             1440 → 1150（余 92，全被名称/题材吃掉，实测涨到 185/237）
+             1512 → 1222（余 164）    1366 → 1076（余 18）
+             1280 →  990（差 68，出横向滚动条，「接盘收益 / 结果」被推出可视区）
+           弹性列自身允许折行，压 min-width 只会多折一行，不会撑破表格。
+
+           单元格内边距已在下面 .tbl :deep(.el-table .cell) 里压到 6px（Element 默认 8px），
+           12 列一起省 48px——这比逐列抠宽度有效，改列宽前先确认这条还在。
+           size="small" 下实测：字号 12px、排序箭头 .caret-wrapper 宽 24px、
+           el-tag--small 高 20px、左右 padding 各 7px + 1px 边框（所以 5 字标 = 60+14+2 = 76px）。
+           各列的零裁切地板（.cell 是 overflow:hidden，裁切发生在 **padding box**＝列宽，
+           不是内容盒，所以地板 = 内容宽 + 6px 左内边距，右侧那 6px 可以被内容压进去）：
+             连板 60（表头 2 字 + 箭头，已取到地板）
+             警示 82（最长单标「一字断魂刀」76 + 6；现取 86，余 4）
+                     预警与风险同时命中时是两个标，.alerts{flex-wrap:wrap} 折成两行，
+                     行高 34 → 55，不横向溢出
+             封单强度 84（表头 4 字 + 箭头；现取 92，「排队」标与百分比同现时折行）
+             得分 99（值 + 7 gap + 52 进度条；现取 108 留了余量）
+
+           表格宽度封顶：el-table 会把容器的富余宽度按 min-width 比例全塞给弹性列，
            宽屏下「名称/题材」会被撑到 300~500px，内容却只有一小截。封顶后多出来的空间留在表右侧。 -->
       <div class="tbl">
         <el-table :data="candidates" row-key="code" size="small" stripe :row-class-name="rowClass" style="width: 100%">
-          <el-table-column prop="rankNo" label="#" width="48" align="center" />
-          <el-table-column label="名称" min-width="165">
+          <el-table-column prop="rankNo" label="#" width="38" align="center" />
+          <el-table-column label="名称" min-width="144">
             <template #default="{ row }">
               <div class="nm">
                 <el-tooltip placement="top" :show-after="150">
@@ -76,12 +99,12 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="连板" prop="board" width="72" align="center" sortable>
+          <el-table-column label="连板" prop="board" width="60" align="center" sortable>
             <template #default="{ row }">
               <span class="board">{{ row.board }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="题材" min-width="235">
+          <el-table-column label="题材" min-width="186">
             <template #default="{ row }">
               <span v-if="row.tdxThemes && row.tdxThemes.length" class="thm">
                 <el-tag v-for="t in topThemes(row)" :key="t.name" size="small" effect="plain"
@@ -93,7 +116,7 @@
                 title="这只票在通达信题材索引里没有记录，退回引擎分组用的行业">{{ row.topic || '—' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="封单强度" width="118" align="right" header-align="right" sortable
+          <el-table-column label="封单强度" width="92" align="right" header-align="right" sortable
             :sort-method="compareSeal">
             <template #default="{ row }">
               <span v-if="sealRatio(row) != null" class="num">{{ sealRatio(row).toFixed(2) }}%</span>
@@ -101,14 +124,14 @@
               <el-tag v-if="needQueue(row)" size="small" type="warning" effect="plain" class="qtag">排队</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="score" label="得分" width="112" align="right" header-align="right" sortable>
+          <el-table-column prop="score" label="得分" width="108" align="right" header-align="right" sortable>
             <template #header>
               <span class="th-score">
                 得分
                 <el-tooltip placement="bottom" effect="dark" :disabled="!cfg">
                   <template #content>
                     <div class="sr">
-                      <b class="sr-title">得分 = 四项相加 − 风险扣分（满分 {{ scoreRule.ceiling }}）</b>
+                      <b class="sr-title">得分 = 四项相加 − 风险扣分（满分 {{ scoreRule.ceiling }} 分）</b>
                       <div v-for="t in scoreRule.terms" :key="t.key" class="sr-term">
                         <span class="sr-w">{{ t.weight }} ×</span>
                         <span class="sr-body">
@@ -120,12 +143,13 @@
                         <span class="sr-w">−{{ scoreRule.risk }} ×</span>
                         <span class="sr-body">
                           <span class="sr-n">风险</span>
-                          <span class="sr-d">缩量一字（换手&lt;2% 且成交额低于 {{ scoreRule.minAmount }} 亿）或换手&gt;30%；命中任一条即满扣，扣分上限 1</span>
+                          <span class="sr-d">缩量一字（换手&lt;2% 且成交额低于 {{ scoreRule.minAmount }} 亿）或换手&gt;30%，命中即扣满这一档；高控庄票另算，按<b>两倍</b>扣</span>
                         </span>
                       </div>
                       <div class="sr-note">
                         得分不是默认排序依据（# 列走服务端封单强度降序），点本列表头可按得分升/降序。
-                        它决定建议仓位＝{{ scoreRule.maxPos }} × 得分 ÷ 当日最高分，带风险标记的再折半。
+                        它决定建议仓位＝{{ scoreRule.maxPos }} × 得分 ÷ 当日最高分 × 温度系数，带风险标记的再折半。
+                        温度系数按当日情绪温度分档（{{ tempRule }}），当日没复盘出温度时仓位<b>置空</b>、不按 0 处理。
                       </div>
                     </div>
                   </template>
@@ -140,10 +164,10 @@
                     <b class="sr-title">{{ row.name }} · 得分构成</b>
                     <template v-if="bdOf(row)">
                       <div class="sr-note sr-note-top">
-                        满分 {{ fmt2(bdOf(row).ceiling) }}（四项正权重之和，不含扣分）
+                        满分 {{ pt(bdOf(row).ceiling) }} 分（四项正权重之和，不含扣分）
                       </div>
                       <div v-for="t in bdOf(row).terms" :key="t.key" class="sr-row">
-                        <span class="sr-w">{{ fmt2(t.weight) }} ×</span>
+                        <span class="sr-w">{{ pt(t.weight) }} ×</span>
                         <span class="sr-body">
                           <span class="sr-n">{{ termName(t.key) }}</span>
                           <span class="sr-d">{{ rawText(t) }}</span>
@@ -151,7 +175,7 @@
                         <span class="sr-v" :class="termCls(t.value)">{{ signed(t.value) }}</span>
                       </div>
                       <div class="sr-foot">
-                        合计 <b>{{ fmt2(bdOf(row).score) }}</b> / 满分 {{ fmt2(bdOf(row).ceiling) }}
+                        合计 <b>{{ pt(bdOf(row).score) }}</b> / 满分 {{ pt(bdOf(row).ceiling) }} 分
                         · 当日最高板 {{ bdOf(row).max_board }} 板
                       </div>
                     </template>
@@ -162,7 +186,7 @@
                 </template>
                 <span class="sc">
                   <span :class="['sc-val', { 'sc-empty': row.score == null }]">
-                    {{ row.score == null ? '—' : Number(row.score).toFixed(2) }}
+                    {{ pt(row.score) }}
                   </span>
                   <span :class="['sc-bar', { 'sc-bar-none': !bdOf(row) }]">
                     <i v-for="(s, i) in segsOf(row)" :key="i" :class="{ pen: s.pen }"
@@ -172,23 +196,23 @@
               </el-tooltip>
             </template>
           </el-table-column>
-          <el-table-column label="建议仓位" width="84" align="right" header-align="right">
+          <el-table-column label="建议仓位" width="68" align="right" header-align="right">
             <template #default="{ row }">
-              <span class="num pos">{{ posText(row.suggestPosition) }}</span>
+              <span class="num pos" :title="posTip(row)">{{ posText(row.suggestPosition) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="警示" width="112">
+          <el-table-column label="警示" width="86">
             <template #default="{ row }">
               <span v-if="row.alertFlag || row.riskFlag" class="alerts">
                 <el-tag v-if="row.alertFlag" size="small" type="danger" effect="dark"
                   :title="alertTip(row.alertFlag)">{{ alertText(row.alertFlag) }}</el-tag>
-                <el-tag v-if="row.riskFlag" size="small" type="warning" effect="dark"
-                  title="风险项参与仓位折算：带风险标的建议仓位折半">{{ riskText(row.riskFlag) }}</el-tag>
+                <el-tag v-if="row.riskFlag" size="small" :type="riskType(row.riskFlag)" effect="dark"
+                  :title="riskTip(row.riskFlag)">{{ riskText(row.riskFlag) }}</el-tag>
               </span>
               <span v-else class="mut">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="T+1 跳空" width="86" align="right" header-align="right">
+          <el-table-column label="T+1 跳空" width="70" align="right" header-align="right">
             <template #default="{ row }">
               <span v-if="t1Of(row) && t1Of(row).gapPct != null" :class="['num', cls(t1Of(row).gapPct)]">
                 {{ pct(t1Of(row).gapPct) }}
@@ -196,7 +220,7 @@
               <span v-else class="mut">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="打板收益" width="86" align="right" header-align="right">
+          <el-table-column label="打板收益" width="68" align="right" header-align="right">
             <template #default="{ row }">
               <span v-if="t1Of(row) && t1Of(row).t1ChangePct != null" :class="['num', cls(t1Of(row).t1ChangePct)]">
                 {{ pct(t1Of(row).t1ChangePct) }}
@@ -204,7 +228,7 @@
               <span v-else class="mut">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="接盘收益" width="86" align="right" header-align="right">
+          <el-table-column label="接盘收益" width="72" align="right" header-align="right">
             <template #default="{ row }">
               <span v-if="bPct(row) != null" :class="['num', cls(bPct(row))]">
                 <b>{{ pct(bPct(row)) }}</b>
@@ -212,7 +236,7 @@
               <span v-else class="mut">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="结果" width="76" align="center">
+          <el-table-column label="结果" width="66" align="center">
             <template #default="{ row }">
               <span v-if="!t1Of(row)" class="mut">待验证</span>
               <el-tag v-else-if="t1Of(row).promoted === 1" size="small" type="danger" effect="dark">晋级</el-tag>
@@ -230,9 +254,14 @@
         节点票与锚定龙头是身份标，不看日子；
         蓝底的 <b>题材</b>＝通达信概念板块，按当日该题材的涨停家数降序，只铺前 3 个，
         多的折成 <b>+N</b>（悬浮看全部与家数）。
-        <b>警示</b>列里红底的 <b>一字断魂刀</b>＝今日与昨日连续锁死、小盘、封成比高、换手低，
-        大概率<b>排不到队</b>（与「连板生态」页同一判据；只影响买不买得到，不剔除也不降权）；
-        琥珀色的 <b>一字缩量 / 过度换手</b> 才是要折算仓位的风险项。
+        <b>警示</b>列分两档。<b>红底＝最高</b>：<b>一字断魂刀</b>（今日与昨日连续锁死、小盘、封成比高、换手低，
+        大概率<b>排不到队</b>；与「连板生态」页同一判据，只影响买不买得到，不剔除也不降权）
+        与 <b>高控庄票</b>（连板≥2、换手&lt;5%、一字锁死、首板日流通≤35亿）。
+        <b>琥珀＝低一档</b>：一字缩量 / 过度换手。
+        除一字断魂刀外都是风险项，建议仓位一律折半；扣分<b>跟着档位走</b>——
+        高控庄票按<b>两倍</b>扣，一字缩量 / 过度换手 按一倍。
+        <b>建议仓位</b>还要再乘<b>当日情绪温度</b>的档位系数（档位见「得分」表头，只降不做 0）；
+        显示 <b>—</b> 是当日<b>没有温度记录</b>（仓位置空，不是算出 0）。
       </p>
 
       <div v-if="!candidates.length" class="empty">
@@ -365,7 +394,7 @@ import { ElMessage } from 'element-plus'
 import { waveriderApi } from '../api/modules'
 import { useTradingCalendar } from '../utils/tradingCalendar'
 
-const { cellClass } = useTradingCalendar()
+const { cellClass, disabledDate, loadTradingDays } = useTradingCalendar()
 const router = useRouter()
 
 const strategies = ref([])
@@ -557,18 +586,43 @@ function needQueue(row) {
   return r != null && r >= 150
 }
 
+/** 追溯明细 filter_detail_json，解析一次给多处用；坏 JSON 一律当没有。 */
+function fdOf(row) {
+  if (!row || !row.filterDetailJson) return null
+  try {
+    return JSON.parse(row.filterDetailJson)
+  } catch (e) {
+    return null
+  }
+}
+
 /**
  * 得分明细。后端把四项的分量写进 filterDetailJson.score_breakdown（只展示、不参与排序），
  * 前端一律<b>不重算</b>——重算一旦与引擎的公式漂移，页面上的数就成了第二份真相，且查不出来。
  * 老数据没有这一段（明细功能是后加的）：取不到就只显示总分，重跑当日补齐，不猜。
  */
 function bdOf(row) {
-  if (!row || !row.filterDetailJson) return null
-  try {
-    return JSON.parse(row.filterDetailJson).score_breakdown || null
-  } catch (e) {
-    return null
+  const d = fdOf(row)
+  return d ? d.score_breakdown || null : null
+}
+
+/**
+ * 「建议仓位」格的悬浮：只报这一行乘了哪个温度系数，不复述公式（公式在得分表头那份里）。
+ *
+ * <p>仓位为空时必须说清是「当日没有温度记录」，否则看起来像算出了 0——PRD §13 要的
+ * 正是这两者分开：置空表示「不知道」，0 表示「别买」。
+ *
+ * <p>本次改动之前落库的行没有 temperature 这两个键，那就什么都不显示，不拿旧数据编解释。
+ */
+function posTip(row) {
+  const d = fdOf(row)
+  const t = d ? d.temperature : null
+  const s = d ? d.temperature_scale : null
+  if (row.suggestPosition == null) {
+    return t == null && s == null ? '' : '当日无情绪温度记录，仓位置空（不按 0 处理）'
   }
+  if (t == null || s == null) return ''
+  return '当日温度 ' + Number(t).toFixed(1) + '° → 仓位系数 ' + Number(s).toFixed(2)
 }
 
 /** 四项的名称与色。与「得分构成」悬浮里从左到右的顺序一致：高度 → 身位 → 节点 → 早封。 */
@@ -626,7 +680,9 @@ function rawText(t) {
     return (raw ? '10:00 前首封（' : '10:00 后首封（') + sealClock(t.first_seal_time) + '）'
   }
   if (t.key === 'risk') {
-    return t.risk_flag ? '命中 ' + riskText(t.risk_flag) + '，扣满' : '无'
+    return t.risk_flag
+      ? '命中 ' + riskText(t.risk_flag) + '，扣分系数 ' + fmt2(t.raw)
+      : '无'
   }
   return String(t.raw)
 }
@@ -642,9 +698,21 @@ function fmt2(v) {
   return v == null ? '—' : Number(v).toFixed(2)
 }
 
+/**
+ * 百分制。库里的得分是 0~1 的原始分（满分＝四项正权重之和），显示一律 ×100。
+ * 保留 1 位小数、整数不带尾零，所以权重 0.50 显示成 50、0.125 显示成 12.5。
+ *
+ * <p>换算只发生在这一层：排序（prop="score"）、建议仓位（得分 ÷ 当日最高分 × 温度系数）、
+ * 堆叠条（分量 ÷ 满分）走的都还是原始分——它们要么是比值、要么单调，换不换标度结果一样。
+ */
+function pt(v) {
+  if (v == null) return '—'
+  return String(Math.round(Number(v) * 100 * 10) / 10)
+}
+
 function signed(v) {
   const n = Number(v) || 0
-  return (n > 0 ? '+' : '') + n.toFixed(2)
+  return (n > 0 ? '+' : '') + pt(n)
 }
 
 /** 扣分项才上色（绿＝负向）；加分用常色，避免和「涨红」的行情色撞语义。 */
@@ -670,6 +738,29 @@ function riskText(flag) {
 }
 
 /**
+ * 风险分档：高控庄票与一字断魂刀同属最高档（红底），一字缩量 / 过度换手 低一档（琥珀）。
+ *
+ * <p>这一档不只是颜色——引擎里 WaveRiderEngine.HIGH_CONTROL_PENALTY = 2，
+ * 高控庄票的扣分系数是普通风险项的两倍；建议仓位则不分档，一律折半。
+ * 改这里的分档必须同步改引擎，否则颜色和扣分就各说一套。
+ */
+const RISK_TOP = ['HIGH_CONTROL']
+
+function riskTop(flag) {
+  return RISK_TOP.includes(flag)
+}
+
+function riskType(flag) {
+  return riskTop(flag) ? 'danger' : 'warning'
+}
+
+function riskTip(flag) {
+  return riskTop(flag)
+    ? '最高风险档（与一字断魂刀同级）：按两倍扣分，建议仓位折半'
+    : '风险项：建议仓位折半'
+}
+
+/**
  * 「得分怎么算」的文案。权重一律取当前策略的生效配置：
  * 他在配置页改了 score_weights，这里的数字必须跟着动，不能写成死文字。
  */
@@ -689,27 +780,44 @@ function nodeTermDesc(c) {
     + '注意「节点票」标是身份、不限日期，所以可能只显示标不加分'
 }
 
-function w2(v) {
-  return v == null ? '—' : Number(v).toFixed(2)
-}
-
 const scoreRule = computed(() => {
   const c = cfg.value || {}
   const w = c.score_weights || {}
   return {
     terms: SCORE_TERMS.map((t) => ({
       ...t,
-      weight: w2(w[t.key]),
+      weight: pt(w[t.key]),
       desc: t.key === 'node' ? nodeTermDesc(c) : t.desc
     })),
-    risk: w2(w.risk),
+    risk: pt(w.risk),
     minAmount: c.filter_min_amount == null ? '—' : Number(c.filter_min_amount).toFixed(1),
     // 满分只加正项。节点项现在是活的：命中节点票本人就给满 W_node。
-    ceiling: w2((Number(w.board) || 0) + (Number(w.position) || 0)
+    ceiling: pt((Number(w.board) || 0) + (Number(w.position) || 0)
       + (Number(w.node) || 0) + (Number(w.timing) || 0)),
     maxPos: c.max_position_per_stock == null ? '—'
       : (Number(c.max_position_per_stock) * 100).toFixed(0) + '%'
   }
+})
+
+/**
+ * 温度档位的文案，形如「≥70→1、≥60→0.8、≥55→0.6、其余→0.5」。
+ *
+ * <p>档位一律取当前策略的生效配置，不写死——PRD 给的那四档只是<b>默认值</b>，是可改的。
+ * 键按<b>数值</b>降序排，不依赖 JSON 里的书写顺序（与服务端 {@code temperatureScale} 同一口径）。
+ *
+ * <p>最低那档写成「其余」而不是「≥0」：引擎在温度低于最小下界时退回的就是这一档，
+ * 所以「其余」才是它的真实含义，也顺带说明温度再低也不做 0。
+ */
+const tempRule = computed(() => {
+  const raw = (cfg.value || {}).position_scale_by_temperature
+  if (!raw) return '—'
+  const keys = Object.keys(raw)
+    .filter((k) => raw[k] != null && !Number.isNaN(Number(k)))
+    .sort((a, b) => Number(b) - Number(a))
+  if (!keys.length) return '—'
+  return keys
+    .map((k, i) => (i === keys.length - 1 ? '其余→' : '≥' + Number(k) + '→') + raw[k])
+    .join('、')
 })
 
 async function loadStrategies() {
@@ -821,6 +929,7 @@ async function doExport(format) {
 }
 
 onMounted(async () => {
+  loadTradingDays() // 只为日期面板的两种标识；不阻塞本页取数
   await loadStrategies()
   if (strategyId.value) {
     await loadAll()
@@ -882,6 +991,13 @@ onMounted(async () => {
    需要更宽/更窄只改这一处。 */
 .tbl {
   max-width: 1400px;
+}
+/* 单元格左右内边距 8px → 6px：12 列一起省 4px/列＝48px，比逐列抠宽度有效得多。
+   选择器写到三层（.tbl + .el-table + .cell）是为了在权重上稳压 Element 的
+   `.el-table--small .cell{padding:0 8px}`（两层）——同权重时胜负取决于样式注入顺序，
+   那种赢法不稳。只作用于本页候选池表格，不动全站表格观感。 */
+.tbl :deep(.el-table .cell) {
+  padding: 0 6px;
 }
 .blk-head {
   display: flex;
