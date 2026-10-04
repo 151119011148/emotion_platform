@@ -313,14 +313,17 @@ function shiftDays(iso, days) {
 
 async function load() {
   loading.value = true
+  // 一次取数对应一个日子：分批 await 会让中途改日期时前后两批拼成两天
+  const d = date.value
   try {
-    const [res] = await Promise.all([
-      prdApi.shouban(date.value).catch(() => null),
-      scoring.loadDetail(date.value, true).catch(() => null)
+    // 第 2 槽是 score-detail，结果由 store 自己落进 detail，这里不接——空位留着，rangeRes 才是第 3 个
+    const [res, , rangeRes] = await Promise.all([
+      prdApi.shouban(d).catch(() => null),
+      scoring.loadDetail(d, true).catch(() => null),
+      // 曲线与异动监管页同一取数口：range 返回按日升序，切出最近一段直接喂图
+      recordApi.getRange(shiftDays(d, LOOKBACK_DAYS), d).catch(() => null)
     ])
     vo.value = res?.data || null
-    // 曲线与异动监管页同一取数口：range 返回按日升序，切出最近一段直接喂图
-    const rangeRes = await recordApi.getRange(shiftDays(date.value, LOOKBACK_DAYS), date.value).catch(() => null)
     curveRows.value = ((rangeRes && rangeRes.data) || []).slice(-CURVE_ROWS).map((r) => ({
       date: r.tradeDate,
       score: r.scoreFirst
@@ -331,14 +334,18 @@ async function load() {
 }
 
 onMounted(async () => {
+  loadTradingDays()
   if (!route.query.date) {
     try {
       const res = await recordApi.getLatest(1)
       const latest = (res.data || [])[0]
-      if (latest && latest.tradeDate < todayStr) date.value = latest.tradeDate
+      if (latest && latest.tradeDate < todayStr) {
+        // 落到最近复盘日时把加载交给 watch(date, load)：这里再 load() 一遍等于整页重打一轮请求
+        date.value = latest.tradeDate
+        return
+      }
     } catch (e) { /* 停在今天 */ }
   }
-  loadTradingDays()
   load()
 })
 watch(date, load)

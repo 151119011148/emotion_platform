@@ -23,8 +23,24 @@ spring:
     # 覆盖 application.yml 里的 ${MYSQL_PASSWORD:} 空值。
     # 服务器上数据库名固定 emotion_dashboard，用户 root，主机 localhost（本机），不用重复配。
     password: __MYSQL_PASSWORD__
+    # 覆盖 jar 里的 Hikari 默认值（默认 maximumPoolSize=10，且 minimumIdle 不写就等于它）。
+    hikari:
+      # 连接超时从 30 s 压到 3 s：mysqld 被 OOM 打死时快速失败，
+      # 而不是每个请求都挂在拿连接上，把 Tomcat 工作线程整批耗光。
+      connection-timeout: 3000
+      maximum-pool-size: 20
+      # 必须显式写：不写时它默认跟 maximum-pool-size 齐平，1.8G 的机器上会常驻 20 条连接。
+      minimum-idle: 5
 
 jwt:
   # 覆盖 application.yml 里的 ${JWT_SECRET:} 空值。
   # 签名密钥一旦公开任何人都能伪造 token，所以只在服务器上放真值、不进 git。
   secret: __JWT_SECRET__
+
+# 关掉 StdOutImpl。jar 里开它是因为开发期想看 SQL，但在生产上它把每条语句连同结果集行
+# 都打到 stdout，经 systemd 全量进 journal（实测 896 M），排障时靠它反而把真正的错误淹了。
+# 要临时看 SQL：把下面改成 org.apache.ibatis.logging.stdout.StdOutImpl 再 restart。
+# 这里只覆盖 log-impl 一个键，jar 里的 map-underscore-to-camel-case 等仍然生效。
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl

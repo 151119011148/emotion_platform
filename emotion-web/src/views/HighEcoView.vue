@@ -476,16 +476,20 @@ async function load() {
 }
 
 onMounted(async () => {
+  loadTradingDays()
   if (!route.query.date) {
     try {
       const res = await recordApi.getLatest(1)
       const latest = (res.data || [])[0]
-      if (latest && latest.tradeDate < todayStr) date.value = latest.tradeDate
+      if (latest && latest.tradeDate < todayStr) {
+        // 落到最近复盘日时把加载交给 watch(date, load)：这里再 load() 一遍等于整页重打一轮请求
+        date.value = latest.tradeDate
+        return
+      }
     } catch (e) {
       // 拿不到最近记录就停在今天
     }
   }
-  loadTradingDays()
   load()
 })
 

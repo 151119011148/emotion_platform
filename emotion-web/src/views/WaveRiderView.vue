@@ -888,8 +888,9 @@ function shiftDays(iso, days) {
 
 async function loadAll() {
   if (!strategyId.value) return
-  await loadCandidates()
-  await loadConfig()
+  // loadReview 排在 loadCandidates 之后是有意为之：候选接口会把 date 归一到本次实际运行日，
+  // 回顾那 30 天窗口要跟它同源。config 只喂 tooltip 说明，与两者无关，并发拉。
+  await Promise.all([loadCandidates(), loadConfig()])
   await loadReview()
 }
 

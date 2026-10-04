@@ -346,16 +346,23 @@ const heightCurveAll = ref([])
  * 所以一次拉满，右端在本地按所选日期截。
  */
 let curveBase = null
+let curveBasePromise = null
 async function loadCurveBase() {
-  if (!curveBase) {
-    const start = shiftDays(todayStr, LOOKBACK_DAYS)
-    const [rec, height] = await Promise.all([
-      recordApi.getRange(start, todayStr).catch(() => null),
-      prdApi.heightRange(start, todayStr).catch(() => null)
-    ])
-    curveBase = { rec: (rec && rec.data) || [], height: (height && height.data) || [] }
+  if (curveBase) return curveBase
+  // 复用同一个在飞 promise：load() 把这份取数和天梯取数并到一批了，没有这道锁会在并发加载时把那对大窗口各拉一遍
+  if (!curveBasePromise) {
+    curveBasePromise = (async () => {
+      const start = shiftDays(todayStr, LOOKBACK_DAYS)
+      const [rec, height] = await Promise.all([
+        recordApi.getRange(start, todayStr).catch(() => null),
+        prdApi.heightRange(start, todayStr).catch(() => null)
+      ])
+      curveBase = { rec: (rec && rec.data) || [], height: (height && height.data) || [] }
+      curveBasePromise = null
+      return curveBase
+    })()
   }
-  return curveBase
+  return curveBasePromise
 }
 
 /** 后端 height-range 的一行 → 曲线与天梯共用的判定点（判定全在 TiantiService.detectBreaks，页面只读）。 */
@@ -754,11 +761,16 @@ function shiftDays(iso, days) {
 async function load() {
   loading.value = true
   lowFailExpanded.value = false
+  // 一次取数对应一个日子：分批 await 会让中途改日期时前后两批拼成两天
+  const d = date.value
   try {
     // 天梯数据与引擎信号同源同日；score-detail 由 store 去重（页内 DimScoreBlock 也在拉，不会重复发）
-    const [tiantiRes] = await Promise.all([
-      prdApi.tianti(date.value).catch(() => null),
-      scoring.loadDetail(date.value, true).catch(() => null)
+    // 曲线基础数据只跟「看到哪一天」有关、与天梯取数互不依赖，并到同一批发出去
+    // 第 2 槽是 score-detail，结果由 store 自己落进 detail，这里不接——空位留着，base 才是第 3 个
+    const [tiantiRes, , base] = await Promise.all([
+      prdApi.tianti(d).catch(() => null),
+      scoring.loadDetail(d, true).catch(() => null),
+      loadCurveBase()
     ])
     vo.value = tiantiRes?.data || null
     if (highlightCode.value) {
@@ -770,8 +782,7 @@ async function load() {
       })
     }
     // 曲线取数见 loadCurveBase：一次拉满全量，这里只按所选日期右截，可见宽度交给曲线自己的缩放
-    const base = await loadCurveBase()
-    curveRows.value = base.rec.filter((r) => r.tradeDate <= date.value).map((r) => ({
+    curveRows.value = base.rec.filter((r) => r.tradeDate <= d).map((r) => ({
       date: r.tradeDate,
       score: r.scoreBoard
     }))
@@ -783,14 +794,18 @@ async function load() {
 }
 
 onMounted(async () => {
+  loadTradingDays()
   if (!route.query.date) {
     try {
       const res = await recordApi.getLatest(1)
       const latest = (res.data || [])[0]
-      if (latest && latest.tradeDate < todayStr) date.value = latest.tradeDate
+      if (latest && latest.tradeDate < todayStr) {
+        // 落到最近复盘日时把加载交给 watch(date, load)：这里再 load() 一遍等于整页重打一轮请求
+        date.value = latest.tradeDate
+        return
+      }
     } catch (e) { /* 停在今天 */ }
   }
-  loadTradingDays()
   load()
 })
 watch(date, load)

@@ -19,6 +19,13 @@ Description=emotion-server (Spring Boot, Alibaba Cloud Linux)
 # 后端要连 MySQL 和 Redis，等它们就绪后再启动更稳
 After=network.target mysqld.service redis.service
 Wants=mysqld.service redis.service
+# 启动失败限速：不写时窗口是默认 10 s，而下面 RestartSec=5 + 起来约 14 s 才报错 ≈ 每 19 s 一轮，
+# 永远够不到 burst 上限 → Flyway 校验红 / yml 写坏这类「一起不来」的错会无限撞，
+# 每轮还都往共享库再写一遍半启动的 Quartz/Flyway 状态。给 300 s 窗口，5 次就停在 failed。
+# 注意服务器上有同名 drop-in /etc/systemd/system/emotion-server.service.d/10-start-limit.conf，
+# drop-in 优先级高于本文件，下次发版后它已冗余，确认两边取值一致即可删掉。
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 # 有专门部署账号时可用 User=xxx；root 部署最省事，这里就用默认即可

@@ -387,39 +387,44 @@ function shiftDays(iso, days) {
 
 async function load() {
   loading.value = true
+  themeLoading.value = true
+  // 一次取数对应一个日子：分批 await 会让中途改日期时前后两批拼成两天
+  const d = date.value
   try {
-    const res = await prdApi.mainline(date.value).catch(() => null)
+    const [res, t, rangeRes] = await Promise.all([
+      prdApi.mainline(d).catch(() => null),
+      // 题材表（后端自动回填热门行业题材）：独立取数，单独 loading
+      prdApi.intradayThemes(d).catch(() => null),
+      // 曲线与异动监管页同一取数口：range 返回按日升序，切出最近一段直接喂图
+      recordApi.getRange(shiftDays(d, LOOKBACK_DAYS), d).catch(() => null)
+    ])
     vo.value = res?.data || null
-    // 题材表（后端自动回填热门行业题材）：独立取数，单独 loading
-    themeLoading.value = true
-    try {
-      const t = await prdApi.intradayThemes(date.value).catch(() => null)
-      themesData.value = t?.data || null
-    } finally {
-      themeLoading.value = false
-    }
-    // 曲线与异动监管页同一取数口：range 返回按日升序，切出最近一段直接喂图
-    const rangeRes = await recordApi.getRange(shiftDays(date.value, LOOKBACK_DAYS), date.value).catch(() => null)
+    themesData.value = t?.data || null
     curveRows.value = ((rangeRes && rangeRes.data) || []).slice(-CURVE_ROWS).map((r) => ({
       date: r.tradeDate,
       score: r.scoreThemeMain
     }))
   } finally {
+    themeLoading.value = false
     loading.value = false
   }
 }
 
 onMounted(async () => {
+  loadTradingDays()
   if (!route.query.date) {
     try {
       const res = await recordApi.getLatest(1)
       const latest = (res.data || [])[0]
-      if (latest && latest.tradeDate < todayStr) date.value = latest.tradeDate
+      if (latest && latest.tradeDate < todayStr) {
+        // 落到最近复盘日时把加载交给 watch(date, load)：这里再 load() 一遍等于整页重打一轮请求
+        date.value = latest.tradeDate
+        return
+      }
     } catch (e) {
       // 拿不到最近记录就停在今天
     }
   }
-  loadTradingDays()
   load()
 })
 

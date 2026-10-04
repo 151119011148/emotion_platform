@@ -186,7 +186,7 @@ server_deploy_frontend() {
 # ---------------- ⑥ 健康检查 ----------------
 health_check() {
   log "⑥ [6/6] 健康检查"
-  local code
+  local code api i
   for i in $(seq 1 20); do                                     # 最多等 60s
     code="$(curl -s -o /dev/null -m 3 -w '%{http_code}' "http://$SERVER_IP/" || true)"
     [ "$code" = "200" ] && { log "   前端页面 OK (HTTP 200)"; break; }
@@ -194,11 +194,20 @@ health_check() {
   done
   [ "$code" = "200" ] || warn "   前端首页未就绪，最后 HTTP=$code，请人工核查"
 
-  local api
-  api="$(curl -s -m 5 -X POST "http://$SERVER_IP/api/auth/login" \
-          -H 'Content-Type: application/json' \
-          -d '{"username":"__probe__","password":"__probe__"}' || true)"
-  echo "   后端 /api 登录探活响应（无效凭据应返回业务错误码）:"
+  # 后端要单独轮：前端是 nginx 直接给静态文件，秒回 200，跟后端起没起来毫无关系，
+  # 所以上面那个循环几乎立刻 break；而 Spring Boot 实测要 22~27 s（Flyway 校验 + Quartz 装载）。
+  # 原来这里只探一次，每次都落在启动窗口里拿到 nginx 的 502，于是「后端响应异常」成了每次发版的固定误报。
+  api=""
+  for i in $(seq 1 40); do                                     # 最多等 120s
+    api="$(curl -s -m 5 -X POST "http://$SERVER_IP/api/auth/login" \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"__probe__","password":"__probe__"}' || true)"
+    case "$api" in
+      *'"code":400'*) break ;;                                 # 拿到业务错误码就说明后端真的起来了
+    esac
+    sleep 3
+  done
+  echo "   后端 /api 登录探活响应（无效凭据应返回业务错误码，等待约 $((i * 3)) s）:"
   echo "   $api"
   case "$api" in
     *'"code":400'*) log "   后端正常（返回 400 业务错误，符合预期）" ;;

@@ -197,27 +197,26 @@ function shiftDays(iso, days) {
 
 async function load() {
   loading.value = true
+  // 一次取数对应一个日子：分批 await 会让中途改日期时前后两批拼成两天
+  const d = date.value
   try {
-    const [idxRes, recRes] = await Promise.all([
-      marketApi.indexes(date.value).catch(() => null),
-      recordApi.getByDate(date.value).catch(() => null)
+    const [idxRes, recRes, rangeRes, breadthRes] = await Promise.all([
+      marketApi.indexes(d).catch(() => null),
+      recordApi.getByDate(d).catch(() => null),
+      // 曲线与异动监管页同一取数口：range 返回按日升序，切出最近一段直接喂图
+      recordApi.getRange(shiftDays(d, LOOKBACK_DAYS), d).catch(() => null),
+      // 实时家数只在看今天时有意义
+      d === todayStr ? marketApi.breadth().catch(() => null) : Promise.resolve(null),
+      scoring.loadDetail(d, true).catch(() => null)
     ])
     indexes.value = idxRes?.data?.indexes || []
     idxTradeDate.value = idxRes?.data?.tradeDate || ''
     record.value = recRes?.data || null
-    // 曲线与异动监管页同一取数口：range 返回按日升序，切出最近一段直接喂图
-    const rangeRes = await recordApi.getRange(shiftDays(date.value, LOOKBACK_DAYS), date.value).catch(() => null)
     curveRows.value = ((rangeRes && rangeRes.data) || []).slice(-CURVE_ROWS).map((r) => ({
       date: r.tradeDate,
       score: r.scoreMarket
     }))
-    // 实时家数只在看今天时有意义
-    liveBreadth.value = null
-    if (date.value === todayStr) {
-      const b = await marketApi.breadth().catch(() => null)
-      liveBreadth.value = b?.data || null
-    }
-    await scoring.loadDetail(date.value, true)
+    liveBreadth.value = breadthRes?.data || null
   } finally {
     loading.value = false
   }
@@ -230,7 +229,11 @@ onMounted(async () => {
     try {
       const res = await recordApi.getLatest(1)
       const latest = (res.data || [])[0]
-      if (latest && latest.tradeDate < todayStr) date.value = latest.tradeDate
+      if (latest && latest.tradeDate < todayStr) {
+        // 落到最近复盘日时把加载交给 watch(date, load)：这里再 load() 一遍等于整页重打一轮请求
+        date.value = latest.tradeDate
+        return
+      }
     } catch (e) { /* 停在今天 */ }
   }
   load()
