@@ -274,7 +274,7 @@ const ttKey = (d) => `tt:${d}`
 const sbKey = (d) => `sb:${d}`
 const mlKey = (d) => `ml:${d}`
 
-/* score-detail metrics：D1 量比 / 涨跌停从这里读（拉取行情后 scoring 会 force 刷新，本组件响应式跟随） */
+/* score-detail metrics：D1 量比 / 涨跌停从这里读（写请求落地时 api 层会作废这份现算读数，本组件响应式跟随） */
 const metrics = computed(() => scoring.detail?.metrics || {})
 const turnoverBand = computed(() => {
   const sub = (scoring.detail?.dims || []).find((d) => d.key === 'market')
@@ -329,7 +329,7 @@ async function load() {
   if (!d) return
   loading.value = true
   try {
-    const jobs = [scoring.loadDetail(d, true)]
+    const jobs = [scoring.loadDetail(d)]
     if (props.dimKey === 'market') {
       jobs.push(
         cached(idxKey(d), () => marketApi.indexes(d)).then((res) => { indexes.value = res?.data?.indexes || []; idxTradeDate.value = res?.data?.tradeDate || '' }).catch(() => {}),

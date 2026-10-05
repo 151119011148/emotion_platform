@@ -53,7 +53,7 @@ function bandClass(score) {
 }
 
 watch(() => props.date, (d) => {
-  scoring.loadDetail(d, true)
+  scoring.loadDetail(d)
 }, { immediate: true })
 </script>
 

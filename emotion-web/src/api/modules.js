@@ -1,4 +1,33 @@
-import api from './index'
+import api, { onApiWrite } from './index'
+
+/**
+ * 「最新一条复盘记录」是六个页面默认的取数日期来源，六个挂载点问的是同一个问题，
+ * 而且各自把它排在整批请求前面（探针不回来，页面不知道要拉哪天）。一次会话收敛成一趟。
+ *
+ * <p>只服务 {@code days=1} 这一种问法；60s 后自然过期（夜间任务在别的进程里写了库也要认），
+ * 任何写请求落地立刻作废（本页刚建/改掉当天那条，下一跳必须看见）。失败不缓存。
+ */
+const LATEST_TTL_MS = 60000
+let latestEntry = null
+onApiWrite(() => { latestEntry = null })
+
+function getLatest(days = 20) {
+  if (days !== 1) return api.get('/records/latest', { params: { days } })
+  if (latestEntry && Date.now() - latestEntry.at < LATEST_TTL_MS) return latestEntry.p
+  const entry = { at: Date.now(), p: null }
+  entry.p = api.get('/records/latest', { params: { days } })
+    .then((res) => {
+      // 复用窗口从「读到的那一刻」起算，不是从「发出去」起算：慢响应不该一回来就过期
+      if (latestEntry === entry) entry.at = Date.now()
+      return res
+    })
+    .catch((e) => {
+      if (latestEntry === entry) latestEntry = null
+      throw e
+    })
+  latestEntry = entry
+  return entry.p
+}
 
 export const authApi = {
   login: (data) => api.post('/auth/login', data),
@@ -35,7 +64,7 @@ export const recordApi = {
   getByDate: (date) => api.get(`/records/date/${date}`, { skipErrorToast: true }),
   // config 可选：后台静默取数（算分位带那条）要能压掉红条
   getRange: (start, end, config) => api.get('/records/range', { params: { start, end }, ...config }),
-  getLatest: (days = 20) => api.get('/records/latest', { params: { days } }),
+  getLatest: (days = 20) => getLatest(days),
   getAdvice: () => api.get('/records/advice'),
   getCurve: (days = 20) => api.get('/records/curve', { params: { days } }),
   // 只重算那一天。行情字段有改动后想立刻看分数落点时用得上

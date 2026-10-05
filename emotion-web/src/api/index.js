@@ -7,6 +7,16 @@ const api = axios.create({
   timeout: 10000
 })
 
+/**
+ * 写请求回调：后端「引擎现算」类读数（如 /records/score-detail）按库里当前的数算，
+ * 任何一次成功的写都可能让它变。与其在十来个页面各记一行「写完记得作废」——漏一处就是
+ * 一屏旧分数——不如在唯一的出口上统一通知。目前只有一个订阅方（stores/scoring.js）。
+ */
+const writeHooks = []
+export function onApiWrite(fn) {
+  writeHooks.push(fn)
+}
+
 api.interceptors.request.use(config => {
   const token = localStorage.getItem('token')
   if (token) {
@@ -24,6 +34,11 @@ api.interceptors.response.use(
         ElMessage.error(res.message || '请求失败')
       }
       return Promise.reject(new Error(res.message))
+    }
+    const method = (response.config?.method || 'get').toLowerCase()
+    // 落库成功的写：现算类读数当场作废。写是低频动作，宁可多失效一次，不冒显示旧数的险。
+    if (method !== 'get' && method !== 'head') {
+      writeHooks.forEach((fn) => { try { fn(response.config) } catch (e) { /* 回调不许把响应链打断 */ } })
     }
     return res
   },

@@ -351,9 +351,35 @@
               <el-tag :type="row.status === '持仓' ? 'warning' : 'success'" size="small">{{ row.status }}</el-tag>
             </template>
           </el-table-column>
+          <el-table-column label="操作" width="96">
+            <template #default="{ row }">
+              <el-button v-if="row.status === '持仓'" size="small" text type="primary" @click="openClearDialog(row)">编辑卖出</el-button>
+              <span v-else class="mini">—</span>
+            </template>
+          </el-table-column>
         </el-table>
       </div>
     </div>
+
+    <!-- 个股「编辑卖出」：向所选卖出日追加一条今日清仓行（整日替换 API），修正生命周期状态并计盈亏 -->
+    <el-dialog v-model="clearDlg.open" :title="`编辑卖出 · ${clearDlg.target?.stockName || ''} ${clearDlg.target?.stockCode || ''}`" width="420px">
+      <el-form label-position="top">
+        <el-form-item label="卖出日">
+          <el-date-picker v-model="clearDlg.sellDate" type="date" value-format="YYYY-MM-DD" placeholder="选择卖出日" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="卖价">
+          <el-input-number v-model="clearDlg.sellPrice" :min="0" :precision="2" :controls="false" placeholder="成交价" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="卖出量">
+          <el-input-number v-model="clearDlg.sellQty" :min="1" :step="100" :controls="false" placeholder="默认全部股数" style="width: 100%" />
+        </el-form-item>
+        <div class="mini">卖出量 ≥ 股数即视为清仓；保存后该票在生命周期显示「已清」并计盈亏。原买入日快照保持不动。</div>
+      </el-form>
+      <template #footer>
+        <el-button @click="clearDlg.open = false">取消</el-button>
+        <el-button type="primary" :loading="clearDlg.saving" @click="saveClear">保存</el-button>
+      </template>
+    </el-dialog>
 
     <!-- ⑤ 卖出流水：一笔「了结」一行，减仓也算。这是「哪天卖的、卖多少钱」唯一的凭据。 -->
     <div class="sec" v-if="tab !== 'stats' && exitRows.length">
@@ -819,6 +845,60 @@ async function markExecuted(row) {
   } catch (e) {
     ElMessage.error('标记失败')
   }
+}
+
+/* ---------------- 个股「编辑卖出」弹窗 ---------------- */
+/** 把一只还在「持仓」的票记一笔清仓：向所选卖出日追加一条今日清仓行。 */
+const clearDlg = reactive({ open: false, saving: false, target: null, sellDate: '', sellPrice: null, sellQty: null })
+
+function openClearDialog(row) {
+  clearDlg.target = row
+  clearDlg.sellDate = localToday()
+  clearDlg.sellPrice = row.lastExit ? row.lastExit.sellPrice : null
+  clearDlg.sellQty = row.lastRow && row.lastRow.quantity != null ? row.lastRow.quantity : null
+  clearDlg.open = true
+}
+
+async function saveClear() {
+  const { target, sellDate, sellPrice, sellQty } = clearDlg
+  if (!target) return
+  if (!sellDate) { ElMessage.warning('请选择卖出日'); return }
+  const base = target.lastRow || {}
+  const q = Number(base.quantity) || 0
+  const s = Number(sellQty) || 0
+  if (!s) { ElMessage.warning('请填写卖出量'); return }
+  if (q > 0 && s > q) { ElMessage.warning('卖出量不能大于股数'); return }
+  clearDlg.saving = true
+  try {
+    // 取回卖出日当天现有行，原样 round-trip（payloadOf 带全 POS_KEYS，少一个键＝那列被抹掉）
+    const res = await recordApi.getPositions(sellDate)
+    const existing = Array.isArray(res.data) ? res.data : []
+    const arr = existing.map(payloadOf)
+    const clear = {
+      stockCode: target.stockCode,
+      stockName: base.stockName || target.stockName,
+      costPrice: base.costPrice ?? null,
+      currentPrice: base.currentPrice ?? null,
+      quantity: base.quantity ?? null,
+      floatPct: base.floatPct ?? null,
+      industry: base.industry ?? null,
+      boardNum: base.boardNum ?? null,
+      sellPrice: sellPrice ?? null,
+      sellQty: sellQty ?? null,
+      status: '今日清仓',
+      executed: 0,
+      actualAction: null
+    }
+    const full = {}
+    POS_KEYS.forEach(k => { full[k] = clear[k] === undefined ? null : clear[k] })
+    const i = arr.findIndex(r => r.stockCode === target.stockCode)
+    if (i >= 0) arr[i] = { ...arr[i], ...full }   // 卖出日已有该标的行：并入，不重复建行
+    else arr.push(full)
+    await recordApi.savePositions(sellDate, arr)
+    ElMessage.success(`「${target.stockName}」清仓已记到 ${sellDate}`)
+    clearDlg.open = false
+    await loadAll()
+  } catch (e) { /* 拦截器已弹后端校验错；弹窗留着让人改 */ } finally { clearDlg.saving = false }
 }
 
 async function loadAll() {

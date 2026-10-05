@@ -570,6 +570,7 @@ import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from
 import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { recordApi, importApi, reviewApi, prdApi, d5Api, marketApi, anchorsApi } from '../api/modules'
 import { useTradingCalendar } from '../utils/tradingCalendar'
+import { useScoringStore } from '../stores/scoring'
 import { bandOfPoint } from '../utils/stages'
 import { pnlOf, yuan, realizedOf } from '../utils/money'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -577,6 +578,8 @@ import EditableStatCard from '../components/EditableStatCard.vue'
 
 // useRoute 必须在 setup 顶层取一次：放进普通函数会在 watch/生命周期回调里 inject 失败（返回 undefined 抛 TypeError）
 const route = useRoute()
+// 只为作废用：本页卡片读 /review/detail，但拉取行情写的是同一批库里数据，现算读数得跟着掉
+const scoring = useScoringStore()
 
 /* ======================================================================= */
 /* 只读小组件：就绪度 badge / 得分 chip / 统计项                           */
@@ -760,24 +763,33 @@ async function loadRecord(date) {
 
 async function loadDashboard(date) {
   if (!date) return
-  try {
-    const res = await reviewApi.detail(date)
-    if (form.tradeDate !== date) return
-    dashboard.value = res.data || null
-  } catch (e) { /* detail 只读，取不到时块内空态 */ }
-  try {
-    const s = await reviewApi.status(date)
-    if (form.tradeDate === date && s.data) {
-      fetchOverall.value = s.data.overall || ''
-      try { fetchTasks.value = JSON.parse(s.data.tasksJson || '[]') } catch (e) { fetchTasks.value = [] }
-      hasRun.value = true
-    }
-  } catch (e) { /* 没有该日状态不弹条 */ }
+  // 两块读数互不依赖：串行 await 等于白等一个来回（detail 还是本页最重的那个）
+  const [res, s] = await Promise.all([
+    reviewApi.detail(date).catch(() => null),
+    reviewApi.status(date).catch(() => null)
+  ])
+  if (form.tradeDate !== date) return
+  dashboard.value = res?.data || null
+  // 没有该日状态不弹条
+  if (s?.data) {
+    fetchOverall.value = s.data.overall || ''
+    try { fetchTasks.value = JSON.parse(s.data.tasksJson || '[]') } catch (e) { fetchTasks.value = [] }
+    hasRun.value = true
+  }
 }
 
+/** 已经拉过一整轮的日期：一轮=十来条请求，同一天不该因为「onMounted 显式调 + watch 再调 + 日历回校又调」打三遍。 */
+const loadedDate = ref('')
+
 function handleDateChange(date) {
+  if (!date) return
   // 仪表盘「待裁决 → 去处理」跳来时带着 to=ledger：等台账行渲染完直接滚到持仓台账，不停页面顶部
   const wantLedger = route.query?.to === 'ledger'
+  if (date === loadedDate.value) {
+    if (wantLedger) nextTick(() => setTimeout(scrollToLedger, 100))
+    return
+  }
+  loadedDate.value = date
   dashboard.value = null
   fetchTasks.value = []
   fetchOverall.value = ''
@@ -826,11 +838,10 @@ async function handleFetch() {
       fetchTasks.value.push({ task: ev.task, status: ev.status, rows: ev.rows, msg: ev.msg })
     })
     if (form.tradeDate !== date) return
-    const s = await reviewApi.status(date)
-    if (s.data) fetchOverall.value = s.data.overall || 'DONE'
-    await loadDashboard(date)   // 落库后按最新数据刷新 D1-D5 + 就绪度
+    // 一键拉取走的是原生 fetch（SSE），不经 api 层的写钩子：这天的现算读数在这里手动作废
+    scoring.invalidateDetail(date)
     loadReuse(date)             // T4 三池已回写，刷新内联的天梯/首板/高位
-    autoScore(date)             // 当天还没有复盘记录时，用拉到的客观数据自动算分落库，让顶部五维评分回显
+    await autoScore(date)       // 落库后按最新数据刷 D1-D5 + 就绪度（只刷这一遍）
     ElMessage.success('拉取完成，五维数据已刷新')
   } catch (e) {
     fetchOverall.value = 'FAILED'
@@ -852,8 +863,9 @@ async function autoScore(date) {
     savedRecord.value = res.data
     recordId.value = res.data?.id || null
     formReady.value = true
-    await loadDashboard(date)
   } catch (e) { /* 自动落库失败不阻塞拉取流程 */ }
+  // 落没落成都要刷：读的是库里现状，落库失败时页面至少还能看见拉到的客观数
+  await loadDashboard(date)
 }
 
 function fillForm(data) {

@@ -207,7 +207,7 @@ async function load() {
       recordApi.getRange(shiftDays(d, LOOKBACK_DAYS), d).catch(() => null),
       // 实时家数只在看今天时有意义
       d === todayStr ? marketApi.breadth().catch(() => null) : Promise.resolve(null),
-      scoring.loadDetail(d, true).catch(() => null)
+      scoring.loadDetail(d).catch(() => null)
     ])
     indexes.value = idxRes?.data?.indexes || []
     idxTradeDate.value = idxRes?.data?.tradeDate || ''

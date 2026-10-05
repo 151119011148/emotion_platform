@@ -225,11 +225,10 @@ async function loadCurve() {
 async function loadDay() {
   const date = headRecord.value?.tradeDate
   if (!date) {
-    scoring.detail = null
-    scoring.detailDate = null
+    scoring.invalidateDetail()
     return
   }
-  await scoring.loadDetail(date, true)
+  await scoring.loadDetail(date)
 }
 
 async function loadAdvice() {

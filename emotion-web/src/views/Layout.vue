@@ -46,12 +46,12 @@
           <el-icon><Tickets /></el-icon>
           <span>D10 持仓与台账</span>
         </el-menu-item>
-        <el-menu-item index="/scoring">
+        <!-- 这两个管理页只对超级管理员露出：打分配置改的是全站生效的模型，账号管理是开户/管号。
+             隐藏只是少个点，真正的判据在后端（角色不符一律 400）。 -->
+        <el-menu-item v-if="userStore.isSuperAdmin" index="/scoring">
           <el-icon><SetUp /></el-icon>
           <span>D11 打分配置</span>
         </el-menu-item>
-        <!-- 只对超级管理员露出：注册入口收拢之后，开户/管号就只有这一个入口。
-             隐藏只是少个点，真正的判据在后端（角色不符一律 400）。 -->
         <el-menu-item v-if="userStore.isSuperAdmin" index="/admin">
           <el-icon><UserFilled /></el-icon>
           <span>账号管理</span>

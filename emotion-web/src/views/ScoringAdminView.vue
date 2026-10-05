@@ -4,7 +4,10 @@
       <h2>打分配置</h2>
     </div>
 
-    <p class="hint">
+    <el-alert v-if="!userStore.isSuperAdmin" class="deny" type="warning" :closable="false" show-icon
+      title="你不是超级管理员，无法查看或修改打分配置" />
+
+    <p class="hint" v-if="userStore.isSuperAdmin">
       维度、权重、子指标与阈值档位都是<b>注册表驱动</b>的：改一维权重、增一个子指标、调一档阈值，仪表盘卡片与复盘页随之变。
       对 <b>five_dim</b> 模型，BAND_LADDER 子直接读这里的规则阶梯；STRATEGY/MANUAL/LAYER 的合成/算法/人工口径由 Java 端
       BoardScoreCalculator 承担，本页面仍能编辑其权重与阈值上限。
@@ -12,7 +15,7 @@
     </p>
 
     <!-- 模型表 -->
-    <el-card shadow="never" class="block">
+    <el-card v-if="userStore.isSuperAdmin" shadow="never" class="block">
       <template #header><span class="block-title">打分模型</span></template>
       <el-table :data="models" highlight-current-row @current-change="onModelRowClick" style="width: 100%">
         <el-table-column prop="id" label="ID" width="70" />
@@ -42,7 +45,7 @@
     </el-card>
 
     <!-- 选中模型：维度 + 规则 -->
-    <template v-if="detail">
+    <template v-if="userStore.isSuperAdmin && detail">
       <el-card shadow="never" class="block">
         <template #header>
           <div class="dim-header">
@@ -149,7 +152,7 @@
         <el-button size="small" style="margin-top: 12px" @click="openCreateRule">新增规则</el-button>
       </el-card>
     </template>
-    <el-empty v-else description="点上面任一模型查看它的维度与规则" />
+    <el-empty v-else-if="userStore.isSuperAdmin" description="点上面任一模型查看它的维度与规则" />
 
     <!-- 模型弹框 -->
     <el-dialog v-model="modelDialog.visible" :title="modelDialog.isEdit ? '编辑模型' : '新增模型'" width="480px">
@@ -352,6 +355,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { scoringApi } from '../api/modules'
 import { useScoringStore } from '../stores/scoring'
+import { useUserStore } from '../stores/user'
 
 const DIM_KEYS = ['height', 'premium', 'breadth', 'broken', 'loss', 'volume', 'theme', 'anchor', 'surv',
   'market', 'theme_main', 'board', 'first']
@@ -361,6 +365,7 @@ const OPERATORS = ['GTE', 'GT', 'LTE', 'LT', 'EQ', 'BETWEEN', 'ELSE', 'GUARD', '
 const SCORING_KINDS = ['WEIGHTED_SUM', 'BAND_LADDER', 'LAYER_WEIGHTED_BAND', 'STRATEGY', 'MANUAL']
 
 const scoringStore = useScoringStore()
+const userStore = useUserStore()
 
 const models = ref([])
 const detail = ref(null)
@@ -650,6 +655,9 @@ async function doDeleteRule(row) {
 }
 
 onMounted(async () => {
+  // 非超管不发取数请求：这两个读端点后端只认超管，打了只会换一条红色报错条，
+  // 页头下面那句「你不是超级管理员」已经把该说的说完了。
+  if (!userStore.isSuperAdmin) return
   await loadModels()
   const active = models.value.find((m) => m.active) || models.value[0]
   if (active) await loadDetail(active.id)
@@ -670,6 +678,9 @@ onMounted(async () => {
 .page-header h2 {
   margin: 0;
   color: #e1e8ed;
+}
+.deny {
+  margin-top: 8px;
 }
 .hint {
   color: #8899a6;

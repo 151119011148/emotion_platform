@@ -769,7 +769,7 @@ async function load() {
     // 第 2 槽是 score-detail，结果由 store 自己落进 detail，这里不接——空位留着，base 才是第 3 个
     const [tiantiRes, , base] = await Promise.all([
       prdApi.tianti(d).catch(() => null),
-      scoring.loadDetail(d, true).catch(() => null),
+      scoring.loadDetail(d).catch(() => null),
       loadCurveBase()
     ])
     vo.value = tiantiRes?.data || null

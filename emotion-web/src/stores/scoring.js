@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { scoringApi, recordApi } from '../api/modules'
+import { onApiWrite } from '../api/index'
 import {
   DIMS, CARD_ORDER, MAX_POSSIBLE,
   FIVE_DIM_DIMS, FIVE_DIM_ORDER, FIVE_DIM_MAX
@@ -42,6 +43,13 @@ const BUILTIN_FIVE_DIMS = Object.entries(FIVE_DIM_DIMS).map(([key, d]) => ({
   note: null
 }))
 
+/**
+ * 同日 score-detail 的复用窗口。这一天在后端是「现算」的（102 条语句一趟），D1→D5→D3 连着翻
+ * 不该各打一次；60s 只用来兜<b>本会话之外</b>的写入（夜间 19:30 客观数据任务、另一个标签页），
+ * 本会话自己的落库动作一律走 invalidateDetail() 立即作废，不等这个定时器。
+ */
+const DETAIL_TTL_MS = 60000
+
 export const useScoringStore = defineStore('scoring', () => {
   /** 后端 ScoringModelVO（含 dims / subs / rules）；source=DB 且有 dims 时才算生效。 */
   const vo = ref(null)
@@ -57,6 +65,10 @@ export const useScoringStore = defineStore('scoring', () => {
   /** 当日在飞的 score-detail 请求：复盘页同屏有五个 DimScoreBlock，靠它把并发收敛成一次。 */
   let inflight = null
   let inflightDate = null
+  /** detail 最近一次成功取数的时刻，DETAIL_TTL_MS 的基准；失败不记，让下一次挂载重试。 */
+  let detailFetchedAt = 0
+  /** 读取世代号：换日期与 invalidateDetail 都 +1，晚到的响应一律认不出自己的世代就丢弃。 */
+  let detailGen = 0
 
   async function load(force = false) {
     if (loading.value) return
@@ -75,13 +87,14 @@ export const useScoringStore = defineStore('scoring', () => {
 
   /**
    * 拉/复用某一天的 score-detail eval 树。
-   * - 同一天已加载 → 直接返回（除非 force）
+   * - 同一天已加载且在 {@code DETAIL_TTL_MS} 内 → 直接返回（force 可越过）
    * - 同一天已有在飞请求 → 复用同一个 Promise（五维同屏不重复发）
    * - 换日期 → <b>先清 detail</b>，避免旧日期读数落在新日期卡片上
    * - 失败 → detail=null，卡片走 record.score_* 兜底显示，不弹红条
    */
   async function loadDetail(date, force = false) {
     if (!date) {
+      detailGen++
       detail.value = null
       detailDate.value = null
       inflight = null
@@ -89,22 +102,26 @@ export const useScoringStore = defineStore('scoring', () => {
       return
     }
     if (inflight && inflightDate === date) return inflight
-    if (!force && detailDate.value === date && detail.value) return
+    if (!force && detailDate.value === date && Date.now() - detailFetchedAt < DETAIL_TTL_MS) return
 
+    const gen = ++detailGen
     const p = (async () => {
       detail.value = null
       detailDate.value = date
+      detailFetchedAt = 0
       detailLoading.value = true
       try {
         const res = await recordApi.scoreDetail(date)
-        // 60s 里用户可能已经切了日期：晚到的响应不许落在新日期上
-        if (detailDate.value !== date) return
+        // 60s 里用户可能切了日期、或刚写过这天的数把这次读取作废了：晚到的响应不许落地
+        if (gen !== detailGen) return
         detail.value = res?.data || null
+        // 取回 null（那天确实没评出来）也算「这一天读过了」：否则每次挂载都重打一趟现算
+        detailFetchedAt = Date.now()
       } catch (e) {
-        if (detailDate.value !== date) return
+        if (gen !== detailGen) return
         detail.value = null
       } finally {
-        detailLoading.value = false
+        if (gen === detailGen) detailLoading.value = false
       }
     })()
 
@@ -119,6 +136,23 @@ export const useScoringStore = defineStore('scoring', () => {
       }
     }
   }
+
+  /**
+   * 本会话刚改过这天的数（保存复盘/拉取行情/人工监管/改模型权重阈值）→ 让下一次读重新现算。
+   * 省略 date = 全部作废（改的是生效模型，影响每一天）。在飞的响应也一起作废：它按的是写之前的数据。
+   */
+  function invalidateDetail(date) {
+    if (date && detailDate.value !== date) return
+    detailGen++
+    detail.value = null
+    detailDate.value = null
+    detailFetchedAt = 0
+    inflight = null
+    inflightDate = null
+  }
+
+  // 写请求一落地就作废：页面各自记「写完记得刷」迟早漏一处，漏了就是一屏旧分数还写得像现算。
+  onApiWrite(() => invalidateDetail())
 
   const isDb = computed(() => !!vo.value)
   const source = computed(() => (isDb.value ? 'DB' : 'BUILTIN'))
@@ -277,6 +311,6 @@ export const useScoringStore = defineStore('scoring', () => {
     fiveDimDims, fiveDimCardOrder, fiveDimMax, fiveDimScoreLine,
     subs, subsByDim, childrenOf, ladderOf,
     // score-detail eval 树
-    detail, detailDate, detailLoading, loadDetail, dimEval, subsOf
+    detail, detailDate, detailLoading, loadDetail, invalidateDetail, dimEval, subsOf
   }
 })
