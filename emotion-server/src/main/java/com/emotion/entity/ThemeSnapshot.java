@@ -1,6 +1,7 @@
 package com.emotion.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -22,7 +23,12 @@ public class ThemeSnapshot {
     private LocalDate tradeDate;
     /** 题材绑定所属用户（AUTO 口径）。 */
     private Long userId;
-    /** 题材榜排名 1-5。 */
+    /**
+     * 题材榜排名 1-5。列名必须反引号：MySQL 8 起 {@code rank} 是保留字，
+     * MyBatis-Plus 生成的字段列表里裸写它就报 1064。写侧走的是带反引号的手写 XML，
+     * 所以这个坑一直藏着，直到导出文档第一次用 selectList 投影这列才踩出来。
+     */
+    @TableField("`rank`")
     private Integer rank;
     private String themeName;
     private Integer ztCount;

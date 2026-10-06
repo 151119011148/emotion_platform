@@ -3,7 +3,7 @@ package com.emotion.market;
 import lombok.Data;
 
 /**
- * 一天盘面明细按池聚合出来的三个家数，第 4 维三个子项的分母全部来自这里。
+ * 一天盘面明细按池聚合出来的几个家数，第 4 维三个子项的分母全部来自这里。
  *
  * <p>数的是 {@code t_market_stock} 的明细行，不是上游的 tc。理由是重算必须能离线复现：
  * 用 tc 就只有在拉取那一刻拿得到，隔天重算就只能退回明细，两条路径会给出两个封板率。
@@ -19,6 +19,13 @@ public class PoolCounts {
     private int zbCount;
     /** 涨停池里 zbc&gt;0 的家数：封住前打开过、尾盘又封回去了。 */
     private int resealCount;
+    /**
+     * 涨停池里的一字板家数：首封 ≤09:30:00 且当日零炸板，与
+     * {@link com.emotion.mapper.IndustrySnapshotMapper#aggregate} 里那个 yizi_cnt 同一判据。
+     * 区别是这一列数的是<b>整个涨停池</b>：板块快照只落前 5 个板块，拿它的合计当全市场一字数会少算
+     * （9/30 实测：前 5 板块合计 2 家，涨停池真有 6 家）。
+     */
+    private int yiziCount;
 
     /** 一行明细都没有 = 那天没回补过明细，两个家数口径都该是"未评"，不是 0%。 */
     public boolean isEmpty() {

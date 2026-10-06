@@ -3,13 +3,22 @@ package com.emotion.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.emotion.entity.Anchor;
 import com.emotion.entity.DailyRecord;
+import com.emotion.entity.IndustrySnapshot;
 import com.emotion.entity.IndexClose;
 import com.emotion.entity.Position;
 import com.emotion.entity.Prediction;
 import com.emotion.entity.Stock;
+import com.emotion.entity.ThemeSnapshot;
+import com.emotion.mapper.IndustrySnapshotMapper;
+import com.emotion.mapper.MarketStockMapper;
 import com.emotion.mapper.StockMapper;
+import com.emotion.mapper.ThemeSnapshotMapper;
+import com.emotion.mapper.TradingHolidayMapper;
+import com.emotion.market.PoolCounts;
+import com.emotion.market.PoolCounts;
 import com.emotion.util.ReviewDoc;
 import com.emotion.util.ReviewDocFormatter;
+import com.emotion.util.ReviewDocMetrics;
 import com.emotion.util.ReviewImportParser;
 import com.emotion.util.ReviewMdFormatter;
 import com.emotion.vo.ReviewExportVO;
@@ -18,8 +27,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -35,14 +47,19 @@ import java.util.Set;
  * 说得通的方向：库里那份是<b>上次导入的结果</b>，重建它等于把 md 对齐到自己刚确认过的状态；
  * 反过来沿用旧 md 里的 meta，就会留下一格"页面显示已改、md 还是旧值"的暗差。
  *
- * <p>一个读不到的例外，只能从 {@code review_md} 现解析回来：{@code 题材} 没有日粒度
- * （题材表有，但拿它当"当天的题材"会让上周的强度串到今天）。{@code 对照} 以前也在这一列里，
- * 现在有自己的列了，读取按"列优先、原文兜底"。
+ * <p>一个读不到的例外，只能从 {@code review_md} 现解析回来：可导入格式的 {@code 题材} 键没有日粒度
+ * （{@code t_theme} 存的是"最后一次导入赢"的当前值，拿它当"当天的题材"会让上周的强度串到今天）。
+ * {@code 对照} 以前也在这一列里，现在有自己的列了，读取按"列优先、原文兜底"。
+ * 只读的那份复盘文档不受这条限制——{@link #reviewDoc} 读的是逐日落盘的
+ * {@code t_theme_daily_snapshot}，那是当天盘出来的榜，不是当前值。
  */
 @Service
 public class ReviewExportService {
 
     private static final Logger log = LoggerFactory.getLogger(ReviewExportService.class);
+
+    /** 往后找"次日"最多找这么多天：国庆七天长假 + 缓冲；再远说明停机表没覆盖到，不猜。 */
+    private static final int HOLIDAY_LOOKAHEAD_DAYS = 15;
 
     /** 没存过原文时给的新正文骨架，七步对齐 06 篇那份清单。 */
     private static final String SKELETON =
@@ -69,6 +86,10 @@ public class ReviewExportService {
     private final StockMapper stockMapper;
     private final MarketDataService marketDataService;
     private final AnchorService anchorService;
+    private final ThemeSnapshotMapper themeSnapshotMapper;
+    private final IndustrySnapshotMapper industrySnapshotMapper;
+    private final MarketStockMapper marketStockMapper;
+    private final TradingHolidayMapper tradingHolidayMapper;
 
     public ReviewExportService(DailyRecordService dailyRecordService,
                                PositionStore positionStore,
@@ -76,7 +97,11 @@ public class ReviewExportService {
                                IndexCloseStore indexCloseStore,
                                StockMapper stockMapper,
                                MarketDataService marketDataService,
-                               AnchorService anchorService) {
+                               AnchorService anchorService,
+                               ThemeSnapshotMapper themeSnapshotMapper,
+                               IndustrySnapshotMapper industrySnapshotMapper,
+                               MarketStockMapper marketStockMapper,
+                               TradingHolidayMapper tradingHolidayMapper) {
         this.dailyRecordService = dailyRecordService;
         this.positionStore = positionStore;
         this.predictionStore = predictionStore;
@@ -84,6 +109,10 @@ public class ReviewExportService {
         this.stockMapper = stockMapper;
         this.marketDataService = marketDataService;
         this.anchorService = anchorService;
+        this.themeSnapshotMapper = themeSnapshotMapper;
+        this.industrySnapshotMapper = industrySnapshotMapper;
+        this.marketStockMapper = marketStockMapper;
+        this.tradingHolidayMapper = tradingHolidayMapper;
     }
 
     /** 不管那天有没有原文，一律按库里当前的值重建。写周五的复盘用这个。 */
@@ -109,7 +138,7 @@ public class ReviewExportService {
     }
 
     /**
-     * 只读<b>复盘文档</b>：把那天库里的系统取数按用户手写的版式（【一】…【九】）排成一份给人读、
+     * 只读<b>复盘文档</b>：把那天库里的系统取数按用户手写的版式（【一】…【十一】）排成一份给人读、
      * 给人补判断的 md。与 {@link #template} 不同——那份是喂回导入器的可再导入格式，这份不写 meta、
      * 不承诺可导入。判断文字平台造不出，也不从库里回填（{@code doc_notes} 已停用）：
      * 每节固定留一行 {@code ✍️ 判断} 占位，他写完的那份就是当天的 md。
@@ -128,7 +157,18 @@ public class ReviewExportService {
         m.positions = positionStore.read(userId, date);
         m.predictions = predictionStore.read(userId, date);
         m.anchors = anchorService.listInPosition(userId, date);
-        // 题材无日粒度，只有那天导入过 md 才解析得回来。
+        m.coreThemes = coreThemes(userId, date);
+        m.industries = industrySnapshots(date);
+        PoolCounts pools = marketStockMapper.countPools(date);
+        Integer yizi = null;
+        if (pools != null && !pools.isEmpty()) {
+            m.poolZt = pools.getZtCount();
+            m.poolZb = pools.getZbCount();
+            yizi = pools.getYiziCount();
+        }
+        m.metrics = ReviewDocMetrics.from(today, prev, m.poolZt, m.poolZb, m.stocks, yizi);
+        m.nextDate = nextSession(date);
+        // 旧 md 的 `题材:` 键：那是他手记的题材，和系统盘出来的 Top5 不同源，两栏分开摆。
         if (today != null && notBlank(today.getReviewMd())) {
             m.themes = ReviewImportParser.parse(today.getReviewMd(), date).getThemes();
         }
@@ -139,14 +179,59 @@ public class ReviewExportService {
         if (today == null || today.getId() == null) {
             vo.getWarnings().add(date + " 还没有主观复盘记录：行情数读全局客观日表，主线/龙头等手填节显示 —。");
         }
-        if (m.themes.isEmpty()) {
-            vo.getWarnings().add("题材没有日粒度：这天没导入过带 `题材:` 的原文，【二】只给了主线与总龙头。");
+        if (m.coreThemes.isEmpty()) {
+            vo.getWarnings().add(date + " 没落过核心题材 Top5 快照，【二】强/活方向只剩板块涨停榜和主线/总龙头。");
+        }
+        if (m.industries.isEmpty()) {
+            vo.getWarnings().add(date + " 没有板块快照（涨停池按行业聚合那一张），【二】板块涨停榜显示 —。");
         }
         if (m.stocks == null || !m.stocks.isAvailable()) {
             vo.getWarnings().add("这天没有盘面明细（连板梯队/跌停/大面），先在复盘页拉一次行情快照再导。");
         }
         vo.setContent(ReviewDocFormatter.render(m));
         return vo;
+    }
+
+    /** 当天盘出来的核心题材 Top5。rank 在 Java 里排：MySQL 8 认 {@code rank} 为保留字，ORDER BY 它得反引号。 */
+    private List<ThemeSnapshot> coreThemes(Long userId, LocalDate date) {
+        List<ThemeSnapshot> rows = themeSnapshotMapper.selectList(new LambdaQueryWrapper<ThemeSnapshot>()
+                .eq(ThemeSnapshot::getTradeDate, date)
+                .eq(ThemeSnapshot::getUserId, userId));
+        rows.sort(Comparator.<ThemeSnapshot, Integer>comparing(
+                ThemeSnapshot::getRank, Comparator.nullsLast(Comparator.naturalOrder())));
+        return rows;
+    }
+
+    /** 当天板块快照，排序沿用 {@code aggregate} 那条 SQL 的口径：涨停家数降序、再按最高板。 */
+    private List<IndustrySnapshot> industrySnapshots(LocalDate date) {
+        List<IndustrySnapshot> rows = industrySnapshotMapper.selectList(
+                new LambdaQueryWrapper<IndustrySnapshot>().eq(IndustrySnapshot::getTradeDate, date));
+        Comparator<IndustrySnapshot> byBoard = Comparator.<IndustrySnapshot, Integer>comparing(
+                IndustrySnapshot::getMaxBoard, Comparator.nullsLast(Comparator.reverseOrder()));
+        rows.sort(Comparator.<IndustrySnapshot, Integer>comparing(
+                IndustrySnapshot::getZtCount, Comparator.nullsLast(Comparator.reverseOrder())).thenComparing(byBoard));
+        return rows;
+    }
+
+    /**
+     * 【六】结案、【七】~【十一】预期所指的"次日"。口径与 {@code /api/review/trading-days} 一致：
+     * 周一~周五且不在停机表里。
+     *
+     * <p>不拿"下一个有盘面明细的日子"凑：那种日子在写当天复盘时永远还不存在（9/30 当天就是 null），
+     * 一 null 就退回只跳周末的近似，国庆前一天的复盘于是把次日写成 10/1。
+     * 窗口内一个开市日都没有（停机表没覆盖到那么远）时返回 null，由渲染层兜底并照实标出日期。
+     */
+    private LocalDate nextSession(LocalDate date) {
+        Set<LocalDate> closed = new HashSet<>(tradingHolidayMapper.listBetween(
+                date.plusDays(1), date.plusDays(HOLIDAY_LOOKAHEAD_DAYS)));
+        for (int i = 1; i <= HOLIDAY_LOOKAHEAD_DAYS; i++) {
+            LocalDate d = date.plusDays(i);
+            DayOfWeek dow = d.getDayOfWeek();
+            if (dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY && !closed.contains(d)) {
+                return d;
+            }
+        }
+        return null;
     }
 
     /** 上一交易日：近 40 条里 trade_date 严格早于 date 的最近一条。缺历史就返回 null，对照表昨列显 —。 */

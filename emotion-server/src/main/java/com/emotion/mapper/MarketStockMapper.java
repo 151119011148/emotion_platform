@@ -38,7 +38,8 @@ public interface MarketStockMapper extends BaseMapper<MarketStock> {
      * 放它们进分子，炸板家数恒为 0，那一天就被读成 100% 封板率——缺数得继续按缺数走。
      */
     @Select("SELECT IFNULL(SUM(pool='ZT'),0) AS zt_count, IFNULL(SUM(pool='ZB'),0) AS zb_count, "
-            + "IFNULL(SUM(pool='ZT' AND IFNULL(break_count,0)>0),0) AS reseal_count "
+            + "IFNULL(SUM(pool='ZT' AND IFNULL(break_count,0)>0),0) AS reseal_count, "
+            + "IFNULL(SUM(pool='ZT' AND first_seal_time<=93000 AND IFNULL(break_count,0)=0),0) AS yizi_count "
             + "FROM t_market_stock WHERE trade_date=#{date} AND change_pct IS NOT NULL")
     PoolCounts countPools(@Param("date") LocalDate date);
 
