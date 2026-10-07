@@ -27,7 +27,14 @@ public class DailyBar {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    /** gtimg 代码，如 {@code sz000993} / {@code sh000001}。 */
+    /**
+     * gtimg 代码，如 {@code sz000993} / {@code sh000001}。
+     *
+     * <p><b>命名空间陷阱</b>：这一列带市场前缀，而 {@code t_stock} / {@code t_position} /
+     * {@code t_index_close} 用的都是裸六位代码，两个命名空间里的 {@code 000001} 不是同一个东西
+     * （这里是上证指数，那里是平安银行）。截掉前缀去 join 会张冠李戴，要接上得按
+     * {@link com.emotion.market.TencentClient#symbolOf(String)} 的规则补前缀。
+     */
     private String symbol;
     private LocalDate tradeDate;
     private BigDecimal openPrice;

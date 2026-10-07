@@ -61,6 +61,10 @@ public class ReviewDoc {
      *
      * <p>卖价/卖量是「当日了结」：真卖出的成交价与股数，不是收盘价。清仓时卖量=持仓，
      * 减仓时卖量是一部分（那天状态仍是持仓中）。没写就是不知道，服务端不会拿收盘价顶上。
+     *
+     * <p>预案/高开/炸板/低开/跌停是「次日怎么处理」，五个都可选。它们也是<b>唯一</b>能把
+     * 复盘页台账里那四档分档写回库的路——{@code replaceForDate} 是删除重建，md 不带的列会被抹掉，
+     * 所以导出模板必须把这几格一起写出来（见 {@code ReviewMdFormatter#positionLine}）。
      */
     @Getter
     public static class PositionRow {
@@ -79,10 +83,21 @@ public class ReviewDoc {
         private final String action;
         private final String plannedAction;
         private final String discipline;
+        /** 次日总纲（{@code 预案:} 那格）；md 里没写「预案」时为 null。 */
+        private final String nextDayPlan;
+        /** 次日高开→动作（{@code 高开}）。 */
+        private final String planOpen;
+        /** 次日炸板→动作（{@code 炸板}）。 */
+        private final String planBreak;
+        /** 次日平开/低开→动作（{@code 低开}）。 */
+        private final String planLow;
+        /** 次日跌停→动作（{@code 跌停}）。 */
+        private final String planFall;
 
         public PositionRow(int line, String code, String name, BigDecimal cost, BigDecimal current,
                            Integer quantity, BigDecimal sellPrice, Integer sellQty, BigDecimal floatPct,
-                           String action, String plannedAction, String discipline) {
+                           String action, String plannedAction, String discipline,
+                           String nextDayPlan, String planOpen, String planBreak, String planLow, String planFall) {
             this.line = line;
             this.code = code;
             this.name = name;
@@ -95,6 +110,11 @@ public class ReviewDoc {
             this.action = action;
             this.plannedAction = plannedAction;
             this.discipline = discipline;
+            this.nextDayPlan = nextDayPlan;
+            this.planOpen = planOpen;
+            this.planBreak = planBreak;
+            this.planLow = planLow;
+            this.planFall = planFall;
         }
     }
 

@@ -32,6 +32,7 @@ import com.emotion.service.IndexCloseStore;
 import com.emotion.service.IndustrySnapshotService;
 import com.emotion.service.MarketDailyStore;
 import com.emotion.service.MarketDataService;
+import com.emotion.service.ReviewAiDraftService;
 import com.emotion.service.ReviewExportService;
 import com.emotion.service.ReviewFetchService;
 import com.emotion.service.SurveillanceService;
@@ -41,6 +42,7 @@ import com.emotion.vo.ApiResponse;
 import com.emotion.vo.MarketStocksVO;
 import com.emotion.vo.PremiumTiersVO;
 import com.emotion.vo.ReviewDashboardVO;
+import com.emotion.vo.ReviewAiDraftVO;
 import com.emotion.vo.ReviewExportVO;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.security.core.Authentication;
@@ -60,6 +62,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  *   <li>{@code GET /api/review/detail}：当日 D1-D5 原始数据 + 计算指标 + 得分 + 就绪度；</li>
  *   <li>{@code POST /api/review/save}：保存复盘记录（操作/持仓/明日计划/预判）；</li>
  *   <li>{@code GET /api/review/export}：导出复盘文档；</li>
+ *   <li>{@code POST /api/review/ai-draft}：一次模型调用，产出【一】核心定性的 AI 草稿（不写库）；</li>
  *   <li>{@code POST /api/surveillance/manual}：T7 无自动源时的人工补录入口。</li>
  * </ul>
  */
@@ -74,6 +77,7 @@ public class ReviewController {
     private final MarketDataService marketDataService;
     private final DailyRecordService dailyRecordService;
     private final ReviewExportService reviewExportService;
+    private final ReviewAiDraftService reviewAiDraftService;
     private final SurveillanceService surveillanceService;
     private final SurveillanceMapper surveillanceMapper;
     private final MarketStockMapper marketStockMapper;
@@ -92,6 +96,7 @@ public class ReviewController {
                             MarketDataService marketDataService,
                             DailyRecordService dailyRecordService,
                             ReviewExportService reviewExportService,
+                            ReviewAiDraftService reviewAiDraftService,
                             SurveillanceService surveillanceService,
                             SurveillanceMapper surveillanceMapper,
                             MarketStockMapper marketStockMapper,
@@ -109,6 +114,7 @@ public class ReviewController {
         this.marketDataService = marketDataService;
         this.dailyRecordService = dailyRecordService;
         this.reviewExportService = reviewExportService;
+        this.reviewAiDraftService = reviewAiDraftService;
         this.surveillanceService = surveillanceService;
         this.surveillanceMapper = surveillanceMapper;
         this.marketStockMapper = marketStockMapper;
@@ -290,6 +296,19 @@ public class ReviewController {
     @GetMapping("/export")
     public ApiResponse<ReviewExportVO> export(Authentication auth, @RequestParam String date) {
         return ApiResponse.ok(reviewExportService.reviewDoc(userId(auth), parse(date)));
+    }
+
+    /**
+     * 【AI 草稿】：把当天的系统读数交给模型，只让它组织措辞，拿回一段【一】「核心定性」的草稿。
+     * 数值全部由系统回填（模型侧看不到任何一个数），产出只在返回值里——不写库、不进留痕、
+     * 不动他自己那行 {@code ✍️}。
+     *
+     * <p>挂在 POST 上是刻意的：一次外呼有延迟也有代价，不该由「打开文档」触发；
+     * 而 {@code GET /api/review/export} 那份文档按同一条件必须逐字节相同，把模型塞进去就破了。
+     */
+    @PostMapping("/ai-draft")
+    public ApiResponse<ReviewAiDraftVO> aiDraft(Authentication auth, @RequestParam String date) {
+        return ApiResponse.ok(reviewAiDraftService.draft(userId(auth), parse(date)));
     }
 
     /**

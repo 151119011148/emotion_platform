@@ -100,9 +100,14 @@ public final class ReviewImportParser {
     /**
      * 卖价/卖量 是「当日了结」，与 成本/现价/数量 一样可省；必填的仍是 动作/应做/纪律。
      * 标签匹配要求前一字符是空白（见 {@link #split}），所以「卖价」不会被「现价」抢走，反之亦然。
+     *
+     * <p>预案/高开/炸板/低开/跌停 是次日怎么处理的那五格，同样可选。多认五个标签的代价照旧是
+     * 「值里别出现别的标签词」这条硬规则：{@code 应做 跌停清} 会被切成 应做空 + 跌停清，
+     * 而 {@code 应做跌停清} 不会——标签词只有紧跟在空白后面才算边界，所以值<b>开头</b>别是另一个标签。
      */
-    private static final List<String> POSITION_LABELS =
-            Arrays.asList("成本", "现价", "数量", "卖价", "卖量", "浮动", "动作", "应做", "纪律");
+    private static final List<String> POSITION_LABELS = Arrays.asList(
+            "成本", "现价", "数量", "卖价", "卖量", "浮动", "动作", "应做", "纪律",
+            "预案", "高开", "炸板", "低开", "跌停");
     private static final List<String> THEME_LABELS = Arrays.asList("强度", "状态", "龙头");
     private static final List<String> PLAN_LABELS = Arrays.asList("概率", "条件");
     private static final List<String> INDEX_LABELS = Arrays.asList("收盘", "涨跌");
@@ -378,7 +383,8 @@ public final class ReviewImportParser {
         String missing = firstMissing(seg.labels, "动作", "应做", "纪律");
         if (missing != null) {
             doc.addError(lineNo, "持仓", "缺标签 " + missing,
-                    "成本… 现价… 数量… 卖价… 卖量… 浮动… 动作… 应做… 纪律…（只有后三个必填）");
+                    "成本… 现价… 数量… 卖价… 卖量… 浮动… 动作… 应做… 纪律…（只有后三个必填），"
+                            + "次日预案再往后备 预案… 高开… 炸板… 低开… 跌停…");
             return;
         }
         BigDecimal cost = numberOrNull(doc, lineNo, "持仓", seg, "成本");
@@ -404,7 +410,9 @@ public final class ReviewImportParser {
         }
         doc.getPositions().add(new ReviewDoc.PositionRow(lineNo, code, head[1],
                 cost, current, qty, sellPrice, sellQty, flt,
-                seg.labels.get("动作"), seg.labels.get("应做"), discipline));
+                seg.labels.get("动作"), seg.labels.get("应做"), discipline,
+                seg.labels.get("预案"), seg.labels.get("高开"), seg.labels.get("炸板"),
+                seg.labels.get("低开"), seg.labels.get("跌停")));
     }
 
     private static void parseTheme(ReviewDoc doc, int lineNo, String value) {
@@ -710,7 +718,8 @@ public final class ReviewImportParser {
     private static String exampleOf(String key) {
         switch (key) {
             case "持仓":
-                return "002229 鸿博股份 成本11.17 现价12.12 数量1000 卖价13.2 卖量1000 浮动+8.5 动作未动 应做竞价清仓 纪律违约";
+                return "002229 鸿博股份 成本11.17 现价12.12 数量1000 卖价13.2 卖量1000 浮动+8.5 动作未动 "
+                        + "应做竞价清仓 纪律违约 预案竞价减半 高开减半 炸板板砸 低开竞价走 跌停割";
             case "题材":
                 return "液冷服务器 强度70 状态扩散 龙头002909 集泰股份";
             case "预判":

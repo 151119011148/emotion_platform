@@ -115,3 +115,18 @@ market:
     list-base: http://push2delay.eastmoney.com
     # 异动监管公告：必须带 ann_type=A，且服务端过滤参数一律被静默忽略，判类别只能在客户端按类目码
     ann-base: https://np-anotice-stock.eastmoney.com
+
+# ---- 复盘 AI 草稿（阿里千问 / DashScope 兼容模式）----
+ai:
+  # 一次模型补全正常就要十几秒，绝不能套用 market 那套三秒半的读超时
+  connect-timeout-ms: 5000
+  read-timeout-ms: 60000
+  qwen:
+    base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    model: qwen-plus
+    temperature: 0.7
+    max-tokens: 400
+    # 空串也要能启动：没配 key 时 /ai-draft 直接回一句「没配 key」，别的接口不受影响。
+    # key 只有两条来路——生产的环境变量 QWEN_API_KEY，或本机不入库的 application-local.yml；
+    # 仓库是公开的，明文写在这里或代码里就等于永久公开。
+    api-key: ${QWEN_API_KEY:}

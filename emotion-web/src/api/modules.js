@@ -238,6 +238,9 @@ export const reviewApi = {
   status: (date) => api.get('/review/fetch/status', { params: { date }, skipErrorToast: true }),
   detail: (date) => api.get('/review/detail', { params: { date }, timeout: 25000, skipErrorToast: true }),
   exportDoc: (date) => api.get('/review/export', { params: { date }, timeout: 30000 }),
+  // 【AI 草稿】：一次模型外呼，数字全由系统回填，产出只是草稿——不写库、不动 ✍️ 那行。
+  // 超时给到 90s：服务端等上游最长 60s，别让浏览器先掐断反而以为失败了。
+  aiDraft: (date) => api.post('/review/ai-draft', null, { params: { date }, timeout: 90000 }),
   save: (data) => api.post('/review/save', data, { timeout: 25000 }),
   // T7 无自动源时人工补录监管：{code, name, kind, title, date}
   manualSurveillance: (data) => api.post('/surveillance/manual', data),

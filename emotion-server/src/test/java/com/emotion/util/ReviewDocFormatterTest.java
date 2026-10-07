@@ -1,6 +1,8 @@
 package com.emotion.util;
 
+import com.emotion.ai.ReviewAiPrompt;
 import com.emotion.entity.Anchor;
+import com.emotion.entity.DailyBar;
 import com.emotion.entity.DailyRecord;
 import com.emotion.entity.IndustrySnapshot;
 import com.emotion.entity.IndexClose;
@@ -16,7 +18,9 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -375,6 +379,67 @@ class ReviewDocFormatterTest {
         assertFalse(section(md, "【七、", "【九、").contains("跌停≥30 家"), md);
     }
 
+    /**
+     * 台账的 current_price 只在<b>录入当天</b>对得上：结转行是从上一天整行搬来的，
+     * 写侧回填又只补 NULL（{@code needPrice = getCurrentPrice() == null}），
+     * 于是 9/30 那份导出把 9/28 的 10.65 当成当天收盘印了出来。现价必须按当天明细覆盖，
+     * 浮动跟着覆盖后的价重算——一行里价和对不上，比数旧更坏。
+     */
+    @Test
+    void dayCloseOverridesTheCarriedForwardLedgerPrice() {
+        Model m = rich();
+        m.dayCloses.put("002909", new BigDecimal("100.80"));
+
+        String four = section(ReviewDocFormatter.render(m), "【四、", "【五、");
+
+        assertTrue(four.contains("| 源杰科技 002909 | 88.00 | 100.80 | 89.10 | 1000 | +14.55% |"), four);
+        assertFalse(four.contains("90.50"), "台账那个旧价不该再出现：\n" + four);
+        assertFalse(four.contains("+2.84%"), four);
+        assertFalse(four.contains("†"), "这天有盘面明细，不该标缺数：\n" + four);
+    }
+
+    /** 这天不在任何池里 = 库里没有它的当日收盘价。宁可标出来"这是台账带过来的价"，不装作那是今天的收盘。 */
+    @Test
+    void ledgerPriceIsMarkedWhenTheDayHasNoPoolRow() {
+        Model m = rich();
+        m.dayCloses.remove("001234");
+
+        String md = ReviewDocFormatter.render(m);
+
+        String four = section(md, "【四、", "【五、");
+        assertTrue(four.contains("| 新赛股份 001234 | — | 9.90† |"), four);
+        assertTrue(four.contains("带 † 的那几只这天不在任何池里"), four);
+        assertTrue(section(md, "【九、", "【十、").contains("| 持仓位 | 新赛股份 001234（现价 9.90†） |"), md);
+    }
+
+    // ---- 【七】指数关键位 ----
+
+    /**
+     * 以前这一句写的是"库里没有日内高低点"——假话：{@code t_daily_bar} 存了四价。
+     * 9/30 那天沪指 开 3839.25 / 高 3851.22 / 低 3833.09 就在库里。
+     */
+    @Test
+    void indexKeyLevelCarriesTheDaysIntradayRange() {
+        Model m = rich();
+        m.indexBar = bar("3839.25", "3851.22", "3833.09");
+
+        String seven = section(ReviewDocFormatter.render(m), "【七、", "【八、");
+
+        assertTrue(seven.contains("上证昨收 3842.09｜当天日 K 开 3839.25 / 高 3851.22 / 低 3833.09"), seven);
+        assertFalse(seven.contains("库里没有日内高低点"), seven);
+    }
+
+    /** 日 K 是带保鲜期的缓存，不是档案：那天没被打开过就没有行，缺数照实说缺，不拿上一天的区间顶。 */
+    @Test
+    void missingIndexBarIsStatedAsMissing() {
+        Model m = rich();
+
+        String seven = section(ReviewDocFormatter.render(m), "【七、", "【八、");
+
+        assertTrue(seven.contains("上证昨收 3842.09（这天的沪指日 K 库里没缓存过，日内高低点取不到）"), seven);
+        assertFalse(seven.contains("库里没有日内高低点"), seven);
+    }
+
     /** 【六】是"上一天的预案在今天结案"，两个日期都得写出来，否则不知道在结哪一天的案。 */
     @Test
     void answerSectionNamesBothDates() {
@@ -476,6 +541,51 @@ class ReviewDocFormatterTest {
         assertTrue(first.endsWith("自己负责。\n"), "结尾该收在免责声明");
     }
 
+    // ---- AI 草稿的令牌表 ----
+
+    /**
+     * 词表解释不了的令牌发出去就是让模型按名字猜，所以这条是两边的接缝：
+     * {@code aiFacts} 加一个新键而忘了在 {@link com.emotion.ai.ReviewAiPrompt.GLOSSARY} 里解释，这里先红。
+     */
+    @Test
+    void everyAiFactTokenHasAnExplanationInThePrompt() {
+        for (String key : ReviewDocFormatter.aiFacts(rich()).keySet()) {
+            assertTrue(ReviewAiPrompt.GLOSSARY.containsKey(key), "令牌没解释：" + key);
+        }
+    }
+
+    /** 值必须由系统按正文那套格式化好；破折号是"没有这个数"，发给模型等于让它填一个。 */
+    @Test
+    void aiFactsCarryFormattedReadingsAndNeverADash() {
+        Map<String, String> f = ReviewDocFormatter.aiFacts(rich());
+
+        assertEquals("44°", f.get("温度"));
+        assertEquals("1980.5 亿", f.get("成交额"));
+        assertEquals("66", f.get("涨停"));
+        assertEquals("光通信/CPO", f.get("主线"));
+        assertEquals("剑桥科技 · 加速", f.get("总龙头"));
+        assertEquals("3842.09（-0.72%）", f.get("上证"));
+        for (Map.Entry<String, String> e : f.entrySet()) {
+            assertFalse(e.getValue().contains("—"), "缺数当值发出去：" + e.getKey() + "=" + e.getValue());
+        }
+    }
+
+    @Test
+    void aiFactsLeaveOutWhatTheSystemDidNotRead() {
+        Model only = new Model();
+        only.date = FRIDAY;
+        Map<String, String> bare = ReviewDocFormatter.aiFacts(only);
+        assertEquals(2, bare.size(), bare.keySet().toString());
+        assertTrue(bare.containsKey("日期"), bare.keySet().toString());
+
+        Model noPrev = rich();
+        noPrev.prev = null;
+        Map<String, String> f = ReviewDocFormatter.aiFacts(noPrev);
+        assertFalse(f.containsKey("昨温度"), f.keySet().toString());
+        assertFalse(f.containsKey("温度差"), f.keySet().toString());
+        assertTrue(f.containsKey("温度"), f.keySet().toString());
+    }
+
     // ---- fixture ----
 
     /** 一块数据都不缺的一天：十一节全有内容，派生数也算得出来。 */
@@ -509,6 +619,12 @@ class ReviewDocFormatterTest {
         m.themes = Arrays.asList(new ThemeRow(1, "光通信", 88, "主升", "603843", "宋都股份"));
         m.poolZt = 66;
         m.poolZb = 24;
+        // 三只持仓当天都有盘面明细：现价取当日收盘，台账值不参与，所以这里给的就是台账那几个数，
+        // 免得"数据齐的一天"这个 fixture 里混进 † 那种缺数分支。缺数由各自的用例造。
+        m.dayCloses = new HashMap<>();
+        m.dayCloses.put("603843", new BigDecimal("13.400"));
+        m.dayCloses.put("002909", new BigDecimal("90.50"));
+        m.dayCloses.put("001234", new BigDecimal("9.900"));
         // 一字 9 家：故意不等于上面三行板块快照的一字合计（4+2+1=7）。快照只落前 5 个板块，
         // 拿它的合计当全市场一字数就是 9/30 那次少算的来路，所以这里两个数必须错开。
         m.metrics = ReviewDocMetrics.from(m.today, m.prev, m.poolZt, m.poolZb, m.stocks, 9);
@@ -539,6 +655,18 @@ class ReviewDocFormatterTest {
         ic.setClosePrice(new BigDecimal(close));
         ic.setChangePct(new BigDecimal(changePct));
         return ic;
+    }
+
+    /** 沪指当天日 K：t_daily_bar 的 symbol 带市场前缀，裸 000001 是平安银行，别拿错命名空间。 */
+    private static DailyBar bar(String open, String high, String low) {
+        DailyBar d = new DailyBar();
+        d.setSymbol("sh000001");
+        d.setTradeDate(FRIDAY);
+        d.setOpenPrice(new BigDecimal(open));
+        d.setHighPrice(new BigDecimal(high));
+        d.setLowPrice(new BigDecimal(low));
+        d.setClosePrice(new BigDecimal("3842.090"));
+        return d;
     }
 
     /** 梯队：5 条档、6 只票，其中 4 板两只是同行业还是不同行业都影响渲染断言，这里给不同的。 */

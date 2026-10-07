@@ -1,6 +1,7 @@
 package com.emotion.util;
 
 import com.emotion.entity.Anchor;
+import com.emotion.entity.DailyBar;
 import com.emotion.entity.DailyRecord;
 import com.emotion.entity.IndustrySnapshot;
 import com.emotion.entity.IndexClose;
@@ -15,6 +16,9 @@ import java.math.RoundingMode;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -65,6 +69,14 @@ public final class ReviewDocFormatter {
         /** 涨停池 / 炸板池家数（封板率的分母）。null = 这天没有盘面明细。 */
         public Integer poolZt;
         public Integer poolZb;
+        /**
+         * 标的代码 → <b>当天</b>收盘价（{@code t_market_stock.close_price}）。
+         * 持仓那三节的「现价」以它为准；台账里的 {@code current_price} 结转时会带着录入当天的价
+         * 一路不变，所以这里没有的行才退回台账值并标 {@code †}。空 map = 这天没有盘面明细。
+         */
+        public Map<String, BigDecimal> dayCloses = new HashMap<>();
+        /** 沪指当天的日 K（{@code t_daily_bar}）：【七】的日内高低点只有这一条路。null = 库里没缓存过。 */
+        public DailyBar indexBar;
         /** 派生读数。服务层用 {@link ReviewDocMetrics#from} 算好后放进；null 时渲染层按空处理。 */
         public ReviewDocMetrics metrics;
         /** 下一交易日（按交易日历）。null 时渲染层回落到"跳过周末"的日历近似。 */
@@ -313,17 +325,28 @@ public final class ReviewDocFormatter {
         // 卖价/卖出量是「当日了结」那一笔的真实成交，与现价（收盘）并列摆出来，两者不等就是差价。
         sb.append("| 标的 | 成本 | 现价 | 卖价 | 卖出量 | 浮动 | 动作 | 应做 | 纪律 |\n")
                 .append("|---|---|---|---|---|---|---|---|---|\n");
+        boolean stale = false;
         for (Position p : m.positions) {
+            BigDecimal close = dayClose(m, p);
+            stale |= close == null && p.getCurrentPrice() != null;
+            BigDecimal floatPct = close == null ? p.getFloatPct() : floatOf(p.getCostPrice(), close);
             sb.append("| ").append(cell(p.getStockName())).append(" ").append(cell(p.getStockCode())).append(" | ")
                     .append(price(p.getCostPrice())).append(" | ")
-                    .append(price(p.getCurrentPrice())).append(" | ")
+                    .append(shownPrice(m, p)).append(" | ")
                     .append(price(p.getSellPrice())).append(" | ")
                     .append(p.getSellQty() == null ? "—" : plain(p.getSellQty())).append(" | ")
-                    .append(p.getFloatPct() == null ? "—" : signed(p.getFloatPct(), "%")).append(" | ")
+                    .append(floatPct == null ? "—" : signed(floatPct, "%")).append(" | ")
                     .append(cell(p.getAction())).append(" | ")
                     .append(cell(p.getPlannedAction())).append(" | ")
                     .append(cell(p.getDiscipline())).append(" |\n");
         }
+        sb.append("\n> 现价＝<b>当日收盘</b>（当天盘面明细里的 close_price），浮动按它对成本现算，")
+                .append("台账里结转过来的旧价不进这一列。");
+        if (stale) {
+            sb.append("带 † 的那几只这天不在任何池里、库里没有它的当日收盘价，只能沿用台账那一行的值——"
+                    + "那通常是买入当天的价，别当今天的收盘读。");
+        }
+        sb.append("\n");
         return prompt(sb, "每只一句处置评价（格局没破 / 平盘走 / 该清没清）；"
                 + "卖了就记成交均价，别拿收盘价当卖价。");
     }
@@ -401,14 +424,31 @@ public final class ReviewDocFormatter {
                 + "）不一致就写为什么不一致。");
     }
 
-    /** 指数关键位只能给到"昨收"这个层级——库里只存收盘点位，没有日内高低点和历史分位。 */
+    /**
+     * 指数关键位：收盘点位来自 {@code t_index_close}，<b>当天的日内开高低来自 {@code t_daily_bar}
+     * 的沪指日 K</b>（{@code t_index_close} 只有收盘＋涨跌幅，四价在它那里没有）。
+     *
+     * <p>日 K 是带保鲜期的缓存，只有被打开过的标的才会落进行，缺行就说缺——
+     * 关键位是每天要看的东西，拿"没有"比拿上一天的区间顶上当今天的好。
+     */
     private static String indexHint(Model m) {
         IndexClose sh = findIndex(m.indexes, "000001");
-        if (sh == null || sh.getClosePrice() == null) {
-            return "—（库里只有收盘点位，日内低点/年内新低无从算）";
+        DailyBar bar = m.indexBar;
+        boolean hasClose = sh != null && sh.getClosePrice() != null;
+        boolean hasBar = bar != null && (bar.getHighPrice() != null || bar.getLowPrice() != null);
+        if (!hasClose && !hasBar) {
+            return "—（这天既没有上证收盘点位，也没有沪指日 K）";
         }
-        return "上证昨收 " + plain(sh.getClosePrice())
-                + "（关键位由你定；库里没有日内高低点，破不破得你自己盯）";
+        StringBuilder sb = new StringBuilder("上证昨收 ").append(hasClose ? plain(sh.getClosePrice()) : "—");
+        if (hasBar) {
+            sb.append("｜当天日 K 开 ").append(plain(bar.getOpenPrice()))
+                    .append(" / 高 ").append(plain(bar.getHighPrice()))
+                    .append(" / 低 ").append(plain(bar.getLowPrice()));
+        } else {
+            sb.append("（这天的沪指日 K 库里没缓存过，日内高低点取不到）");
+        }
+        sb.append("；关键位由你定，日 K 只到日线级，盘中分钟级的下探库里没有");
+        return sb.toString();
     }
 
     // ---- 【八、次日三路径】 ----
@@ -463,7 +503,7 @@ public final class ReviewDocFormatter {
             }
             rows++;
             sb.append("| 持仓位 | ").append(cell(p.getStockName())).append(" ").append(cell(p.getStockCode()))
-                    .append("（现价 ").append(price(p.getCurrentPrice())).append("）")
+                    .append("（现价 ").append(shownPrice(m, p)).append("）")
                     .append(" | ✍️ |\n");
         }
         if (rows == 0) {
@@ -488,7 +528,7 @@ public final class ReviewDocFormatter {
                 .append("|---|---|---|---|---|---|---|\n");
         for (Position p : ps) {
             sb.append("| ").append(cell(p.getStockName())).append(" ").append(cell(p.getStockCode())).append(" | ")
-                    .append(price(p.getCurrentPrice())).append(" | ")
+                    .append(shownPrice(m, p)).append(" | ")
                     .append(cell(p.getPlanOpen())).append(" | ")
                     .append(cell(p.getPlanBreak())).append(" | ")
                     .append(cell(p.getPlanLow())).append(" | ")
@@ -547,6 +587,130 @@ public final class ReviewDocFormatter {
         return s;
     }
 
+    // ---- AI 草稿的令牌表 ----
+
+    /** 指数代码 → 令牌名。名字里不带数字（{@code {科创}} 而非 {@code {科创50}}），理由见 {@link #aiFacts}。 */
+    private static final Map<String, String> AI_INDEX_TOKEN = aiIndexTokens();
+
+    private static Map<String, String> aiIndexTokens() {
+        Map<String, String> m = new HashMap<String, String>();
+        m.put("000001", "上证");
+        m.put("399001", "深证");
+        m.put("399006", "创业板");
+        m.put("000688", "科创");
+        m.put("899050", "北证");
+        return Collections.unmodifiableMap(m);
+    }
+
+    /**
+     * AI 草稿可以引用的<b>全部事实</b>：令牌名 → 系统算好、格式化好的值。
+     *
+     * <p>模型侧永远只看到令牌名和它的语义（{@link com.emotion.ai.ReviewAiPrompt}），看不到这里的
+     * value——它没有数可抄，也就没有数可编；数是在回填那一步才进句子的，走的是和正文同一条
+     * 格式化管线（{@link #plain} / {@link #signed} / {@link #pct} / {@link #vol}），所以草稿里的
+     * 「52.8°」和【一】表格里的「52.8」不可能对不上。
+     *
+     * <p><b>读不到的键整条不进表</b>，而不是给一个 {@code —}：提示里写「温度 {@code {温度} }」而回填
+     * 出来是破折号，比干脆不提温度更容易被当成一个真读数读进去。
+     *
+     * <p>令牌名一律<b>不含阿拉伯数字</b>：数字门卫查的是<b>回填之前</b>的模型原文，令牌自己带数字
+     * 会把「老老实实引用了令牌」的好草稿误杀成违规。
+     */
+    public static Map<String, String> aiFacts(Model m) {
+        Map<String, String> f = new LinkedHashMap<String, String>();
+        if (m.date != null) {
+            put(f, "日期", md(m.date) + "（" + weekday(m.date) + "）");
+            LocalDate next = nextDate(m);
+            if (next != null) {
+                put(f, "次日", md(next) + "（" + weekday(next) + "）");
+            }
+        }
+        DailyRecord r = m.today;
+        DailyRecord p = m.prev;
+        ReviewDocMetrics x = metrics(m);
+        if (r == null) {
+            return f;
+        }
+        put(f, "温度", r.getTemperature() == null ? null : plain(r.getTemperature()) + "°");
+        put(f, "总分", r.getTotalScore() == null ? null : plain(r.getTotalScore()) + " 分");
+        put(f, "进分维", r.getScoredDims() == null ? null : r.getScoredDims() + "/9 维");
+        put(f, "阶段", stageLabel(r));
+        if (p != null) {
+            put(f, "昨温度", p.getTemperature() == null ? null : plain(p.getTemperature()) + "°");
+            put(f, "昨阶段", stageLabel(p));
+            if (r.getTemperature() != null && p.getTemperature() != null) {
+                put(f, "温度差", signed(r.getTemperature().subtract(p.getTemperature()), "°"));
+            }
+        }
+        put(f, "成交额", r.getTotalVolume() == null ? null : vol(r.getTotalVolume()));
+        put(f, "成交额差", x.volumeDelta == null ? null : signed(x.volumeDelta, " 亿"));
+        put(f, "涨家", plain(r.getUpCount()));
+        put(f, "跌家", plain(r.getDownCount()));
+        put(f, "红盘率", x.redRate == null ? null : pct(x.redRate));
+        if (p != null) {
+            put(f, "昨涨停", plain(p.getLimitUpCount()));
+            put(f, "昨跌停", plain(p.getLimitDownCount()));
+            BigDecimal prevRate = rate(p);
+            put(f, "昨红盘率", prevRate == null ? null : plain(prevRate) + "%");
+        }
+        put(f, "涨停", plain(r.getLimitUpCount()));
+        put(f, "跌停", plain(r.getLimitDownCount()));
+        put(f, "最高板", r.getMaxConsecutiveLimit() == null ? null
+                : r.getMaxConsecutiveLimit() + " 板");
+        put(f, "连板家数", x.lianbanCount == null ? null : x.lianbanCount + " 家二板及以上");
+        put(f, "一字", x.yiziCount == null ? null : x.yiziCount + " 家");
+        put(f, "炸板", m.poolZb == null ? null : m.poolZb + " 家");
+        put(f, "封板率", x.sealRate == null ? null : pct(x.sealRate));
+        if (m.stocks != null && m.stocks.isAvailable() && m.stocks.getBigLoss() != null) {
+            put(f, "大面", m.stocks.getBigLoss().size() + " 家");
+        }
+        for (IndexClose ic : safeIndexes(m)) {
+            String token = AI_INDEX_TOKEN.get(ic.getIndexCode());
+            if (token == null || ic.getClosePrice() == null) {
+                continue;
+            }
+            f.put(token, plain(ic.getClosePrice())
+                    + (ic.getChangePct() == null ? "" : "（" + signed(ic.getChangePct(), "%") + "）"));
+        }
+        put(f, "主线", blankToNull(r.getMainTheme()));
+        if (notBlank(r.getLeadingStock())) {
+            put(f, "总龙头", leaderWithStatus(r));
+        }
+        put(f, "中军", blankToNull(r.getMidCapStock()));
+        List<Position> ps = positionList(m);
+        if (!ps.isEmpty()) {
+            List<String> names = new ArrayList<String>();
+            for (Position pos : ps) {
+                if (notBlank(pos.getStockName())) {
+                    names.add(pos.getStockName());
+                }
+            }
+            put(f, "持仓", names.isEmpty() ? null : String.join("、", names));
+            put(f, "持仓只数", names.isEmpty() ? null : names.size() + " 只");
+        }
+        return f;
+    }
+
+    /** 只在值不是 {@code null} 也不是空串时入表——缺数就是「这条不提」。 */
+    private static void put(Map<String, String> f, String token, String value) {
+        if (notBlank(value)) {
+            f.put(token, value);
+        }
+    }
+
+    private static String stageLabel(DailyRecord r) {
+        String label = CycleStageMachine.label(r.getStage(), r.getStagePhase(), r.getStageSeq());
+        return label.isEmpty() ? null : label;
+    }
+
+    private static List<IndexClose> safeIndexes(Model m) {
+        return m.indexes == null ? new ArrayList<IndexClose>() : m.indexes;
+    }
+
+    private static String blankToNull(String s) {
+        return notBlank(s) ? s : null;
+    }
+
     // ---- 取值 / 格式化 ----
 
     private static ReviewDocMetrics metrics(Model m) {
@@ -588,6 +752,36 @@ public final class ReviewDocFormatter {
     /** 价格是 DECIMAL(10,3) 补出来的（11.170）；A 股报价两位，就按两位写。 */
     private static String price(BigDecimal v) {
         return v == null ? "—" : v.setScale(2, RoundingMode.HALF_UP).toPlainString();
+    }
+
+    /**
+     * 这行持仓<b>当天</b>的收盘价：没有盘面明细行就是 null——缺数继续按缺数走，
+     * 不拿上一天的价冒充今天的。
+     */
+    private static BigDecimal dayClose(Model m, Position p) {
+        if (m.dayCloses == null || p.getStockCode() == null) {
+            return null;
+        }
+        return m.dayCloses.get(p.getStockCode());
+    }
+
+    /** 台账里的 current_price 只在录入当天一定对得上，结转过来就成了旧价，所以标 †。 */
+    private static String shownPrice(Model m, Position p) {
+        BigDecimal close = dayClose(m, p);
+        if (close != null) {
+            return price(close);
+        }
+        BigDecimal stored = p.getCurrentPrice();
+        return stored == null ? "—" : price(stored) + "†";
+    }
+
+    /** 与写侧 {@code ReviewLedgerService.floatPctOf} 同式（%、2 位、HALF_UP）；那个是包内私有，这里不跨包引。 */
+    private static BigDecimal floatOf(BigDecimal cost, BigDecimal current) {
+        if (cost == null || current == null || cost.signum() <= 0) {
+            return null;
+        }
+        return current.subtract(cost).multiply(BigDecimal.valueOf(100))
+                .divide(cost, 2, RoundingMode.HALF_UP);
     }
 
     private static String breadth(Integer up, Integer down) {

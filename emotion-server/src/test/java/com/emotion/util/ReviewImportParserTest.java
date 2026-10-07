@@ -58,6 +58,39 @@ class ReviewImportParserTest {
         assertTrue(doc.errorsText().contains("卖价"), doc.errorsText());
     }
 
+    /**
+     * 次日预案那五格是台账【十、持仓处理】唯一的取数源，可选、各归各的列。
+     * 值紧跟标签（不留空格）时，值里的标签词不在空白后面，不会被当成段边界。
+     */
+    @Test
+    void nextDayPlanLabelsAreOptionalAndEachLandsOnItsOwnColumn() {
+        ReviewDoc none = ReviewImportParser.parse(
+                "```meta\ndate: 2026-09-03\n持仓: 002229 鸿博股份 动作未动 应做竞价清仓 纪律违约\n```", TODAY);
+        assertFalse(none.hasErrors(), none.errorsText());
+        ReviewDoc.PositionRow bare = none.getPositions().get(0);
+        assertNull(bare.getNextDayPlan(), "没写预案就是没说，不能落成空串占掉那一格");
+        assertNull(bare.getPlanOpen());
+        assertNull(bare.getPlanFall());
+
+        ReviewDoc full = ReviewImportParser.parse(
+                "```meta\ndate: 2026-09-03\n持仓: 002229 鸿博股份 动作未动 应做竞价清仓 纪律违约"
+                        + " 预案竞价减半 高开减半 炸板板砸 低开竞价走 跌停割\n```", TODAY);
+        assertFalse(full.hasErrors(), full.errorsText());
+        ReviewDoc.PositionRow r = full.getPositions().get(0);
+        assertEquals("竞价减半", r.getNextDayPlan());
+        assertEquals("减半", r.getPlanOpen());
+        assertEquals("板砸", r.getPlanBreak());
+        assertEquals("竞价走", r.getPlanLow());
+        assertEquals("割", r.getPlanFall());
+
+        ReviewDoc glued = ReviewImportParser.parse(
+                "```meta\ndate: 2026-09-03\n持仓: 002229 鸿博股份 动作未动 应做竞价清仓 纪律违约"
+                        + " 预案高开减半 高开减半\n```", TODAY);
+        assertFalse(glued.hasErrors(), glued.errorsText());
+        assertEquals("高开减半", glued.getPositions().get(0).getNextDayPlan(),
+                "「预案高开减半」里的高开紧挨着预案，不该另起一段");
+    }
+
     /** 只喂一行持仓时的最小 meta 外壳：持仓/题材这些多行键必须写在 meta 围栏块里才认。 */
     private static String meta() {
         return "```meta\ndate: 2026-09-03\n";

@@ -175,6 +175,13 @@ public class ReviewImportWriter {
             p.setAction(r.getAction());
             p.setPlannedAction(r.getPlannedAction());
             p.setDiscipline(r.getDiscipline().isEmpty() ? null : r.getDiscipline());
+            // 次日预案：md 没写这格 = 这次没说，但整表替换是删除重建，不写就会把复盘页上
+            // 填好的四档一起抹掉——所以导出模板一定得把这几格带出来（ReviewMdFormatter#positionLine）。
+            p.setNextDayPlan(nullIfBlank(r.getNextDayPlan()));
+            p.setPlanOpen(nullIfBlank(r.getPlanOpen()));
+            p.setPlanBreak(nullIfBlank(r.getPlanBreak()));
+            p.setPlanLow(nullIfBlank(r.getPlanLow()));
+            p.setPlanFall(nullIfBlank(r.getPlanFall()));
             rows.add(p);
         }
         return rows;

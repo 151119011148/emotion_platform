@@ -113,7 +113,8 @@ public final class ReviewMdFormatter {
         }
         for (ReviewDoc.PositionRow r : doc.getPositions()) {
             addRow(doc, lines, positionLine(r), "持仓 " + safe(r.getCode()) + "："
-                    + "库里缺代码或名称，或者某个值里撞上了 成本/现价/数量/卖价/卖量/浮动/动作/应做/纪律 这些标签词");
+                    + "库里缺代码或名称，或者某个值里撞上了 成本/现价/数量/卖价/卖量/浮动/动作/应做/纪律"
+                    + "/预案/高开/炸板/低开/跌停 这些标签词");
         }
         for (ReviewDoc.ThemeRow r : doc.getThemes()) {
             addRow(doc, lines, themeLine(r), "题材 " + safe(r.getTheme()) + "：缺题材名，"
@@ -154,6 +155,11 @@ public final class ReviewMdFormatter {
         text(sb, "动作", r.getAction());
         text(sb, "应做", r.getPlannedAction());
         text(sb, "纪律", r.getDiscipline());
+        optText(sb, "预案", r.getNextDayPlan());
+        optText(sb, "高开", r.getPlanOpen());
+        optText(sb, "炸板", r.getPlanBreak());
+        optText(sb, "低开", r.getPlanLow());
+        optText(sb, "跌停", r.getPlanFall());
         return sb.toString();
     }
 
@@ -210,6 +216,18 @@ public final class ReviewMdFormatter {
     /** 必填标签即使值为空也要写出来——解析器判的是「标签在不在」，漏掉标签就是坏行。 */
     private static void text(StringBuilder sb, String label, String value) {
         sb.append(' ').append(label).append(isBlank(value) ? "" : clean(value));
+    }
+
+    /**
+     * 可选文本标签（次日预案那五格）：库里没值就整段不出现，写了空值会让解析器当成「标签缺值」。
+     *
+     * <p>值和标签之间<b>不留空格</b>：只有紧跟空白的标签词才算段的边界，所以
+     * {@code 预案高开减半} 回读还是「预案＝高开减半」，写成 {@code 预案 高开减半} 就会被 高开 抢走。
+     */
+    private static void optText(StringBuilder sb, String label, String value) {
+        if (!isBlank(value)) {
+            sb.append(' ').append(label).append(clean(value));
+        }
     }
 
     /** 可选数字标签：库里没值就整段不出现。必填的那些（强度 / 概率）在各自的方法里硬写。 */

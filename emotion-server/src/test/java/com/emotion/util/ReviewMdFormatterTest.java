@@ -132,7 +132,8 @@ class ReviewMdFormatterTest {
         ReviewDoc doc = new ReviewDoc();
         doc.setDate(LocalDate.of(2026, 9, 4));
         doc.getPositions().add(new ReviewDoc.PositionRow(0, "002229", "鸿博股份", null, null, null,
-                null, null, null, "打板买入", "止损位 成本 之上出", "遵守"));
+                null, null, null, "打板买入", "止损位 成本 之上出", "遵守",
+                null, null, null, null, null));
 
         String md = ReviewMdFormatter.render(doc, null, null);
         ReviewDoc back = ReviewImportParser.parse(md, TODAY);
@@ -141,6 +142,48 @@ class ReviewMdFormatterTest {
                 "「成本」落在 应做 的值里会被当成标签，这一行只能降级：\n" + md);
         assertFalse(back.hasErrors(), back.errorsText());
         assertTrue(doc.getWarnings().get(0).contains("不是数字"), doc.getWarnings().toString());
+    }
+
+    /**
+     * 次日预案五格必须带得出来：{@code replaceForDate} 是删除重建，导出模板少一列，
+     * 导入回来就把复盘页上填好的四档抹成一列 NULL。
+     */
+    @Test
+    void nextDayPlanLabelsRoundTrip() {
+        ReviewDoc doc = new ReviewDoc();
+        doc.setDate(LocalDate.of(2026, 9, 4));
+        doc.getPositions().add(new ReviewDoc.PositionRow(0, "002229", "鸿博股份", null, null, null,
+                null, null, null, "未动", "竞价清仓", "遵守",
+                "竞价减半", "减半", "板砸", "竞价走", "割"));
+
+        String md = ReviewMdFormatter.render(doc, null, null);
+        ReviewDoc back = ReviewImportParser.parse(md, TODAY);
+
+        assertTrue(md.contains("持仓: 002229 鸿博股份 动作未动 应做竞价清仓 纪律遵守"
+                + " 预案竞价减半 高开减半 炸板板砸 低开竞价走 跌停割"), md);
+        assertFalse(back.hasErrors(), back.errorsText());
+        assertTrue(back.getWarnings().isEmpty(), back.getWarnings().toString());
+        ReviewDoc.PositionRow r = back.getPositions().get(0);
+        assertEquals("竞价减半", r.getNextDayPlan());
+        assertEquals("减半", r.getPlanOpen());
+        assertEquals("板砸", r.getPlanBreak());
+        assertEquals("竞价走", r.getPlanLow());
+        assertEquals("割", r.getPlanFall());
+    }
+
+    /** 没填的档整段不出现：写了空标签会被当成「标签缺值」，读回来是一列空而不是「这次没说」。 */
+    @Test
+    void blankPlanLabelsAreLeftOutOfTheLine() {
+        ReviewDoc doc = new ReviewDoc();
+        doc.setDate(LocalDate.of(2026, 9, 4));
+        doc.getPositions().add(new ReviewDoc.PositionRow(0, "002229", "鸿博股份", null, null, null,
+                null, null, null, "未动", "竞价清仓", "遵守",
+                "", "减半", "", null, null));
+
+        String md = ReviewMdFormatter.render(doc, null, null);
+
+        assertTrue(md.contains("持仓: 002229 鸿博股份 动作未动 应做竞价清仓 纪律遵守 高开减半"),
+                "只留填了的那一档：\n" + md);
     }
 
     @Test

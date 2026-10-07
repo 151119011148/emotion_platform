@@ -201,6 +201,31 @@ class ReviewImportWriterTest {
         assertEquals(DAY, p.getTradeDate());
     }
 
+    /**
+     * 台账是整表替换（先删后插），md 里没这几格就等于把复盘页填好的四档抹掉。
+     * 所以这几列必须跟着 md 走，且「没写」和「写了空」都落 NULL——空串在页面上读回来是一格脏值。
+     */
+    @Test
+    void nextDayPlanColumnsRideThePositionRowSoTheReplaceDoesNotWipeThem() {
+        ReviewDoc with = docOf("date: 2026-09-03",
+                "持仓: 002229 鸿博股份 动作未动 应做竞价清仓 纪律违约"
+                        + " 预案竞价减半 高开减半 炸板板砸 低开竞价走 跌停割");
+        Position p = ReviewImportWriter.positionRows(2L, DAY, with,
+                Collections.<String, String>emptyMap()).get(0);
+        assertEquals("竞价减半", p.getNextDayPlan());
+        assertEquals("减半", p.getPlanOpen());
+        assertEquals("板砸", p.getPlanBreak());
+        assertEquals("竞价走", p.getPlanLow());
+        assertEquals("割", p.getPlanFall());
+
+        ReviewDoc empty = docOf("date: 2026-09-03",
+                "持仓: 002229 鸿博股份 动作未动 应做竞价清仓 纪律违约 预案 高开减半");
+        Position q = ReviewImportWriter.positionRows(2L, DAY, empty,
+                Collections.<String, String>emptyMap()).get(0);
+        assertNull(q.getNextDayPlan(), "预案 写了空值 = 清空那一格，不该留下空串");
+        assertEquals("减半", q.getPlanOpen());
+    }
+
     /** 没写 持仓 = 这次没说，返回 null 让 Store 整块跳过；返回空表反而是"把那天清仓"。 */
     @Test
     void absentRepeatableKeysReturnNullSoTheStoreSkipsThem() {

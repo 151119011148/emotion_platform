@@ -21,6 +21,9 @@
       <el-button :loading="exportingDoc" :disabled="!form.tradeDate" @click="handleExportDoc">
         导出复盘文档
       </el-button>
+      <el-button :loading="aiDrafting" :disabled="!form.tradeDate" @click="handleAiDraft">
+        AI 草稿
+      </el-button>
     </div>
 
     <!-- ============ 外溢②：昨日（T-1）遗留决策 —— 只留一条入口，
@@ -562,6 +565,35 @@
         <el-button type="primary" :loading="savingSurv" @click="submitSurveillance">补录</el-button>
       </template>
     </el-dialog>
+    <!-- 【AI 草稿】：一次模型外呼的产物，只摆在这一栏。
+         他自己那行 ✍️ 不覆盖、不写库、不进留痕；数全部由系统回填，所以把令牌值一起列出来，
+         草稿里任何一个数都能在这一张表里对回出处。 -->
+    <el-dialog v-model="openAiDraft" :title="'AI 草稿 · ' + (aiDraft.date || form.tradeDate) + ' 核心定性'" width="680px">
+      <p v-if="aiDraft.draft" class="ai-draft-text">{{ aiDraft.draft }}</p>
+      <p v-else class="dim-muted">{{ aiDraft.message || '这次没有产出草稿。' }}</p>
+
+      <div v-if="aiDraft.warnings && aiDraft.warnings.length" class="ai-draft-warn">
+        <div v-for="(w, i) in aiDraft.warnings" :key="i">· {{ w }}</div>
+      </div>
+
+      <div v-if="aiDraft.facts && Object.keys(aiDraft.facts).length" class="ai-draft-facts">
+        <div class="ai-draft-facts-title">系统回填的数（{{ aiDraft.model }} 只看到左边那些名字）</div>
+        <table>
+          <tbody>
+            <tr v-for="(v, k) in aiDraft.facts" :key="k">
+              <td>{ {{ k }} }</td>
+              <td>{{ v }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <template #footer>
+        <span class="dim-muted" style="float: left">草稿是草稿，判断是你的——这一栏不写进 md，也不动 ✍️</span>
+        <el-button v-if="aiDraft.draft" type="primary" @click="copyAiDraft">复制草稿</el-button>
+        <el-button @click="openAiDraft = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -911,6 +943,38 @@ function saveFile(name, text) {
   const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }))
   const a = document.createElement('a'); a.href = url; a.download = name; a.click()
   URL.revokeObjectURL(url)
+}
+
+/* ---- 【AI 草稿】：一次模型外呼，只摆这一栏，不写库也不动 ✍️ ---- */
+const aiDrafting = ref(false)
+const openAiDraft = ref(false)
+const aiDraft = reactive({ date: '', model: '', draft: '', message: '', warnings: [], facts: {} })
+
+async function handleAiDraft() {
+  const date = form.tradeDate
+  if (!date) return
+  aiDrafting.value = true
+  openAiDraft.value = true
+  Object.assign(aiDraft, { date, model: '', draft: '', message: '生成中…（等模型回话，十几秒）', warnings: [], facts: {} })
+  try {
+    const vo = (await reviewApi.aiDraft(date)).data || {}
+    Object.assign(aiDraft, {
+      date: vo.date || date,
+      model: vo.model || '',
+      draft: vo.draft || '',
+      message: vo.message || (vo.draft ? '' : '这次没有产出草稿。'),
+      warnings: vo.warnings || [],
+      facts: vo.facts || {},
+    })
+  } catch (e) {
+    aiDraft.message = '草稿没生成：' + (e.response?.data?.message || e.message || '请求失败')
+  } finally { aiDrafting.value = false }
+}
+
+function copyAiDraft() {
+  navigator.clipboard?.writeText(aiDraft.draft).then(
+    () => ElMessage.success('草稿已复制，要不要进 md 由你定'),
+    () => ElMessage.warning('浏览器不给剪贴板，请手动选文字复制'))
 }
 
 /* ======================================================================= */
@@ -1596,6 +1660,13 @@ onUnmounted(() => window.removeEventListener('beforeunload', onBeforeUnload))
 /* ---- 持仓台账（P0/P1/P2 改版） ---- */
 /* dim-muted 之前只有类名没有规则（全项目就本页在用），这里补成真正的弱化文字 */
 .dim-muted { color: #7a8b9c; font-size: 12px; }
+.ai-draft-text { margin: 0 0 10px; font-size: 14px; line-height: 1.9; white-space: pre-wrap; color: #d7e3f0; }
+.ai-draft-warn { margin-bottom: 10px; font-size: 12px; line-height: 1.7; color: #ef9f27; }
+.ai-draft-facts { border-top: 1px solid #2d3748; padding-top: 8px; }
+.ai-draft-facts-title { font-size: 12px; color: #7a8b9c; margin-bottom: 6px; }
+.ai-draft-facts table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ai-draft-facts td { padding: 2px 8px 2px 0; border-bottom: 1px solid #1b2534; vertical-align: top; }
+.ai-draft-facts td:first-child { width: 42%; color: #7a8b9c; font-family: Menlo, Consolas, monospace; white-space: nowrap; }
 .dirty-tag { margin-left: 8px; font-size: 12px; color: #ef9f27; }
 .undo-chip { display: inline-flex; align-items: center; gap: 2px; margin-left: 12px; padding: 2px 4px 2px 10px;
   background: #16202e; border: 1px solid #2d3748; border-radius: 12px; font-size: 12px; color: #9fb3c8; }
