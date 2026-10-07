@@ -178,24 +178,41 @@
           <Stat :k="'涨停 / 炸板'" :v="nz(tianti.ztTotal) + ' / ' + nz(tianti.zbTotal)" />
           <Stat :k="'日内核心行业'" :v="tianti.mainIndustry || '—'" />
         </div>
-        <div v-for="lv in tianti.levels || []" :key="lv.board" class="tier-block" :class="{ gap: !(lv.rows || []).length }">
-          <div class="tier-head">
-            <span class="tier-board">{{ lv.board }} 板</span>
-            <span v-if="lv.layerLabel" class="tier-layer">{{ lv.layerLabel }}</span>
-            <span class="tier-count" v-if="lv.count != null">{{ lv.count }} 家</span>
-          </div>
-          <div v-if="(lv.rows || []).length" class="tier-rows">
-            <div v-for="r in lv.rows" :key="r.code" class="tier-stock">
-              <b v-if="r.manualLeader" class="star" title="人工总龙头">★</b>
-              <span class="ts-name">{{ r.name }}</span>
-              <span v-if="r.pattern" class="ts-pattern" :class="patternClass(r.pattern)">{{ patternText(r.pattern) }}</span>
-              <i v-if="r.role" class="ts-role">{{ r.roleLabel || r.role }}</i>
-              <span v-if="r.breakCount != null && r.breakCount > 0" class="ts-break" title="日内开板次数">{{ r.breakCount }}开</span>
+        <div class="ladder">
+          <div v-for="g in ladderGroups" :key="g.label" class="lad-band" :class="g.cls">
+            <div class="lad-band-head">
+              <span class="lad-tier">{{ g.label }}</span>
+              <span class="lad-tier-range">{{ g.rangeText }}</span>
+            </div>
+            <div v-for="lvl in g.levels" :key="lvl.board" class="lad-level" :class="{ empty: !(lvl.rows || []).length }">
+              <div class="lad-head">
+                <span class="lad-title">{{ lvl.board }} 板</span>
+                <span v-if="!(lvl.rows || []).length" class="gap-tag">断层</span>
+                <span v-if="lvl.count != null" class="lad-count">{{ lvl.count }} 家</span>
+              </div>
+              <div class="chips">
+                <div v-for="r in lvl.rows || []" :key="r.code" class="chip" :class="roleChipClass(r.role)">
+                  <span class="chip-name">{{ r.name }}</span>
+                  <el-tag v-if="r.role" size="small" :type="ROLE_TYPE[r.role] || 'info'" effect="dark">{{ r.role }}</el-tag>
+                  <el-tag v-if="r.manualLeader" size="small" type="warning" effect="dark">总龙头</el-tag>
+                  <span v-if="r.pattern" class="ts-pattern" :class="patternClass(r.pattern)">{{ patternText(r.pattern) }}</span>
+                  <span v-if="r.breakCount != null && r.breakCount > 0" class="chip-reseal"
+                    :title="`日内开板 ${r.breakCount} 次后封住（炸后回封）`">开板{{ r.breakCount }}次↩回封</span>
+                </div>
+                <!-- 晋级失败并入同层：服务端口径只在 n≥3 层给名单，2 板走首板生态页 -->
+                <template v-if="lvl.board >= 3">
+                  <div v-for="f in lvl.failed || []" :key="'f' + f.code" class="chip chip-fail" :title="failTitle(f)">
+                    <span class="chip-name">{{ f.name }}</span>
+                    <el-tag size="small" :type="FAIL_TYPE[f.todayStatus] || 'info'" effect="plain">
+                      {{ FAIL_LABEL[f.todayStatus] || '未触板' }}
+                    </el-tag>
+                  </div>
+                </template>
+              </div>
             </div>
           </div>
-          <div v-else class="tier-empty">断档（本层无在板股）</div>
         </div>
-        <div v-if="!(tianti.levels || []).length" class="empty-note">当日无 ≥2 板连板（或未拉取三池）</div>
+        <div v-if="!ladderGroups.length" class="empty-note">当日无 ≥2 板连板（或未拉取三池）</div>
       </template>
       <div v-else class="empty-note">连板天梯未取到（需当日涨停池）</div>
     </section>
@@ -660,6 +677,34 @@ const shouban = ref(null)       // /shouban 首板封住名单
 const d5high = ref(null)        // /d5/high 阵眼 + 监管池
 const themesData = ref(null)   // 题材表：来自 /intraday/themes（与日内核心页题材表同源）
 const themesView = computed(() => (themesData.value?.themes || []).slice(0, 5))
+
+/* ---- D3 连板天梯版式对齐「连板生态」页 ---- */
+/* 分层归属完全跟引擎 layerLabel，前端只按标签归桶、不另起阈值；
+   色带/胶囊/断层这套长相与 TiantiView 那张天梯同一份取值，两页不再各画各的 */
+const LAYER_CARDS = [
+  { label: '高位', cls: 'tier-high' },
+  { label: '中位', cls: 'tier-mid' },
+  { label: '低位', cls: 'tier-low' }
+]
+const ladderGroups = computed(() => {
+  const levels = tianti.value?.levels || []
+  return LAYER_CARDS.map((c) => {
+    // levels 已由服务端按板高降序给出，filter 保序即得"高板在上"
+    const rows = levels.filter((l) => l.layerLabel === c.label)
+    if (!rows.length) return null
+    const boards = rows.filter((l) => (l.rows || []).length).map((l) => l.board)
+    const onBoard = rows.reduce((s, l) => s + (l.rows || []).length, 0)
+    const range = boards.length
+      ? (boards.length === 1 ? `${boards[0]} 板` : `${Math.max(...boards)}–${Math.min(...boards)} 板`)
+      : '全部断档'
+    return { ...c, levels: rows, rangeText: `${range} · ${onBoard} 只在板` }
+  }).filter(Boolean)
+})
+const ROLE_TYPE = { 空间板: 'danger', 中军: 'primary', 跟风: 'success', 卡位: 'warning', 反包: 'info' }
+const FAIL_LABEL = { ZT: '仍封停(低板)', ZB: '炸板', DT: '跌停', GONE: '未触板' }
+const FAIL_TYPE = { ZT: 'warning', ZB: 'danger', DT: 'danger', GONE: 'info' }
+const roleChipClass = (role) => (role ? `role-${role}` : '')
+const failTitle = (f) => `昨日 ${f.prevBoard} 板，今日${FAIL_LABEL[f.todayStatus] || '未触板'}`
 
 /* D4 首板封住名单：chip 样式与首板生态页同款（默认展开，点头部折叠） */
 const sealedOpen = ref(false)
@@ -1530,27 +1575,61 @@ onUnmounted(() => window.removeEventListener('beforeunload', onBeforeUnload))
 .topic-name { color: #e1e8ed; font-weight: 600; font-size: 13px; }
 .topic-sub { color: #64748b; font-size: 12px; }
 
-/* D3 连板天梯层级 */
-.tier-block { border: 1px solid #22303f; border-radius: 10px; padding: 8px 10px; margin-top: 10px; background: #131c28; }
-.tier-block.gap { opacity: .7; border-style: dashed; }
-.tier-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-.tier-board { color: #fbbf24; font-weight: 700; font-size: 13px; }
-.tier-layer { color: #64748b; font-size: 11px; border: 1px solid #22303f; border-radius: 10px; padding: 0 7px; }
-.tier-count { color: #8899a6; font-size: 12px; margin-left: auto; }
-.tier-rows { display: flex; flex-wrap: wrap; gap: 6px; }
-.tier-stock { display: inline-flex; align-items: center; gap: 5px; background: #16202e; border: 1px solid #22303f; border-radius: 7px; padding: 3px 8px; font-size: 12px; color: #cbd5e0; }
-.tier-stock .star { color: #fbbf24; margin-right: 1px; }
-.ts-name { color: #e1e8ed; }
+/* D3 连板天梯：高/中/低三张卡，卡内逐板层级虚线分隔；
+   这套取值是照抄「连板生态」页 (TiantiView) 的天梯，两页改一处要改两处，别再漂移 */
+.ladder { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+.lad-band {
+  --tier: #94a3b8;
+  --tier-soft: rgba(148, 163, 184, .10);
+  /* 全局没有 box-sizing 重置：不设 border-box，width:100% 量的是内容盒，
+     padding + 边框会额外加到右边，整张卡片就顶出容器右边界 */
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  background: linear-gradient(180deg, #223041, #1b2735);
+  border: 1px solid #2d3748;
+  border-left: 3px solid var(--tier);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.lad-band.tier-high { --tier: #f87171; --tier-soft: rgba(248, 113, 113, .12); }
+.lad-band.tier-mid { --tier: #fbbf24; --tier-soft: rgba(251, 191, 36, .12); }
+.lad-band.tier-low { --tier: #60a5fa; --tier-soft: rgba(96, 165, 250, .12); }
+.lad-band-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 2px; }
+.lad-tier { font-size: 13px; font-weight: 700; color: var(--tier); letter-spacing: 1px; }
+.lad-tier-range { font-size: 11px; color: #6b7c8c; }
+.lad-level { padding: 10px 0; }
+.lad-level + .lad-level { border-top: 1px dashed #3a4450; }
+.lad-level.empty { background: var(--tier-soft); border-radius: 6px; }
+.lad-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.lad-title { font-size: 15px; font-weight: 700; color: var(--tier); }
+.gap-tag { color: #fbbf24; font-size: 12px; font-weight: 600; }
+.lad-count { color: #6b7c8c; font-size: 11px; margin-left: auto; }
+/* min-width:0 + chip 自身 max-width：否则长药丸撑破卡片右边界被视口裁掉。
+   收在 .ladder 下：本页 D4 首板另有一套同名 .chip（抄自首板生态页）且写在后面，
+   同特异性会把天梯这套的 flex-wrap / max-width 悄悄吃掉 */
+.ladder .chips { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.ladder .chip {
+  display: inline-flex; align-items: center; flex-wrap: wrap;
+  gap: 4px 6px; max-width: 100%;
+  background: #0f1419; border: 1px solid #2d3748; border-radius: 999px;
+  padding: 4px 10px; font-size: 12px;
+}
+.ladder .chip > * { white-space: nowrap; }
+.ladder .chip-name { color: #e1e8ed; font-weight: 600; }
+.ladder .chip-reseal { color: #7dd3fc; font-size: 11px; background: rgba(56, 189, 248, .12); border-radius: 6px; padding: 1px 6px; }
+/* 晋级失败：透明灰色，与在板个股明确区分 */
+.ladder .chip.chip-fail {
+  opacity: .55;
+  background: #0d1117;
+  border-color: #3a4450;
+  border-style: dashed;
+}
+.ladder .chip-fail .chip-name { color: #94a3b8; font-weight: 500; }
 .ts-pattern { font-size: 10px; padding: 0 4px; border-radius: 4px; }
 .p-one { color: #f87171; background: rgba(248, 113, 113, .12); }
 .p-t { color: #fbbf24; background: rgba(251, 191, 36, .12); }
 .p-turn { color: #67e8f9; background: rgba(103, 232, 249, .12); }
-.ts-role { font-style: normal; color: #c084fc; font-size: 11px; }
-.ts-break { color: #fbbf24; font-size: 10px; }
-.tier-empty { color: #64748b; font-size: 12px; }
-.tier-failed { margin-top: 6px; color: #cbd5e0; font-size: 12px; }
-.f-title { color: #8899a6; }
-.f-chip { color: #64748b; margin-right: 4px; }
 
 /* D5 阵眼 + 监管池 */
 .d5-subtitle { color: #8899a6; font-size: 12px; font-weight: 600; margin: 12px 0 8px; }
