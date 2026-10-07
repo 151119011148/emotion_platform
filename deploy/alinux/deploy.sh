@@ -24,6 +24,9 @@
 #   SKIP_DB_INIT       可选；=1 跳过③整库导入，只发代码。init_full.sql 对每张表都
 #                      DROP TABLE IF EXISTS，跑了就把线上数据退回那份 dump 的快照时刻，
 #                      纯代码/无表结构变更的发版应该设这个（④仍会解析 MySQL 密码）
+#   ROTATE_JWT_SECRET  可选；=1 强制换一把新的 JWT 签名密钥，**会让所有在线会话立刻失效**
+#                      （需要重新登录）。默认不换——密钥存在服务器 $REMOTE_APP/jwt.secret 里
+#                      长期复用，所以发版不再等于踢人。只有怀疑密钥泄漏、或就是要清场时才用它。
 #
 # 用法
 #   ALINUX_SSH_PASS='你的密码' bash deploy/alinux/deploy.sh
@@ -129,6 +132,81 @@ resolve_mysql_pass() {
   [ -n "$MYSQL_PASS" ] || die "无法取得服务器 MySQL root 密码，请用 ALINUX_MYSQL_PASS 传入"
 }
 
+# ---------------- JWT 签名密钥：一次生成、长期复用 ----------------
+# 以前这里是每次发版 openssl rand 一把新的，于是「发版」在效果上等价于「全员踢下线」。
+# 但登录状态本来就有服务端权威源——t_user.token_version（见 SingleSessionService），
+# 换签名钥匙对安全性没有额外贡献，只是让旧 token 验不过签名而已。所以改成持久化复用。
+# 密钥放 $REMOTE_APP/jwt.secret（600，只在服务器上，不进 git）。
+JWT_SECRET=""
+JWT_SECRET_FILE="$REMOTE_APP/jwt.secret"
+
+resolve_jwt_secret() {
+  if [ "${ROTATE_JWT_SECRET:-0}" = "1" ]; then
+    JWT_SECRET="$(openssl rand -hex 32)"
+    log "      JWT 密钥：ROTATE_JWT_SECRET=1，强制轮换（本次之后所有在线会话都要重新登录）"
+    save_jwt_secret          # 不写回去的话，下次发版读到的还是旧那把，轮换会被悄悄撤销
+    return 0
+  fi
+  local got adopted
+  # 正常路径：读服务器上那一份。expect 落的是 pty 输出，带 \r 和提示符噪声，
+  # 所以只认「整行正好 64 位小写 hex」这一个形状（-x 是全行匹配），凑不上就当没有——
+  # 宁可新生成，也不能把一个被噪声截过的字符串当密钥用（那等于悄悄换了钥匙、把人踢了还没线索）。
+  got="$(remote_capture "cat $JWT_SECRET_FILE 2>/dev/null" || true)"
+  JWT_SECRET="$(printf '%s\n' "$got" | tr -d '\r' | grep -oxE '[0-9a-f]{64}' | head -n1 || true)"
+  if [ -n "$JWT_SECRET" ]; then
+    log "      JWT 密钥：复用 $JWT_SECRET_FILE（发版不再踢人）"
+    return 0
+  fi
+  # 第一次换成这套机制时服务器上还没有那份文件，但现网 application-local.yml 里就躺着**正在用的**那把。
+  # 先把它接管过来，这样第一次跑新脚本也不会把当时在线的人踢掉。
+  # 必须按行锚定 `secret:` 取值：同一个文件里 datasource 的 password 行排在它**前面**，
+  # 一旦哪天口令也是 64 位 hex，整文件 grep 会先命中口令——那等于悄悄把签名钥匙换成数据库口令，
+  # 既踢了所有人，又把口令塞进签名路径。
+  got="$(remote_capture "grep -E '^[[:space:]]*secret:[[:space:]]*[0-9a-f]{64}[[:space:]]*$' $REMOTE_APP/application-local.yml 2>/dev/null | head -n1" || true)"
+  adopted="$(printf '%s\n' "$got" | tr -d '\r' \
+              | sed -nE 's/^[[:space:]]*secret:[[:space:]]*([0-9a-f]{64})[[:space:]]*$/\1/p' \
+              | grep -oxE '[0-9a-f]{64}' | head -n1 || true)"
+  if [ -n "$adopted" ]; then
+    JWT_SECRET="$adopted"
+    log "      JWT 密钥：服务器上还没有 $JWT_SECRET_FILE，从现网配置接管（在线会话不受影响）"
+  else
+    JWT_SECRET="$(openssl rand -hex 32)"
+    log "      JWT 密钥：没取到可复用的密钥，新生成一把（首次环境，或上次没落盘）"
+  fi
+  save_jwt_secret
+}
+
+# 把当前 JWT_SECRET 写回服务器，下次发版就靠它续命。
+save_jwt_secret() {
+  # 用 remote_capture 而不是 remote_exec：后者会把远端输出写进 $LOG_SSH 留痕文件，
+  # 密钥不该跟着落一份本地日志。值本身只含 hex，单引号包起来没有注入面。
+  remote_capture "umask 077 && printf '%s' '$JWT_SECRET' > $JWT_SECRET_FILE && chmod 600 $JWT_SECRET_FILE && echo JWT_SECRET_SAVED" 2>/dev/null \
+    | grep -q JWT_SECRET_SAVED \
+    || warn "      JWT 密钥没能写入 $JWT_SECRET_FILE：下次发版会重新生成，届时会踢人"
+}
+
+# 用模板 + 真实值生成生产 application-local.yml（只写 $TMP_DIR，上传由调用方做）。
+render_local_yml() {
+  # 替换只认那两个「值行」，不做全文 g 替换。模板头部的说明注释里就写着占位符的名字，
+  # 全文替换会顺手把真值也糊进注释——上一版就是这么把 JWT 密钥复制成了两份
+  # （现网 application-local.yml 里就躺着一把真密钥，而那个文件当时是 644）。
+  # 分隔符仍用 /：所以 MYSQL_PASS 不能含 / 与 &（README 已写死这条约束）。
+  # 渲染在 mac 上跑（BSD sed）：BSD sed 遇到第一个脚本之后就不再接参数，
+  # 所以两条表达式必须挂在同一个 -E 下面写成 -e ... -e ...，否则第二条会被当成文件名。
+  sed -E -e "s/^([[:space:]]*password:[[:space:]]*)__MYSQL_PASSWORD__[[:space:]]*$/\1$MYSQL_PASS/" \
+         -e "s/^([[:space:]]*secret:[[:space:]]*)__JWT_SECRET__[[:space:]]*$/\1$JWT_SECRET/" \
+      "$CONFIG_DIR/application-local.yml.template" > "$TMP_DIR/application-local.yml"
+
+  # 真值在这份文件里各只允许出现一次。多出来的那一份一定在注释里，
+  # 而它马上就会被上传成一个全世界可读的文件——宁可发版在这里停住。
+  local pw_n jwt_n
+  pw_n="$(grep -Fc -- "$MYSQL_PASS" "$TMP_DIR/application-local.yml" || true)"
+  jwt_n="$(grep -Fc -- "$JWT_SECRET" "$TMP_DIR/application-local.yml" || true)"
+  if [ "$pw_n" != "1" ] || [ "$jwt_n" != "1" ]; then
+    die "生成的 application-local.yml 里 MySQL 口令出现 $pw_n 次、JWT 密钥 $jwt_n 次（都应正好 1 次），已中止，不上传这份配置"
+  fi
+}
+
 server_mysql_init() {
   log "③ [3/6] 初始化 MySQL 并导入 deploy/init_full.sql"
 
@@ -146,16 +224,18 @@ server_deploy_backend() {
   # mv 是换指针，旧进程继续用原 inode，重启后才切到新包
   upload "$TMP_DIR/emotion-server.jar" "$REMOTE_APP/emotion-server.jar.new"
 
-  # 用模板 + 真实值生成生产 application-local.yml（覆盖 DB 密码 + 新 JWT 密钥）
-  local jwt
-  jwt="$(openssl rand -hex 32)"
-  sed -e "s/__MYSQL_PASSWORD__/$MYSQL_PASS/g" \
-      -e "s/__JWT_SECRET__/$jwt/g" \
-      "$CONFIG_DIR/application-local.yml.template" > "$TMP_DIR/application-local.yml"
+  # 用模板 + 真实值生成生产 application-local.yml。
+  # MySQL 密码每次现取；JWT 密钥复用服务器上的 $JWT_SECRET_FILE（见 resolve_jwt_secret），
+  # 所以发版不再让在线会话失效——想主动清场才 ROTATE_JWT_SECRET=1。
+  resolve_jwt_secret
+  render_local_yml
   upload "$TMP_DIR/application-local.yml" "$REMOTE_APP/application-local.yml"
 
   upload "$CONFIG_DIR/emotion-server.service" "/tmp/emotion-server.service"
-  remote_exec "mv -f $REMOTE_APP/emotion-server.jar.new $REMOTE_APP/emotion-server.jar &&
+  # chmod 600：application-local.yml 是 scp 落下来的，默认 644＝本机任何账号都能读走 DB 口令和签名密钥。
+  # 服务跑在 root 下（unit 没有 User=），收紧到 600 不影响它读自己的配置。
+  remote_exec "chmod 600 $REMOTE_APP/application-local.yml &&
+               mv -f $REMOTE_APP/emotion-server.jar.new $REMOTE_APP/emotion-server.jar &&
                cp /tmp/emotion-server.service /etc/systemd/system/emotion-server.service &&
                systemctl daemon-reload &&
                systemctl enable emotion-server &&

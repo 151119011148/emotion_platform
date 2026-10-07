@@ -14,8 +14,11 @@
 #   /opt/emotion/app/application-local.yml   （和 emotion-server.jar 同目录）
 #
 # 占位符（由 deploy.sh 用 sed 替换）：
-#   __MYSQL_PASSWORD__  -> 服务器 MySQL root 密码
-#   __JWT_SECRET__      -> 一个新的随机 256-bit JWT 签名密钥（openssl rand -hex 32）
+#   __MYSQL_PASSWORD__  -> 服务器 MySQL root 密码（每次发版现取）
+#   __JWT_SECRET__      -> JWT 签名密钥。**不再每次新生成**：复用服务器上的
+#                          /opt/emotion/app/jwt.secret（600，不进 git），那个文件缺失时
+#                          才生成并落盘；只有显式 ROTATE_JWT_SECRET=1 才换。
+#                          换密钥＝旧 token 全部验不过签名＝所有人重新登录，所以默认不动。
 # ============================================================================
 
 spring:
