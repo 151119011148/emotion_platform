@@ -8,7 +8,7 @@
           账号与密码都不动；改角色或重置密码会自动让对方重新登录。
         </p>
       </div>
-      <el-button type="primary" @click="openCreate">
+      <el-button v-if="userStore.isSuperAdmin" type="primary" @click="openCreate">
         <el-icon class="btn-icon"><Plus /></el-icon>新增账号
       </el-button>
     </div>
