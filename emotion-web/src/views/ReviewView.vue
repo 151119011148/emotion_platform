@@ -17,14 +17,17 @@
         :disabled-date="disabledDate" :cell-class-name="cellClass" placeholder="选择交易日" style="width: 160px" />
       <span class="header-spacer"></span>
       <el-tag v-if="fetchOverall" :type="overallTag" effect="dark">{{ overallText }}</el-tag>
-      <el-button type="primary" :loading="fetching" @click="handleFetch">🔄 一键拉取行情</el-button>
+      <el-button v-if="userStore.isSuperAdmin" type="primary" :loading="fetching" @click="handleFetch">🔄 一键拉取行情</el-button>
       <el-button :loading="exportingDoc" :disabled="!form.tradeDate" @click="handleExportDoc">
         导出复盘文档
       </el-button>
-      <el-button :loading="aiDrafting" :disabled="!form.tradeDate" @click="handleAiDraft">
+      <el-button v-if="userStore.isSuperAdmin" :loading="aiDrafting" :disabled="!form.tradeDate" @click="handleAiDraft">
         AI 草稿
       </el-button>
     </div>
+
+    <el-alert v-if="!userStore.isSuperAdmin" class="deny" type="warning" :closable="false" show-icon
+      title="业务数据全平台共享一份，只有超级管理员能修改——这一页的拉取、保存与 AI 草稿你只能查看；导出复盘文档照常可用，下方持仓台账仍是你自己的" />
 
     <!-- ============ 外溢②：昨日（T-1）遗留决策 —— 只留一条入口，
          明细与「标记执行」都在下方持仓台账里，不再复制出第二套 DOM ============ -->
@@ -56,7 +59,7 @@
         <h3>五维评分</h3>
         <span class="header-spacer"></span>
         <ScoreChip :score="score.total" label="总分" />
-        <el-button type="primary" :loading="saving" :disabled="!form.tradeDate" @click="handleSave">
+        <el-button v-if="userStore.isSuperAdmin" type="primary" :loading="saving" :disabled="!form.tradeDate" @click="handleSave">
           💾 保存复盘
         </el-button>
       </div>
@@ -309,7 +312,7 @@
         <div v-else class="empty-note">当日监管池为空（例行 ZD 不进此表）</div>
 
         <div class="d5-action" v-if="!fetching">
-          <el-button size="small" plain @click="openSurv = true">人工补录监管（T7 无自动源）</el-button>
+          <el-button v-if="userStore.isSuperAdmin" size="small" plain @click="openSurv = true">人工补录监管（T7 无自动源）</el-button>
         </div>
       </template>
       <div v-else class="empty-note">高位生态未取到（/d5/high）</div>
@@ -620,6 +623,7 @@ import { useRoute, onBeforeRouteLeave } from 'vue-router'
 import { recordApi, importApi, reviewApi, prdApi, d5Api, marketApi, anchorsApi } from '../api/modules'
 import { useTradingCalendar } from '../utils/tradingCalendar'
 import { useScoringStore } from '../stores/scoring'
+import { useUserStore } from '../stores/user'
 import { bandOfPoint } from '../utils/stages'
 import { pnlOf, yuan, realizedOf } from '../utils/money'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -629,6 +633,8 @@ import EditableStatCard from '../components/EditableStatCard.vue'
 const route = useRoute()
 // 只为作废用：本页卡片读 /review/detail，但拉取行情写的是同一批库里数据，现算读数得跟着掉
 const scoring = useScoringStore()
+// 业务数据全平台共享一份，只有超级管理员能改；持仓台账不在这一档，各账号各记
+const userStore = useUserStore()
 
 /* ======================================================================= */
 /* 只读小组件：就绪度 badge / 得分 chip / 统计项                           */
@@ -1496,6 +1502,7 @@ onUnmounted(() => window.removeEventListener('beforeunload', onBeforeUnload))
 .review-page { max-width: 1240px; margin: 0 auto; }
 .page-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
 .page-header h2 { margin: 0; color: #e1e8ed; }
+.deny { margin: -8px 0 16px; }
 .header-spacer { flex: 1; }
 
 /* 拉取进度 */

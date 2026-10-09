@@ -11,7 +11,8 @@
       </span>
       <span class="spacer"></span>
       <el-button size="small" @click="load" :loading="loading">重新取数</el-button>
-      <el-button size="small" type="primary" :disabled="!canCreate || !date" :loading="creating" @click="create">
+      <el-button v-if="userStore.isSuperAdmin" size="small" type="primary" :disabled="!canCreate || !date"
+        :loading="creating" @click="create">
         {{ d && d.event === 'BREAK' ? '立为节点（两行）' : '立为节点（试探一行）' }}
       </el-button>
     </div>
@@ -118,11 +119,13 @@
 import { ref, computed, watch } from 'vue'
 import { prdApi, nodeApi } from '../api/modules'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useUserStore } from '../stores/user'
 
 const props = defineProps({
   date: { type: String, required: true }
 })
 const emit = defineEmits(['created'])
+const userStore = useUserStore()
 
 const PATTERN_LABEL = { ONE_LINE: '一字', T_SHAPE: 'T字', TURNOVER: '换手' }
 
@@ -145,7 +148,7 @@ async function load() {
 }
 
 /**
- * 立节点会写库，而且是往<b>他的节点表</b>里写：成功日一次落两行。
+ * 立节点会写库，而且是往<b>全平台共享的节点表</b>里写：成功日一次落两行。
  * 所以点下去先复述一遍要落什么，再由他确认——回执里那句改分说明在这一步就该先看到。
  */
 async function create() {

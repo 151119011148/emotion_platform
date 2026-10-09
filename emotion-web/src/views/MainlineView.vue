@@ -3,7 +3,7 @@
     <div class="page-header">
       <h2>主线与日内核心
         <DimIntroTip title="主线区（已确认·打D2分）+ 雷达区（候选池·不打D2分）双轨，与打分引擎同源"
-          body="雷达区=当日所有有涨停的行业扫描（只标连续天数与强度）；连续 3 个交易日（含今天）该行业排进板块前五，才晋级主线区打 D2 分。雷达区可点击「升级到主线区」落人工标记。" />
+          body="雷达区=当日所有有涨停的行业扫描（只标连续天数与强度）；连续 3 个交易日（含今天）该行业排进板块前五，才晋级主线区打 D2 分。雷达区可点击「升级到主线区」落人工标记——主线标记全平台共享一份，只有超级管理员能改。" />
       </h2>
       <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" :clearable="false"
         :disabled-date="disabledDate" :cell-class-name="cellClass" style="width: 168px" />
@@ -207,7 +207,7 @@
               <span v-else class="missing">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="90" align="center">
+          <el-table-column v-if="userStore.isSuperAdmin" label="操作" width="90" align="center">
             <template #default="{ row }">
               <el-button v-if="isCurrentManual(row)" size="small" type="danger" plain :loading="busy" @click="cancelPromote(row.industry)">取消升级</el-button>
               <el-button v-else size="small" type="primary" plain :loading="busy" @click="promote(row.industry)">升级</el-button>
@@ -287,12 +287,14 @@ import { useRoute } from 'vue-router'
 import { prdApi, recordApi } from '../api/modules'
 import { signed } from '../utils/scores'
 import { useTradingCalendar } from '../utils/tradingCalendar'
+import { useUserStore } from '../stores/user'
 import DimScoreBlock from '../components/DimScoreBlock.vue'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
 
 const { disabledDate, cellClass, loadTradingDays } = useTradingCalendar()
 
 const route = useRoute()
+const userStore = useUserStore()
 
 const ACTION_LABEL = { PROMOTE: '晋级', HOLD: '在位', BREAK: '断板', ABSENT: '缺席' }
 const ACTION_TYPE = { PROMOTE: 'success', HOLD: 'primary', BREAK: 'danger', ABSENT: 'info' }

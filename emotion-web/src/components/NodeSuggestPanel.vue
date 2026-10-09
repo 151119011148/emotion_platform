@@ -19,7 +19,8 @@
       </template>
       <span class="spacer"></span>
       <el-button size="small" @click="load" :loading="loading">重新复算</el-button>
-      <el-button size="small" type="primary" :disabled="!s || !s.ready" :loading="adopting" @click="adopt">
+      <el-button v-if="userStore.isSuperAdmin" size="small" type="primary" :disabled="!s || !s.ready"
+        :loading="adopting" @click="adopt">
         采纳
       </el-button>
     </div>
@@ -96,11 +97,13 @@
 import { ref, computed, watch } from 'vue'
 import { nodeApi } from '../api/modules'
 import { ElMessage } from 'element-plus'
+import { useUserStore } from '../stores/user'
 
 const props = defineProps({
   node: { type: Object, required: true }
 })
 const emit = defineEmits(['adopted'])
+const userStore = useUserStore()
 
 const s = ref(null)
 const loading = ref(false)

@@ -10,7 +10,7 @@
         </p>
       </div>
       <div class="head-actions">
-        <el-button size="small" :loading="running" @click="runNow">立即运行</el-button>
+        <el-button v-if="userStore.isSuperAdmin" size="small" :loading="running" @click="runNow">立即运行</el-button>
         <el-button size="small" @click="loadAll">刷新</el-button>
       </div>
     </div>
@@ -393,9 +393,11 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { waveriderApi } from '../api/modules'
 import { useTradingCalendar } from '../utils/tradingCalendar'
+import { useUserStore } from '../stores/user'
 
 const { cellClass, disabledDate, loadTradingDays } = useTradingCalendar()
 const router = useRouter()
+const userStore = useUserStore()
 
 const strategies = ref([])
 const strategyId = ref(null)

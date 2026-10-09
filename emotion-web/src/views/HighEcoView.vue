@@ -3,7 +3,7 @@
     <div class="page-header">
       <h2>D5 · 高位生态
         <DimIntroTip title="「点—面—力」三层结构，与打分引擎同源"
-          body="阵眼（点）= 你账号人工配置的 t_anchor（起止区间内恒定，断板日仍跟踪）；抱团（面）与监管（力）是公开事实。监管名单靠 /api/market/surveillance/refresh 回补过才全——事件窗为空时压制/反馈整支未评，不是「当天 0 分」。"/>
+          body="阵眼（点）= 全平台共享、人工登记的 t_anchor（起止区间内恒定，断板日仍跟踪），只有超级管理员能改；抱团（面）与监管（力）是公开事实。监管名单靠 /api/market/surveillance/refresh 回补过才全——事件窗为空时压制/反馈整支未评，不是「当天 0 分」。"/>
       </h2>
       <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" :clearable="false"
         :disabled-date="disabledDate" :cell-class-name="cellClass" style="width: 168px" />
@@ -43,11 +43,15 @@
           <h3>① 阵眼个体 <span class="sub">点 · 人工配置 · 权重 35%</span></h3>
           <div class="head-right">
             <span v-if="vo.anchor?.score != null" class="sub-score">得分 {{ vo.anchor.score }}</span>
-            <el-button type="primary" size="small" @click="openAnchorAdd">+ 新增阵眼</el-button>
+            <el-button v-if="userStore.isSuperAdmin" type="primary" size="small" @click="openAnchorAdd">+ 新增阵眼</el-button>
           </div>
         </div>
+        <el-alert v-if="!userStore.isSuperAdmin" class="deny" type="warning" :closable="false" show-icon
+          title="阵眼全平台共享一份，只有超级管理员能登记与修改——你看到的是同一份，只能查看" />
         <el-alert v-if="!vo.anchor?.configured" type="info" :closable="false" show-icon
-          title="当日无在位人工阵眼（本子项未评），点右上「新增阵眼」登记本位后即可计入" style="margin-bottom: 12px" />
+          :title="userStore.isSuperAdmin
+            ? '当日无在位人工阵眼（本子项未评），点右上「新增阵眼」登记本位后即可计入'
+            : '当日无在位人工阵眼，本子项未评；登记阵眼只有超级管理员能做'" style="margin-bottom: 12px" />
         <div v-for="a in anchorItems" :key="a.id" class="anchor-card">
           <div class="anchor-line">
             <el-tag type="danger" effect="dark" size="small">{{ a.roleLabel || '阵眼' }}</el-tag>
@@ -82,7 +86,7 @@
             <span class="score-total">40/25/20/15 → {{ a.score == null ? '未评' : a.score }}</span>
           </div>
           <p v-if="a.consistWarn" class="anchor-warn">⚠️ {{ a.consistWarn }}（一致性 60）</p>
-          <div class="anchor-ops">
+          <div class="anchor-ops" v-if="userStore.isSuperAdmin">
             <el-button link type="primary" size="small" @click="openAnchorEdit(a)">编辑</el-button>
             <el-button link type="danger" size="small" @click="removeAnchor(a)">删除</el-button>
           </div>
@@ -312,6 +316,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { d5Api, recordApi, anchorsApi, reviewApi } from '../api/modules'
 import { signed } from '../utils/scores'
 import { useTradingCalendar } from '../utils/tradingCalendar'
+import { useUserStore } from '../stores/user'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
 import DimIntroTip from '../components/DimIntroTip.vue'
 import MonitorHeatmap from '../components/MonitorHeatmap.vue'
@@ -320,6 +325,7 @@ const { disabledDate, cellClass, loadTradingDays } = useTradingCalendar()
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 
 const LEVEL_TAG = { 健康: 'success', 可控: 'primary', 警戒: 'warning', 危险: 'danger', 崩塌: 'danger' }
 const ACTION_TYPE = {
@@ -707,6 +713,9 @@ async function removeAnchor(a) {
 }
 .notes-bar {
   margin-bottom: 16px;
+}
+.deny {
+  margin-bottom: 12px;
 }
 .force-bar {
   margin-bottom: 16px;

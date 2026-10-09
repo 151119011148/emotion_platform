@@ -144,7 +144,7 @@ export const prdApi = {
 
 /**
  * D5 高位生态（阵眼·抱团·监管）融合页：/api/d5/high。
- * 阵眼是你账号人工配置的 t_anchor（带起止区间）；抱团与监管名单是公开事实。
+ * 阵眼是全平台共享、人工登记的 t_anchor（带起止区间，只有超级管理员能改）；抱团与监管名单是公开事实。
  * 服务端现场装配、可能顺带现推监管期，放宽到与 snapshot 同档 25s；取不到时页面印空态不弹红条。
  */
 export const d5Api = {
@@ -153,7 +153,7 @@ export const d5Api = {
 
 /**
  * 连板天梯人工总龙头：/api/leader。写侧只落库（不联网），GET 返回当前设定或 null。
- * 天梯自动最高板标"空间板"，"总龙头"是账号各自手动指定的身份。
+ * 天梯自动最高板标"空间板"，"总龙头"是全平台共享手动指定的那一只（一个交易日一行）。
  */
 export const leaderApi = {
   get: (date) => api.get('/leader', { params: { date }, skipErrorToast: true }),

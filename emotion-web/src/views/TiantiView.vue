@@ -154,15 +154,17 @@
           <span class="leader-label">总龙头</span>
           <template v-if="leader.code">
             <span class="leader-name">{{ leader.name }}·{{ leader.code }}</span>
-            <el-button size="small" link @click="leaderOpen = true">改</el-button>
-            <el-button size="small" link type="danger" @click="clearLeader">✕</el-button>
+            <template v-if="userStore.isSuperAdmin">
+              <el-button size="small" link @click="leaderOpen = true">改</el-button>
+              <el-button size="small" link type="danger" @click="clearLeader">✕</el-button>
+            </template>
           </template>
-          <el-button v-else size="small" @click="leaderOpen = true">手动指定</el-button>
+          <el-button v-else-if="userStore.isSuperAdmin" size="small" @click="leaderOpen = true">手动指定</el-button>
         </div>
       </div>
 
       <!-- 人工总龙头：只从当日天梯在板个股里选 -->
-      <el-popover v-model:visible="leaderOpen" trigger="click" placement="bottom-end" width="320">
+      <el-popover v-if="userStore.isSuperAdmin" v-model:visible="leaderOpen" trigger="click" placement="bottom-end" width="320">
         <div class="leader-editor">
           <div class="leader-editor-title">把谁标为今日总龙头？</div>
           <el-select v-model="leaderPick" filterable placeholder="从当日天梯在板个股里选一只" style="width:100%">
@@ -311,6 +313,7 @@ import { prdApi, leaderApi, recordApi } from '../api/modules'
 import { signed, fiveDimBandClassOf } from '../utils/scores'
 import { useTradingCalendar } from '../utils/tradingCalendar'
 import { useScoringStore } from '../stores/scoring'
+import { useUserStore } from '../stores/user'
 import BreakDetailPanel from '../components/BreakDetailPanel.vue'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
 import BoardHeightCurve from '../components/BoardHeightCurve.vue'
@@ -320,6 +323,7 @@ const { disabledDate, cellClass, loadTradingDays } = useTradingCalendar()
 
 const route = useRoute()
 const scoring = useScoringStore()
+const userStore = useUserStore()
 
 const ROLE_TYPE = { 空间板: 'danger', 中军: 'primary', 跟风: 'success', 卡位: 'warning', 反包: 'info' }
 const PATTERN_LABEL = { ONE_LINE: '一字', T_SHAPE: 'T字', TURNOVER: '换手' }

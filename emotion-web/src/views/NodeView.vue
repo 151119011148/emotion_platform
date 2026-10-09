@@ -2,8 +2,11 @@
   <div class="node-page">
     <div class="page-header">
       <h2>节点追踪</h2>
-      <el-button type="primary" @click="openLadderCreate()">新增节点事件</el-button>
+      <el-button v-if="userStore.isSuperAdmin" type="primary" @click="openLadderCreate()">新增节点事件</el-button>
     </div>
+
+    <el-alert v-if="!userStore.isSuperAdmin" class="deny" type="warning" :closable="false" show-icon
+      title="节点全平台共享一份，只有超级管理员能新增、删除与采纳" />
 
     <!-- ② 节点演变路径（六态色带）：看活跃节点 D0 落在周期哪个位置，历史节点按状态标点 -->
     <div class="evolution" v-if="activeNode">
@@ -54,7 +57,7 @@
       <div class="empty-title">暂无追踪中的节点事件</div>
       <div class="empty-sub">还没有任何节点事件；从今日天梯新增一个节点，或先关联人工阵眼，追踪与这条曲线都从这里开始</div>
       <div class="empty-actions">
-        <el-button type="primary" @click="goTianti">从今日天梯新增节点</el-button>
+        <el-button v-if="userStore.isSuperAdmin" type="primary" @click="goTianti">从今日天梯新增节点</el-button>
         <el-button @click="goHighEco">关联人工阵眼</el-button>
       </div>
     </div>
@@ -161,7 +164,7 @@
           <template #default="{ row }">
             <div class="nc">
               <el-button size="small" text type="primary" @click="openSuggest(row)">复算</el-button>
-              <el-button size="small" text type="danger" @click="handleDelete(row)">删除</el-button>
+              <el-button v-if="userStore.isSuperAdmin" size="small" text type="danger" @click="handleDelete(row)">删除</el-button>
             </div>
           </template>
         </el-table-column>
@@ -325,10 +328,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import NodeSuggestPanel from '../components/NodeSuggestPanel.vue'
 import BoardHeightCurve from '../components/BoardHeightCurve.vue'
 import { buildNodeTracks } from '../utils/nodeTracks'
+import { useUserStore } from '../stores/user'
 
 const { disabledDate, cellClass, loadTradingDays } = useTradingCalendar()
 
 const router = useRouter()
+const userStore = useUserStore()
 const currentNode = ref(null)
 const nodeList = ref([])
 const showNodeDialog = ref(false)
@@ -895,6 +900,7 @@ onMounted(() => {
 <style scoped>
 .node-page { max-width: 1060px; margin: 0 auto; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+.deny { margin: -14px 0 16px; }
 .page-header h2 { margin: 0; color: #e1e8ed; }
 
 /* ② 节点演变路径 */
