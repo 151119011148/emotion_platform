@@ -11,7 +11,7 @@ import com.emotion.mapper.ManualLeaderMapper;
 import com.emotion.mapper.StockMapper;
 
 /**
- * 天梯人工总龙头的登记：每账号每交易日一行，读给 {@link TiantiService} 标"总龙头"标签。
+ * 天梯人工总龙头的登记：每交易日一行，读给 {@link TiantiService} 标"总龙头"标签。
  *
  * <p>写侧只落库（名称对着 {@code t_stock} 反查回填），读侧由天梯装配；删除即回归无人工总龙头。
  */
@@ -27,18 +27,16 @@ public class ManualLeaderService {
     }
 
     /** 某日人工总龙头代码；没登记返回 null。 */
-    public String codeOf(Long userId, LocalDate date) {
-        if (userId == null || date == null) {
+    public String codeOf(LocalDate date) {
+        if (date == null) {
             return null;
         }
-        ManualLeader row = mapper.selectOne(new LambdaQueryWrapper<ManualLeader>()
-                .eq(ManualLeader::getUserId, userId)
-                .eq(ManualLeader::getTradeDate, date));
+        ManualLeader row = mapper.selectOne(byDate(date));
         return row == null ? null : row.getCode();
     }
 
     /** 保存/覆盖某日总龙头。名称反查回填，不采信前端。 */
-    public ManualLeader save(Long userId, LocalDate date, String code) {
+    public ManualLeader save(LocalDate date, String code) {
         String c = code == null ? "" : code.trim();
         if (!c.matches("\\d{6}")) {
             throw new IllegalArgumentException("股票代码应为 6 位数字，收到：" + code);
@@ -47,31 +45,32 @@ public class ManualLeaderService {
         if (stock == null) {
             throw new IllegalArgumentException("代码 " + c + " 不在 A股代码表里，请从搜索里选一只");
         }
-        ManualLeader row = mapper.selectOne(new LambdaQueryWrapper<ManualLeader>()
-                .eq(ManualLeader::getUserId, userId)
-                .eq(ManualLeader::getTradeDate, date));
-        if (row == null) {
+        ManualLeader row = mapper.selectOne(byDate(date));
+        boolean isNew = row == null;
+        if (isNew) {
             row = new ManualLeader();
         }
-        row.setUserId(userId);
         row.setTradeDate(date);
         row.setCode(c);
         row.setName(stock.getName());
-        if (row.getUpdatedAt() == null) {
+        if (isNew) {
             mapper.insert(row);
         } else {
-            mapper.updateById(row);
+            mapper.update(row, byDate(date));
         }
         return row;
     }
 
     /** 清除某日人工总龙头。 */
-    public void clear(Long userId, LocalDate date) {
-        if (userId == null || date == null) {
+    public void clear(LocalDate date) {
+        if (date == null) {
             return;
         }
-        mapper.delete(new LambdaQueryWrapper<ManualLeader>()
-                .eq(ManualLeader::getUserId, userId)
-                .eq(ManualLeader::getTradeDate, date));
+        mapper.delete(byDate(date));
+    }
+
+    /** 一天一行：{@code trade_date} 就是主键，按日条件读写，不走 {@code selectById}。 */
+    private LambdaQueryWrapper<ManualLeader> byDate(LocalDate date) {
+        return new LambdaQueryWrapper<ManualLeader>().eq(ManualLeader::getTradeDate, date);
     }
 }

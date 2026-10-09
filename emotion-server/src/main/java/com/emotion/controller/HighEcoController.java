@@ -3,7 +3,6 @@ package com.emotion.controller;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -20,7 +19,7 @@ import com.emotion.vo.HighEcoVO;
  * <p>响应与《D5 融合版 PRD》第十节同构：H/总分/定性 + 阵眼个体 + 抱团与资金 + 监管压制 +
  * 监管反馈 + 监管池 + 交叉信号。装配复用 {@link ScoreContextService#forDate} 同一次取数
  * （监管名单只拉一次、主线 Snapshot 只算一次），不另起取数链路。
- * 阵眼是账号各自的人工判断（t_anchor 绑 user_id），监管名单/抱团是公开事实。
+ * 阵眼与监管名单/抱团都是全平台共享的一份：前者是人工判断、只有超级管理员能改，后者是公开事实。
  */
 @RestController
 @RequestMapping("/api/d5")
@@ -33,12 +32,8 @@ public class HighEcoController {
     }
 
     @GetMapping("/high")
-    public ApiResponse<HighEcoVO> high(Authentication auth, @RequestParam(required = false) String date) {
-        return ApiResponse.ok(scoreContext.highEco(userId(auth), parse(date)));
-    }
-
-    private static Long userId(Authentication auth) {
-        return (Long) auth.getPrincipal();
+    public ApiResponse<HighEcoVO> high(@RequestParam(required = false) String date) {
+        return ApiResponse.ok(scoreContext.highEco(parse(date)));
     }
 
     private static LocalDate parse(String raw) {

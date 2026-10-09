@@ -31,7 +31,7 @@ import com.emotion.vo.SurveillanceVO;
  * （{@code t_market_stock} 一条聚合）、阵眼（{@code t_anchor} + 日 K）、
  * 监管名单（{@code t_surveillance} + 日 K）。
  *
- * <p>四样都是"每日公开事实"，跟谁复盘无关，所以谁存那天都该拿到同一个分。其中只有阵眼和监管名单
+ * <p>四样都是"每日公开事实"，跟谁复盘无关，所以同一天的读数只有一份。其中只有阵眼和监管名单
  * 两样要打网络，而 {@link com.emotion.util.TemperatureCalculator} 一行网络代码都没有——
  * 取数集中在这里，打分才能继续用数组单测。
  *
@@ -86,13 +86,13 @@ public class ScoreContextService {
         this.highEcoMetrics = highEcoMetrics;
     }
 
-    public ScoreInputs forDate(Long userId, LocalDate date, DailyRecord record) {
+    public ScoreInputs forDate(LocalDate date, DailyRecord record) {
         ScoreInputs in = ScoreInputs.empty();
         // 注册表驱动的维集合与权重：取当前生效模型快照（读不到=null，引擎退回内置默认）。
         in.setScoringModel(scoringModelStore.activeOrNull());
         in.setPremiumTiers(premiumTierStore.read(date));
         fillPoolCounts(in, date);
-        fillAnchor(in, userId, date);
+        fillAnchor(in, date);
         // 监管名单全程只拉一次 listOn：旧第 9 维与 D5 压制/反馈共享同一份成员，不重复打上游。
         SurvDay survDay = loadSurvDay(date);
         fillSurvival(in, date, survDay);
@@ -103,7 +103,7 @@ public class ScoreContextService {
         in.setScoringTree(scoringModelStore.activeTreeOrNull());
         Map<String, BigDecimal> metrics = in.getMetrics();
         try {
-            // 量能 20 日基准是全局客观口径：两市成交额与谁复盘无关，查 t_market_daily 而不是用户记录。
+            // 量能 20 日基准是全局客观口径：两市成交额与谁复盘无关，查 t_market_daily 而不是复盘记录。
             List<MarketDaily> recent = marketDailyStore.listBefore(date, LadderMetricsService.TURNOVER_WINDOW);
             Map<String, BigDecimal> auto = ladderMetrics.build(date, record, recent);
             for (Map.Entry<String, BigDecimal> e : auto.entrySet()) {
@@ -116,7 +116,7 @@ public class ScoreContextService {
         // Snapshot 同时是 D5 阵眼/抱团取数的输入（日内核心行业、H、实际最高板），只算这一次。
         PrdMetricsService.Snapshot ps = null;
         try {
-            ps = prdMetrics.snapshot(userId, date);
+            ps = prdMetrics.snapshot(date);
             for (Map.Entry<String, BigDecimal> e : ps.metrics.entrySet()) {
                 metrics.put(e.getKey(), e.getValue());
             }
@@ -125,7 +125,7 @@ public class ScoreContextService {
         }
         // D5 高位生态（阵眼个体+抱团资金+监管压制+监管反馈）：失败同样不兜 0。
         try {
-            HighEcoMetricsService.Build d5 = highEcoMetrics.build(userId, date, ps,
+            HighEcoMetricsService.Build d5 = highEcoMetrics.build(date, ps,
                     in.getPremiumTiers(), survDay.members, survDay.available);
             for (Map.Entry<String, BigDecimal> e : d5.getMetrics().entrySet()) {
                 metrics.put(e.getKey(), e.getValue());
@@ -139,21 +139,21 @@ public class ScoreContextService {
     }
 
     /** /api/d5/high：复用 forDate 的同一次装配（同一名单、同一 Snapshot），只取结构化 VO。 */
-    public HighEcoVO highEco(Long userId, LocalDate requestedDate) {
+    public HighEcoVO highEco(LocalDate requestedDate) {
         LocalDate date = requestedDate != null ? requestedDate : LocalDate.now(CN);
-        return forDate(userId, date, null).getHighEcoVo();
+        return forDate(date, null).getHighEcoVo();
     }
 
     /**
      * 复盘页那块「子项读数」：把合并维拆开，每个子项各带自动值与算式。
      *
-     * <p>传进去的 record 是 {@code null}，因此这里只有公开读数——他手改的那几格从表单来，
+     * <p>传进去的 record 是 {@code null}，因此这里只有公开读数——手改的那几格从复盘表单来，
      * 不经过这条响应。少这一层，前端就没有"拉一次行情把手改覆盖成自动值"的路径可走。
      */
-    public ScoreContextVO scoreContextVO(Long userId, LocalDate requestedDate) {
+    public ScoreContextVO scoreContextVO(LocalDate requestedDate) {
         LocalDate date = requestedDate != null ? requestedDate : LocalDate.now(CN);
         long began = System.currentTimeMillis();
-        ScoreInputs in = forDate(userId, date, null);
+        ScoreInputs in = forDate(date, null);
 
         ScoreContextVO vo = new ScoreContextVO();
         vo.setTradeDate(date);
@@ -299,16 +299,16 @@ public class ScoreContextService {
         }
     }
 
-    private void fillAnchor(ScoreInputs in, Long userId, LocalDate date) {
+    private void fillAnchor(ScoreInputs in, LocalDate date) {
         try {
-            AnchorVO vo = anchors.vo(userId, date);
+            AnchorVO vo = anchors.vo(date);
             in.setAnchorScore(vo.getScore());
             in.setAnchorNote(cut(anchorNote(vo), ANCHOR_NOTE_MAX));
             writeAnchorMetrics(in, vo);
         } catch (RuntimeException e) {
             in.setAnchorScore(null);
             in.setAnchorNote(cut("阵眼取数异常：" + reason(e) + "（第 8 维未评，不是 0 分）", ANCHOR_NOTE_MAX));
-            log.warn("第 8 维取数失败 user={} date={} 原因={}", userId, date, e.toString());
+            log.warn("第 8 维取数失败 date={} 原因={}", date, e.toString());
         }
     }
 

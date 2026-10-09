@@ -71,7 +71,7 @@ class PrdMetricsServiceTest {
 
         PrdMetricsService.Snapshot snap = service().aggregate(D, zt, Collections.<MarketStock>emptyList(),
                 Collections.<MarketStock>emptyList(), Collections.<MarketStock>emptyList(),
-                history, 1L, null);
+                history, null);
 
         assertEquals("元件", snap.mainIndustry);
         assertEquals(40, snap.ztTotal);
@@ -114,7 +114,7 @@ class PrdMetricsServiceTest {
 
         PrdMetricsService.Snapshot snap = service().aggregate(D, zt, Collections.<MarketStock>emptyList(),
                 Collections.<MarketStock>emptyList(), Collections.<MarketStock>emptyList(),
-                history, 1L, null);
+                history, null);
 
         assertEquals("元件", snap.mainIndustry);
         assertEquals(3, snap.maxBoard);
@@ -137,7 +137,7 @@ class PrdMetricsServiceTest {
 
         PrdMetricsService.Snapshot snap = service().aggregate(D, zt, Collections.<MarketStock>emptyList(),
                 Collections.<MarketStock>emptyList(), Collections.<MarketStock>emptyList(),
-                new HashMap<LocalDate, Map<String, Integer>>(), 1L, null);
+                new HashMap<LocalDate, Map<String, Integer>>(), null);
 
         assertEquals("元件", snap.mainIndustry);
         assertNull(snap.amountGatherPct);
@@ -191,7 +191,7 @@ class PrdMetricsServiceTest {
         Object[] fx = dualTrackFixture();
         PrdMetricsService.Snapshot snap = service().aggregate(D, (List<MarketStock>) fx[0],
                 Collections.<MarketStock>emptyList(), Collections.<MarketStock>emptyList(),
-                Collections.<MarketStock>emptyList(), (Map<LocalDate, Map<String, Integer>>) fx[1], 1L, null);
+                Collections.<MarketStock>emptyList(), (Map<LocalDate, Map<String, Integer>>) fx[1], null);
 
         assertEquals("元件", snap.radarTopIndustry, "雷达榜首=今日最热");
         assertEquals("旅游", snap.autoMainlineIndustry, "自动主线=≥3天行业");
@@ -213,7 +213,7 @@ class PrdMetricsServiceTest {
         Object[] fx = dualTrackFixture();
         PrdMetricsService.Snapshot snap = service().aggregate(D, (List<MarketStock>) fx[0],
                 Collections.<MarketStock>emptyList(), Collections.<MarketStock>emptyList(),
-                Collections.<MarketStock>emptyList(), (Map<LocalDate, Map<String, Integer>>) fx[1], 1L, null,
+                Collections.<MarketStock>emptyList(), (Map<LocalDate, Map<String, Integer>>) fx[1], null,
                 "元件");
 
         assertEquals("元件", snap.mainIndustry, "人工标记优先于自动主线");
@@ -228,7 +228,7 @@ class PrdMetricsServiceTest {
         Object[] fx = dualTrackFixture();
         PrdMetricsService.Snapshot snap = service().aggregate(D, (List<MarketStock>) fx[0],
                 Collections.<MarketStock>emptyList(), Collections.<MarketStock>emptyList(),
-                Collections.<MarketStock>emptyList(), (Map<LocalDate, Map<String, Integer>>) fx[1], 1L, null,
+                Collections.<MarketStock>emptyList(), (Map<LocalDate, Map<String, Integer>>) fx[1], null,
                 "不存在行业");
 
         assertEquals("旅游", snap.mainIndustry, "人工标记行业当日无涨停 → 忽略，退自动主线");
@@ -255,7 +255,7 @@ class PrdMetricsServiceTest {
         history.put(d2, e2);
 
         PrdMetricsService.Snapshot snap = service().aggregate(D, zt, Collections.<MarketStock>emptyList(),
-                Collections.<MarketStock>emptyList(), Collections.<MarketStock>emptyList(), history, 1L, null);
+                Collections.<MarketStock>emptyList(), Collections.<MarketStock>emptyList(), history, null);
 
         assertEquals("NEW", snap.radar.get(0).flag);   // 元件(8) NEW
         assertEquals("MAIN", snap.radar.get(1).flag);  // 旅游(6) MAIN
@@ -285,7 +285,7 @@ class PrdMetricsServiceTest {
         history.put(D, new HashMap<String, Integer>());
 
         PrdMetricsService.Snapshot snap = service().aggregate(D, zt, Collections.<MarketStock>emptyList(),
-                Collections.<MarketStock>emptyList(), prevZB, history, 1L, null);
+                Collections.<MarketStock>emptyList(), prevZB, history, null);
 
         assertEquals(1, snap.fanBao.size(), "反包已剔除总龙头/中军角色，只留新票F");
         assertEquals("000009", snap.fanBao.get(0).getCode());
@@ -389,7 +389,7 @@ class PrdMetricsServiceTest {
 
         PrdMetricsService.Snapshot snap = service().aggregate(D, zt, Collections.<MarketStock>emptyList(),
                 Collections.<MarketStock>emptyList(), Collections.<MarketStock>emptyList(),
-                history, 1L, null, null, industryTheme);
+                history, null, null, industryTheme);
 
         assertEquals("元件", snap.radar.get(0).industry);
         assertEquals("元件", snap.radar.get(0).theme, "元件行附加题材名");
@@ -419,7 +419,7 @@ class PrdMetricsServiceTest {
 
         PrdMetricsService.Snapshot snap = service().aggregate(D, zt, Collections.<MarketStock>emptyList(),
                 Collections.<MarketStock>emptyList(), Collections.<MarketStock>emptyList(),
-                history, 1L, null, null, it);
+                history, null, null, it);
 
         assertEquals(1, snap.radarThemes.size(), "只有「元件」一个题材进题材表");
         PrdMetricsService.RadarRow t = snap.radarThemes.get(0);

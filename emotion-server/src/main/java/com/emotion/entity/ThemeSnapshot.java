@@ -10,9 +10,9 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 
 /**
- * 日内核心题材榜 Top5 快照：题材维度按用户个性化（t_theme / t_theme_stock 带 userId），
- * 与行业快照（公开不绑用户）不同，这里按 (user_id, trade_date) 存当日展示的前 5 名，
- * 供「题材表」历史可回溯而不必每次重算。读取题材表时自动回填（同 AUTO 绑定惯例）。
+ * 日内核心题材榜 Top5 快照：全平台一份，按 (trade_date, rank) 存当日展示的前 5 名，
+ * 供「题材表」历史可回溯而不必每次重算。读取题材表时自动回填（同 AUTO 绑定惯例），
+ * 但回填改的是全平台共用的那几行，所以非超级管理员只读不触发。
  */
 @Data
 @TableName("t_theme_daily_snapshot")
@@ -21,8 +21,6 @@ public class ThemeSnapshot {
     @TableId(type = IdType.AUTO)
     private Long id;
     private LocalDate tradeDate;
-    /** 题材绑定所属用户（AUTO 口径）。 */
-    private Long userId;
     /**
      * 题材榜排名 1-5。列名必须反引号：MySQL 8 起 {@code rank} 是保留字，
      * MyBatis-Plus 生成的字段列表里裸写它就报 1064。写侧走的是带反引号的手写 XML，

@@ -125,7 +125,7 @@ public class HighEcoMetricsService {
      * @param members      当日在列且进分（SEVERE/EXCH）的监管股；由调用方从同一次 listOn 共享传入
      * @param survAvailable 监管事件窗内是否有事件（false=从没回补过公告，压制/反馈整支未评）
      */
-    public Build build(Long userId, LocalDate date, PrdMetricsService.Snapshot snap,
+    public Build build(LocalDate date, PrdMetricsService.Snapshot snap,
                        MarketMetrics.PremiumTiers tiers, List<SurvivalMember> members,
                        boolean survAvailable) {
         List<MarketStock> todayZt = listPool(date, MarketStock.POOL_LIMIT_UP);
@@ -135,8 +135,7 @@ public class HighEcoMetricsService {
         List<MarketStock> prevZt = prev == null ? Collections.<MarketStock>emptyList()
                 : listPool(prev, MarketStock.POOL_LIMIT_UP);
         List<MarketStock> recent = safeRecent(date);
-        List<Anchor> anchors = userId == null ? Collections.<Anchor>emptyList()
-                : anchorService.listInPosition(userId, date);
+        List<Anchor> anchors = anchorService.listInPosition(date);
         Integer h = snap == null ? null : snap.maxBoard;
         String mainIndustry = snap == null ? null : snap.mainIndustry;
         Build b = aggregate(date, h, mainIndustry, todayZt, todayZb, todayDt, prevZt, recent,

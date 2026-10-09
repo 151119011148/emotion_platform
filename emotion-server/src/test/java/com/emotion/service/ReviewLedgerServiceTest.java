@@ -301,7 +301,7 @@ class ReviewLedgerServiceTest {
         RecordingPredictionStore store = new RecordingPredictionStore();
 
         assertEquals(2, service(new RecordingPositionStore(), store).savePredictions(
-                USER, DATE, Arrays.asList(
+                DATE, Arrays.asList(
                         plan("退潮延续", 55, "竞业达低开低走+跌停≥20"),
                         answer("路径二", "落空", "跌停扩至 17 家"))));
 
@@ -310,7 +310,6 @@ class ReviewLedgerServiceTest {
                 kinds.toString());
 
         List<Prediction> rows = store.rows.get(0);
-        assertEquals(USER, rows.get(0).getUserId());
         assertEquals(DATE, rows.get(0).getTradeDate());
         assertEquals(new Integer(55), rows.get(0).getProb());
         assertEquals("竞业达低开低走+跌停≥20", rows.get(0).getConditionText());
@@ -326,7 +325,7 @@ class ReviewLedgerServiceTest {
         RecordingPredictionStore store = new RecordingPredictionStore();
 
         assertEquals(0, service(new RecordingPositionStore(), store)
-                .savePredictions(USER, DATE, new ArrayList<PredictionRequest>()));
+                .savePredictions(DATE, new ArrayList<PredictionRequest>()));
 
         assertEquals(Arrays.asList(Prediction.KIND_PLAN, Prediction.KIND_ANSWER),
                 new ArrayList<>(store.kinds.get(0)));
@@ -339,7 +338,7 @@ class ReviewLedgerServiceTest {
         ReviewLedgerService svc = service(new RecordingPositionStore(), store);
 
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> svc.savePredictions(
-                USER, DATE, Arrays.asList(
+                DATE, Arrays.asList(
                         plan("路径一", null, null),
                         plan("路径二", 130, null),
                         answer("路径三", "差一点", null),
@@ -365,9 +364,9 @@ class ReviewLedgerServiceTest {
         PredictionRequest noName = plan(null, 40, null);
 
         assertThrows(IllegalArgumentException.class,
-                () -> svc.savePredictions(USER, DATE, Arrays.asList(noKind)));
+                () -> svc.savePredictions(DATE, Arrays.asList(noKind)));
         assertThrows(IllegalArgumentException.class,
-                () -> svc.savePredictions(USER, DATE, Arrays.asList(noName)));
+                () -> svc.savePredictions(DATE, Arrays.asList(noName)));
         assertEquals(0, svcStore.calls);
     }
 
@@ -384,7 +383,7 @@ class ReviewLedgerServiceTest {
 
         service(positions, predictions).savePositions(USER, DATE,
                 Arrays.asList(position("002909", "12.30", "13.40", null, "违约")));
-        service(positions, predictions).savePredictions(USER, DATE,
+        service(positions, predictions).savePredictions(DATE,
                 Arrays.asList(answer("路径一", "命中", null)));
 
         assertEquals("违约", only(positions.rows).getDiscipline());
@@ -482,7 +481,7 @@ class ReviewLedgerServiceTest {
         }
 
         @Override
-        public int replaceForDate(Long userId, LocalDate date, List<Prediction> rows, Set<String> kinds) {
+        public int replaceForDate(LocalDate date, List<Prediction> rows, Set<String> kinds) {
             calls++;
             this.rows.add(new ArrayList<>(rows));
             this.kinds.add(kinds);

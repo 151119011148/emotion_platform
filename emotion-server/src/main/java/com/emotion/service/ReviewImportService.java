@@ -89,22 +89,23 @@ public class ReviewImportService {
 
     /**
      * @param confirm false = 只看差异，库里一个字都不动；true = 落库并只重算那一天。
+     * @param ledgerUserId 只圈持仓那一段，复盘行/预判/题材都写全平台共享的那一份。
      */
-    public ImportPreviewVO importDoc(Long userId, String content, boolean confirm) {
+    public ImportPreviewVO importDoc(Long ledgerUserId, String content, boolean confirm) {
         ReviewDoc doc = ReviewImportParser.parse(content);
-        Prepared prepared = prepare(userId, doc);
+        Prepared prepared = prepare(ledgerUserId, doc);
         ImportPreviewVO vo = prepared.preview;
         if (!confirm) {
             return vo;
         }
         if (!vo.isOkToConfirm()) {
             // 前端在这种情况下会把按钮禁掉，走到这里只能是你绕过了页面。不写，把错误原样回给你。
-            log.warn("{} 导入被拒：{} 行坏数据", userId, doc.getErrors().size());
+            log.warn("{} 导入被拒：{} 行坏数据", ledgerUserId, doc.getErrors().size());
             return vo;
         }
         LocalDate date = doc.getDate();
         try {
-            writer.write(userId, date, content, doc, prepared.names);
+            writer.write(ledgerUserId, date, content, doc, prepared.names);
         } catch (DuplicateKeyException e) {
             // createOrUpdate/importManual 都是"先查后插"，两个窗口撞在一起就落在这条唯一键上。
             throw new IllegalArgumentException(date + " 这一天正在被别处写入，请刷新后重试", e);
@@ -123,11 +124,11 @@ public class ReviewImportService {
         }
     }
 
-    public ReviewDetailVO detail(Long userId, LocalDate date) {
+    public ReviewDetailVO detail(Long ledgerUserId, LocalDate date) {
         ReviewDetailVO vo = new ReviewDetailVO();
         vo.setDate(date);
         // viewByDate：没有主观复盘行时也能回出客观日表（涨跌家数）的合成视图。
-        DailyRecord record = dailyRecordService.viewByDate(userId, date);
+        DailyRecord record = dailyRecordService.viewByDate(date);
         if (record != null) {
             vo.setUpCount(record.getUpCount());
             vo.setDownCount(record.getDownCount());
@@ -152,7 +153,7 @@ public class ReviewImportService {
                 }
             }
         }
-        for (Position p : positionStore.read(userId, date)) {
+        for (Position p : positionStore.read(ledgerUserId, date)) {
             ReviewDetailVO.PositionItem item = new ReviewDetailVO.PositionItem();
             item.setCode(p.getStockCode());
             item.setName(p.getStockName());
@@ -167,7 +168,7 @@ public class ReviewImportService {
             item.setDiscipline(p.getDiscipline());
             vo.getPositions().add(item);
         }
-        for (Prediction p : predictionStore.read(userId, date)) {
+        for (Prediction p : predictionStore.read(date)) {
             ReviewDetailVO.PredictionItem item = new ReviewDetailVO.PredictionItem();
             item.setName(p.getName());
             item.setProb(p.getProb());
@@ -193,7 +194,7 @@ public class ReviewImportService {
 
     // ---- 预览 ----
 
-    private Prepared prepare(Long userId, ReviewDoc doc) {
+    private Prepared prepare(Long ledgerUserId, ReviewDoc doc) {
         ImportPreviewVO vo = new ImportPreviewVO();
         vo.setDate(doc.getDate());
         vo.setProseIncluded(doc.isProse());
@@ -210,8 +211,8 @@ public class ReviewImportService {
         vo.setOkToConfirm(true);
 
         LocalDate date = doc.getDate();
-        DailyRecord current = dailyRecordService.getByDate(userId, date);
-        DailyRecord base = current != null ? current : blankRecord(userId, date);
+        DailyRecord current = dailyRecordService.getByDate(date);
+        DailyRecord base = current != null ? current : blankRecord(date);
         // 还没有主观行时，涨跌家数的"当前值"仍在全局客观日表里——before 列要照实显示。
         MarketDaily market = marketDailyStore.getByDate(date);
         if (current == null && market != null) {
@@ -224,10 +225,10 @@ public class ReviewImportService {
 
         vo.setCompareNote(blankToNull(doc.textOr("对照", null)));
         addScalarChanges(vo, doc, base, draft);
-        addRowCounts(vo, userId, date, doc);
-        addThemeChanges(vo, userId, doc);
+        addRowCounts(vo, ledgerUserId, date, doc);
+        addThemeChanges(vo, doc);
         addMarketCompare(vo, market);
-        addScoreImpact(vo, userId, date, current, draft);
+        addScoreImpact(vo, date, current, draft);
         if (current == null) {
             vo.getWarnings().add(date + " 这天还没有复盘记录，确认后会新建一条主观复盘行。"
                     + "客观行情七数由「拉快照」写入全局客观日表 t_market_daily，与这条行互不依赖。");
@@ -286,13 +287,13 @@ public class ReviewImportService {
         return c;
     }
 
-    private void addRowCounts(ImportPreviewVO vo, Long userId, LocalDate date, ReviewDoc doc) {
+    private void addRowCounts(ImportPreviewVO vo, Long ledgerUserId, LocalDate date, ReviewDoc doc) {
         if (!doc.getPositions().isEmpty()) {
             vo.getRowCounts().add(new ImportPreviewVO.RowCount("持仓台账 t_position",
-                    positionStore.read(userId, date).size(), doc.getPositions().size(),
+                    positionStore.read(ledgerUserId, date).size(), doc.getPositions().size(),
                     "按日删除重建：这天原有的持仓行会被这批换掉"));
         }
-        List<Prediction> existing = predictionStore.read(userId, date);
+        List<Prediction> existing = predictionStore.read(date);
         if (!doc.getPlans().isEmpty()) {
             vo.getRowCounts().add(new ImportPreviewVO.RowCount("预判 t_prediction·PLAN",
                     countKind(existing, Prediction.KIND_PLAN), doc.getPlans().size(),
@@ -310,7 +311,7 @@ public class ReviewImportService {
         }
     }
 
-    private void addThemeChanges(ImportPreviewVO vo, Long userId, ReviewDoc doc) {
+    private void addThemeChanges(ImportPreviewVO vo, ReviewDoc doc) {
         for (ReviewDoc.ThemeRow row : doc.getThemes()) {
             ImportPreviewVO.ThemeChange t = new ImportPreviewVO.ThemeChange();
             t.setTheme(row.getTheme());
@@ -318,7 +319,6 @@ public class ReviewImportService {
             t.setStatus(row.getStatus());
             t.setLeader(row.getLeaderName());
             Theme existing = themeMapper.selectOne(new LambdaQueryWrapper<Theme>()
-                    .eq(Theme::getUserId, userId)
                     .eq(Theme::getName, row.getTheme())
                     .orderByAsc(Theme::getId)
                     .last("LIMIT 1"));
@@ -360,12 +360,12 @@ public class ReviewImportService {
      * 在一份 detached 副本上跑同一套打分。阵眼与监管两维要联网取日 K，
      * 取不到就把整块降级成一句"未能预览分数"——预览失败不该拦下导入，落库后照常重算。
      */
-    private void addScoreImpact(ImportPreviewVO vo, Long userId, LocalDate date,
+    private void addScoreImpact(ImportPreviewVO vo, LocalDate date,
                                 DailyRecord current, DailyRecord draft) {
         ImportPreviewVO.ScoreImpact s = new ImportPreviewVO.ScoreImpact();
         vo.setScoreImpact(s);
         try {
-            DailyRecord after = dailyRecordService.scoredCopy(userId, date, draft);
+            DailyRecord after = dailyRecordService.scoredCopy(date, draft);
             s.setDimsAfter(after.getScoredDims());
             s.setTemperatureAfter(plain(after.getTemperature()));
             s.setStageAfter(nz(after.getStage()));
@@ -554,9 +554,8 @@ public class ReviewImportService {
 
     // ---- 小工具 ----
 
-    private static DailyRecord blankRecord(Long userId, LocalDate date) {
+    private static DailyRecord blankRecord(LocalDate date) {
         DailyRecord record = new DailyRecord();
-        record.setUserId(userId);
         record.setTradeDate(date);
         return record;
     }

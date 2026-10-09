@@ -104,7 +104,7 @@ public class ReviewFetchService {
      * 跑完整 T1-T8。{@code sink} 会收到每个任务一次 "running" 起手 + 一次终结状态，
      * 末尾会收到一个汇总 "done" 事件。结束后把当日编排状态落档到 {@code t_review_fetch}。
      */
-    public void runFetch(LocalDate date, Long userId, Consumer<Event> sink) {
+    public void runFetch(LocalDate date, Consumer<Event> sink) {
         List<Event> all = new ArrayList<>();
         Consumer<Event> record = e -> {
             all.add(e);
@@ -183,7 +183,7 @@ public class ReviewFetchService {
         // ---------- T8 触发五维计算（职责分离：只重算已存在的记录） ----------
         emit(record, "T8", "running", null, "触发五维计算（回写评分）");
         try {
-            com.emotion.entity.DailyRecord rec = dailyRecordService.recalc(userId, date);
+            com.emotion.entity.DailyRecord rec = dailyRecordService.recalc(date);
             if (rec == null) {
                 emit(record, "T8", "warn", null,
                         "尚未创建复盘记录：首次评分在「保存复盘」时自动计算（拉取只落原始数据）");

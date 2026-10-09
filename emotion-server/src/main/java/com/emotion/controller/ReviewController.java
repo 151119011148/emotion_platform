@@ -171,13 +171,12 @@ public class ReviewController {
 
     /** 一键拉取：T1-T8 编排 + SSE 流式进度。每个任务先发 running 再发终结状态。 */
     @PostMapping("/fetch")
-    public SseEmitter fetch(Authentication auth, @RequestParam String date) {
+    public SseEmitter fetch(@RequestParam String date) {
         LocalDate d = parse(date);
-        Long userId = userId(auth);
         SseEmitter emitter = new SseEmitter(0L); // 不设超时，编排结束才 complete
         executor.execute(() -> {
             try {
-                reviewFetchService.runFetch(d, userId, ev -> {
+                reviewFetchService.runFetch(d, ev -> {
                     Map<String, Object> payload = new java.util.LinkedHashMap<>();
                     payload.put("task", ev.task);
                     payload.put("status", ev.status);
@@ -205,13 +204,12 @@ public class ReviewController {
 
     /** 当日 D1-D5 分块数据 + 得分 + 就绪度。 */
     @GetMapping("/detail")
-    public ApiResponse<ReviewDashboardVO> detail(Authentication auth, @RequestParam String date) {
-        Long userId = userId(auth);
+    public ApiResponse<ReviewDashboardVO> detail(@RequestParam String date) {
         LocalDate d = parse(date);
         ReviewDashboardVO vo = new ReviewDashboardVO();
         vo.setTradeDate(d);
 
-        DailyRecord rec = dailyRecordService.viewByDate(userId, d);
+        DailyRecord rec = dailyRecordService.viewByDate(d);
         if (rec != null && rec.getId() != null) {
             ReviewDashboardVO.Score s = vo.getScore();
             s.setAvailable(true);
@@ -286,10 +284,9 @@ public class ReviewController {
 
     /** 保存复盘记录（操作/持仓/明日计划/预判）。同一份 body 的 keySet 决定"哪一格发了"。 */
     @PostMapping("/save")
-    public ApiResponse<DailyRecord> save(Authentication auth, @RequestBody Map<String, Object> raw) {
-        Long userId = userId(auth);
+    public ApiResponse<DailyRecord> save(@RequestBody Map<String, Object> raw) {
         DailyRecordRequest req = json.convertValue(raw, DailyRecordRequest.class);
-        return ApiResponse.ok(dailyRecordService.createOrUpdate(userId, req, raw.keySet()));
+        return ApiResponse.ok(dailyRecordService.createOrUpdate(req, raw.keySet()));
     }
 
     /** 导出复盘文档（含当日系统取数 + 复盘记录）。 */

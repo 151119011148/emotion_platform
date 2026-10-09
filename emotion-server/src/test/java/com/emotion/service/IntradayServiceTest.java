@@ -56,7 +56,6 @@ class IntradayServiceTest {
 
     private static ThemeStock bind(Long themeId, String code, String industry, int primary) {
         ThemeStock ts = new ThemeStock();
-        ts.setUserId(1L);
         ts.setThemeId(themeId);
         ts.setTradeDate(D);
         ts.setCode(code);
@@ -103,7 +102,7 @@ class IntradayServiceTest {
         today.add(bind(2L, "000004", "汽车零部", 0)); // 辅题材：不计数
         when(tsMapper.selectList(any())).thenReturn(today); // 当日 + 窗口都被下面复用同一份
 
-        IntradayVO vo = service.aggregate(1L, D);
+        IntradayVO vo = service.aggregate(D);
 
         assertEquals(3, vo.getTotalZt(), "全市场涨停 3 只");
         assertEquals(3, vo.getAssigned(), "000004 是辅题材不计入，000001 多题材也只算一次");

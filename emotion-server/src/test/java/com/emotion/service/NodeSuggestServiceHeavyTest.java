@@ -309,7 +309,6 @@ class NodeSuggestServiceHeavyTest {
     private static NodeEvent huaCiNode() {
         NodeEvent node = new NodeEvent();
         node.setId(967L);
-        node.setUserId(2L);
         node.setSystemType("A");
         node.setAnchorStock("华瓷股份");
         node.setAnchorMaxBoard(6);

@@ -49,12 +49,13 @@ public class ReviewAiDraftService {
         this.llm = llm;
     }
 
-    public ReviewAiDraftVO draft(Long userId, LocalDate date) {
+    public ReviewAiDraftVO draft(Long ledgerUserId, LocalDate date) {
         ReviewAiDraftVO vo = new ReviewAiDraftVO();
         vo.setDate(date);
         vo.setModel(llm.modelName());
 
-        Map<String, String> facts = ReviewDocFormatter.aiFacts(reviewExportService.docModel(userId, date));
+        Map<String, String> facts =
+                ReviewDocFormatter.aiFacts(reviewExportService.docModel(ledgerUserId, date));
         vo.setFacts(facts);
         if (facts.size() < MIN_FACTS) {
             vo.setMessage(date + " 系统读数太少（只凑出 " + facts.size() + " 项），"

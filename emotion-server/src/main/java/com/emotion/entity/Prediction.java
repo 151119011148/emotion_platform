@@ -26,7 +26,6 @@ public class Prediction {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long userId;
     private LocalDate tradeDate;
     private String kind;
     /** 路径名。跨日对齐只认名称，所以名字必须每天复用。 */

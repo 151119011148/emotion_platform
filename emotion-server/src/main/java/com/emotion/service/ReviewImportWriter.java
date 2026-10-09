@@ -57,9 +57,10 @@ public class ReviewImportWriter {
      * 三张按日表删除重建，题材走 upsert。
      *
      * @param names 代码 → t_stock 里的正名。名字一律以库为准，md 里写错的字只留一条警告。
+     * @param ledgerUserId 只圈持仓那一段：复盘行、预判、题材都是全平台共享的一份，不再按账号写。
      */
     @Transactional(rollbackFor = Exception.class)
-    public DailyRecord write(Long userId, LocalDate date, String content, ReviewDoc doc,
+    public DailyRecord write(Long ledgerUserId, LocalDate date, String content, ReviewDoc doc,
                              Map<String, String> names) {
         // 涨跌家数是客观读数（已隔离进 t_market_daily）。必须在 importManual <b>之前</b>落库：
         // 打分（五维 D1·red_ratio）发生在 importManual 里，它从客观日表回填，晚写就还是旧值。
@@ -74,15 +75,15 @@ public class ReviewImportWriter {
             }
             marketDailyStore.upsertBreadth(date, up, down);
         }
-        DailyRecord record = dailyRecordService.importManual(userId, date, target -> {
+        DailyRecord record = dailyRecordService.importManual(date, target -> {
             applySingles(target, doc, names);
             // 整篇原文，连 ```meta 围栏块一起。md 是唯一真相，这份要能原样导回编辑器改完再导入。
             target.setReviewMd(content);
         });
-        positionStore.replaceForDate(userId, date, positionRows(userId, date, doc, names));
-        predictionStore.replaceForDate(userId, date, predictionRows(userId, date, doc));
+        positionStore.replaceForDate(ledgerUserId, date, positionRows(ledgerUserId, date, doc, names));
+        predictionStore.replaceForDate(date, predictionRows(date, doc));
         indexCloseStore.replaceForDate(date, indexRows(date, doc));
-        themeDayWriter.apply(userId, date, doc.getThemes());
+        themeDayWriter.apply(date, doc.getThemes());
         return record;
     }
 
@@ -191,11 +192,10 @@ public class ReviewImportWriter {
      * PLAN 与 ANSWER 一起交出去：Store 只删这次出现过的 kind。
      * 一份只写了 {@code 预判:} 的文件不该把那天已有的 {@code 对答案:} 行清掉。
      */
-    static List<Prediction> predictionRows(Long userId, LocalDate date, ReviewDoc doc) {
+    static List<Prediction> predictionRows(LocalDate date, ReviewDoc doc) {
         List<Prediction> rows = new ArrayList<>();
         for (ReviewDoc.PlanRow r : doc.getPlans()) {
             Prediction p = new Prediction();
-            p.setUserId(userId);
             p.setTradeDate(date);
             p.setKind(Prediction.KIND_PLAN);
             p.setName(r.getName());
@@ -205,7 +205,6 @@ public class ReviewImportWriter {
         }
         for (ReviewDoc.AnswerRow r : doc.getAnswers()) {
             Prediction p = new Prediction();
-            p.setUserId(userId);
             p.setTradeDate(date);
             p.setKind(Prediction.KIND_ANSWER);
             p.setName(r.getName());

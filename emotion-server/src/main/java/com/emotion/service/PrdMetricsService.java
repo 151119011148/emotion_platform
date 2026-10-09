@@ -133,7 +133,7 @@ public class PrdMetricsService {
         public String autoMainlineIndustry;
         /** 雷达区板块表（候选池）：当日所有有涨停的行业，按 zt 降序 → 持续天数降序。 */
         public List<RadarRow> radar = new ArrayList<>();
-        /** 雷达区题材表：把 radar 按题材归并（共享同一 t_theme 的行业合并成一行），只含用户已登记题材的行业。 */
+        /** 雷达区题材表：把 radar 按题材归并（共享同一 t_theme 的行业合并成一行），只含已登记题材的行业。 */
         public List<RadarRow> radarThemes = new ArrayList<>();
         public List<MarketStock> zhongJun = new ArrayList<>();  // 主线内其余连板≥2（中军候选）
         public int genFengCount;               // 主线内跟风涨停家数（扣掉总龙/中军）
@@ -147,7 +147,7 @@ public class PrdMetricsService {
     /** 雷达区单行（候选池）：当日一个行业板块的快照，不打 D2 分，只标连续天数与强度。 */
     public static class RadarRow {
         public String industry;
-        /** 该行业名匹配到的用户题材（t_theme.name==industry，可能 null=未登记题材）。 */
+        /** 该行业名匹配到的题材（t_theme.name==industry，可能 null=未登记题材）。 */
         public String theme;
         public int zt;                 // 当日涨停家数
         public int maxBoard;           // 板块内最高连板
@@ -159,7 +159,7 @@ public class PrdMetricsService {
     }
 
     /** 读当天+前一交易日的池明细、主线活跃历史与题材行，产出快照。DB 异常向上抛，调用方决定降级方式。 */
-    public Snapshot snapshot(Long userId, LocalDate date) {
+    public Snapshot snapshot(LocalDate date) {
         List<MarketStock> todayZT = listPool(date, MarketStock.POOL_LIMIT_UP);
         List<MarketStock> todayZB = listPool(date, MarketStock.POOL_BROKEN);
         LocalDate prev = marketStockMapper.prevDetailDate(date);
@@ -196,13 +196,11 @@ public class PrdMetricsService {
             byIndustry.put(ind, n == null ? 1 : n + 1);
         }
 
-        // 题材行（用户自维护）：名称与行业一致才算对上；同账号当天只可能有一行命中（重名取最新）。
-        // userId 为 null（理论不该发生）时跳过，硬度=未评。
+        // 题材行（人工登记）：名称与行业一致才算对上；全平台一份，同名多行时取最新。
         Theme mainTheme = null;
         Map<String, Theme> industryTheme = new HashMap<String, Theme>();
         try {
             List<Theme> themes = themeMapper.selectList(new LambdaQueryWrapper<Theme>()
-                    .eq(userId != null, Theme::getUserId, userId)
                     .orderByDesc(Theme::getCreatedAt));
             for (Theme t : themes) {
                 if (t.getName() == null || t.getName().trim().isEmpty()) {
@@ -223,48 +221,47 @@ public class PrdMetricsService {
             // 上面拿的是"最新题材"，但主线可能对不上它；精确匹配交给 aggregate（需要主线名）。
             // 为保持 aggregate 纯函数，这里把"同名行"挑出来，找不到再退最新行供主线页展示。
         } catch (RuntimeException e) {
-            log.warn("题材行读取失败 user={} date={} 原因={}（催化剂硬度未评）", userId, date, e.toString());
+            log.warn("题材行读取失败 date={} 原因={}（催化剂硬度未评）", date, e.toString());
         }
 
         // 人工主线标记（t_mainline_mark）：当日命中则作为 D2 评分对象的最高优先（高于 ≥3天 自动主线）。
         String manualMainline = null;
-        if (mainlineMarkMapper != null && userId != null) {
+        if (mainlineMarkMapper != null) {
             try {
                 List<MainlineMark> marks = mainlineMarkMapper.selectList(new LambdaQueryWrapper<MainlineMark>()
-                        .eq(MainlineMark::getUserId, userId)
                         .eq(MainlineMark::getTradeDate, date)
                         .orderByDesc(MainlineMark::getUpdatedAt));
                 if (!marks.isEmpty()) {
                     manualMainline = marks.get(0).getIndustry();
                 }
             } catch (RuntimeException e) {
-                log.warn("人工主线标记读取失败 user={} date={} 原因={}（按无人工标记处理）", userId, date, e.toString());
+                log.warn("人工主线标记读取失败 date={} 原因={}（按无人工标记处理）", date, e.toString());
             }
         }
 
-        return aggregate(date, todayZT, todayZB, prevZT, prevZB, dailyIndustryZt, userId, mainTheme,
+        return aggregate(date, todayZT, todayZB, prevZT, prevZB, dailyIndustryZt, mainTheme,
                 manualMainline, industryTheme);
     }
 
     /**
-     * 7 参纯聚合（不碰 DB），保留给既有单测与无人工标记场景；委托 8 参核心（manualMainlineIndustry=null）。
+     * 7 参纯聚合（不碰 DB），保留给既有单测与无人工标记场景；委托 9 参核心（manualMainlineIndustry=null）。
      */
     Snapshot aggregate(LocalDate date,
                        List<MarketStock> todayZT, List<MarketStock> todayZB,
                        List<MarketStock> prevZT, List<MarketStock> prevZB,
                        Map<LocalDate, Map<String, Integer>> dailyIndustryZt,
-                       Long userId, Theme mainTheme) {
-        return aggregate(date, todayZT, todayZB, prevZT, prevZB, dailyIndustryZt, userId, mainTheme,
+                       Theme mainTheme) {
+        return aggregate(date, todayZT, todayZB, prevZT, prevZB, dailyIndustryZt, mainTheme,
                 null, Collections.<String, Theme>emptyMap());
     }
 
-    /** 9 参纯聚合：人工主线标记场景（无题材关联表）；委托 10 参核心。 */
+    /** 8 参纯聚合：人工主线标记场景（无题材关联表）；委托 9 参核心。 */
     Snapshot aggregate(LocalDate date,
                        List<MarketStock> todayZT, List<MarketStock> todayZB,
                        List<MarketStock> prevZT, List<MarketStock> prevZB,
                        Map<LocalDate, Map<String, Integer>> dailyIndustryZt,
-                       Long userId, Theme mainTheme, String manualMainlineIndustry) {
-        return aggregate(date, todayZT, todayZB, prevZT, prevZB, dailyIndustryZt, userId, mainTheme,
+                       Theme mainTheme, String manualMainlineIndustry) {
+        return aggregate(date, todayZT, todayZB, prevZT, prevZB, dailyIndustryZt, mainTheme,
                 manualMainlineIndustry, Collections.<String, Theme>emptyMap());
     }
 
@@ -272,13 +269,13 @@ public class PrdMetricsService {
      * 纯聚合（不碰 DB）。dailyIndustryZt：日期→(行业→涨停家数)，须含 date 当天；mainTheme：调用方挑选出的题材行
      * （aggregate 内部再按主线行业名精确匹配，匹配不上只作展示兜底，不影响 metrics）。
      * manualMainlineIndustry：人工主线标记行业（null=无人工标记）。
-     * industryTheme：行业名→用户题材行，用于给雷达区每行附题材关联（可空 map）。
+     * industryTheme：行业名→题材行，用于给雷达区每行附题材关联（可空 map）。
      */
     Snapshot aggregate(LocalDate date,
                        List<MarketStock> todayZT, List<MarketStock> todayZB,
                        List<MarketStock> prevZT, List<MarketStock> prevZB,
                        Map<LocalDate, Map<String, Integer>> dailyIndustryZt,
-                       Long userId, Theme mainTheme, String manualMainlineIndustry,
+                       Theme mainTheme, String manualMainlineIndustry,
                        Map<String, Theme> industryTheme) {
         Snapshot s = new Snapshot();
         s.ztTotal = todayZT.size();
@@ -529,7 +526,7 @@ public class PrdMetricsService {
             s.metrics.put("persistence_days", BigDecimal.valueOf(s.persistenceDays == null ? 0 : s.persistenceDays));
         }
         // 催化剂硬度：题材名与主线行业完全一致才认（industry≠题材的已知口径差，宁缺勿错）。
-        Theme matched = matchTheme(mainTheme, main, userId, date);
+        Theme matched = matchTheme(mainTheme, main, date);
         if (matched != null) {
             s.mainTheme = matched;
             Integer hardness = matched.getCatalystHardness();
@@ -799,20 +796,19 @@ public class PrdMetricsService {
 
     // ================= helpers =================
 
-    /** 主线题材精确匹配：名称与主线行业一致 + 归属该账号。匹配不上返回 null（硬度=未评，不硬凑）。 */
-    private Theme matchTheme(Theme candidate, String main, Long userId, LocalDate date) {
-        if (main == null || userId == null) {
+    /** 主线题材精确匹配：名称与主线行业一致。匹配不上返回 null（硬度=未评，不硬凑）。 */
+    private Theme matchTheme(Theme candidate, String main, LocalDate date) {
+        if (main == null) {
             return null;
         }
         try {
             List<Theme> rows = themeMapper.selectList(new LambdaQueryWrapper<Theme>()
-                    .eq(Theme::getUserId, userId)
                     .eq(Theme::getName, main)
                     .orderByDesc(Theme::getCreatedAt)
                     .last("LIMIT 1"));
             return rows.isEmpty() ? null : rows.get(0);
         } catch (RuntimeException e) {
-            log.warn("主线题材匹配失败 user={} main={} 原因={}", userId, main, e.toString());
+            log.warn("主线题材匹配失败 main={} 原因={}", main, e.toString());
             return null;
         }
     }

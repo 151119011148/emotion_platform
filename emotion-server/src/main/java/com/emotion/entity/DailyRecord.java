@@ -11,7 +11,6 @@ import java.time.LocalDateTime;
 public class DailyRecord {
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long userId;
     private LocalDate tradeDate;
 
     // ==================== 客观行情九数（2026-09-11 起已隔离到 t_market_daily，全局共享、不绑用户）====================
@@ -107,8 +106,8 @@ public class DailyRecord {
      * 子项人工覆盖八列：第 2 维三组均涨幅、第 4 维两条家数口径子项、第 8 维的分、第 9 维的家数与均值。
      *
      * <p>一律 {@code NULL = 这格没改}，不是 0 分：0% 封板率和 0 家进分都是能把阶段判翻的真实读数。
-     * 覆盖只落在自己这一行——{@code t_premium_tier} 与 {@code t_market_stock} 都没有 user_id，
-     * 是"每日公开事实"，人工值写进那两张表就等于替所有账号改了同一份事实。
+     * 覆盖只落在当天这一行——{@code t_premium_tier} 与 {@code t_market_stock} 是"每日公开事实"，
+     * 人工值写进那两张表就等于改了所有人一起读的行情底数。
      *
      * <p>ALWAYS 在这里不是模板照抄：清空一格的语义就是"退回自动值"，
      * 默认的 NOT_NULL 会让那个 0 分永远赖在温度里不走。

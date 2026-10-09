@@ -11,7 +11,6 @@ import java.time.LocalDateTime;
 public class Cycle {
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long userId;
     private LocalDate startDate;
     private LocalDate endDate;
     private BigDecimal maxTemperature;

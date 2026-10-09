@@ -10,7 +10,6 @@ import java.time.LocalDateTime;
 public class LeadingStock {
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long userId;
     private Long themeId;
     private String name;
     private String role;

@@ -82,7 +82,7 @@ public class WaveRiderEngine {
     private final CandidateStockMapper candidateMapper;
     private final CandidateT1Mapper t1Mapper;
     private final StrategyRunMapper runMapper;
-    /** 情绪温度的出处。t_daily_record 按 user_id 分行，同一天多个复盘人各有一份、值可以差好几度。 */
+    /** 情绪温度的出处。t_daily_record 一个交易日全局一行（uk_date），同一天不会再有第二份温度。 */
     private final DailyRecordMapper dailyRecordMapper;
     private final DailyBarService dailyBarService;
     /** 节点票身份的唯一出处：与策略选股页那个「节点票」标共用一套匹配，见 {@link #build}。 */
@@ -196,7 +196,7 @@ public class WaveRiderEngine {
                 // 不是失败：没有节点日就只是没有节点票。身位板照跑。
                 warnings.add("NO_NODE");
             }
-            chosen = select(strategyId, strategy.getUserId(), tradeDate, cfg, run.getId(), funnel, warnings);
+            chosen = select(strategyId, tradeDate, cfg, run.getId(), funnel, warnings);
 
             if (!dryRun) {
                 // 整日替换：AC-9 要求同一天重跑多次候选行数不变（run 表会多行留痕）。
@@ -232,7 +232,7 @@ public class WaveRiderEngine {
      * 选股主体。漏斗每一步都记数——这是界面回答「为什么只剩这几只」的唯一依据，
      * 也是防止某个阈值悄悄变成死分支的手段（PRD AC-11 要求近 20 日触发次数可见）。
      */
-    private List<CandidateStock> select(Long strategyId, Long userId, LocalDate tradeDate, WaveRiderConfig cfg,
+    private List<CandidateStock> select(Long strategyId, LocalDate tradeDate, WaveRiderConfig cfg,
                                         Long runId, Map<String, Integer> funnel, List<String> warnings) {
         List<MarketStock> pool = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
                 .eq(MarketStock::getTradeDate, tradeDate)
@@ -296,7 +296,7 @@ public class WaveRiderEngine {
 
         // ---- 情绪温度 → 仓位系数（PRD §6/§17）。市场级变量，同日全部候选共享同一取值，
         // 所以在这儿算一次就够；它不进个股评分——§12.4.3：对「选哪只」没有区分度。
-        Double temperature = temperatureOf(userId, tradeDate);
+        Double temperature = temperatureOf(tradeDate);
         Double tempScale = null;
         if (temperature == null) {
             warnings.add("NO_TEMPERATURE");
@@ -304,7 +304,7 @@ public class WaveRiderEngine {
             tempScale = cfg.temperatureScale(temperature);
         }
 
-        List<CandidateStock> rows = build(strategyId, userId, tradeDate, runId, cfg, picked,
+        List<CandidateStock> rows = build(strategyId, tradeDate, runId, cfg, picked,
                 temperature, tempScale);
 
         // ---- 清单长度上限（相对当日涨停池）。
@@ -333,13 +333,12 @@ public class WaveRiderEngine {
      * {@code manual_first_sealed_rate}、{@code manual_top_high_break} 等子指标必须人工填写，
      * 实测 19 个交易日里只有 14 天有温度。一旦当前置条件，用户某天没复盘当天就整片不可用。
      *
-     * <p>取的是<strong>策略属主自己那行</strong>：{@code uk_user_date} 保证 (user_id, trade_date)
-     * 唯一，而同一天不同复盘人的温度可以差出好几度（2026-09-30：user 1 = 57.4、user 2 = 52.8），
-     * 差到跨档就会给出不同系数——所以这里必须跟着引擎其余部分一样按 userId 作用域取。
+     * <p>取的是<strong>当天那一份</strong>：{@code uk_date} 保证每个交易日只有一行复盘记录，
+     * 温度因此是全平台唯一的真值。去隔离之前同一天可以有多个复盘人各给一个温度
+     * （2026-09-30：57.4 与 52.8 并存），跨档时会给出不同系数——现在那种分歧从表结构上就不存在了。
      */
-    private Double temperatureOf(Long userId, LocalDate tradeDate) {
+    private Double temperatureOf(LocalDate tradeDate) {
         DailyRecord rec = dailyRecordMapper.selectOne(new LambdaQueryWrapper<DailyRecord>()
-                .eq(DailyRecord::getUserId, userId)
                 .eq(DailyRecord::getTradeDate, tradeDate));
         BigDecimal t = rec == null ? null : rec.getTemperature();
         return t == null ? null : t.doubleValue();
@@ -391,7 +390,7 @@ public class WaveRiderEngine {
      * 同日全部候选共享同一取值，对「选哪只」没有区分度）。拿不到温度时两者都为 {@code null}，
      * 此时仓位一律置空而不是按 0 处理。
      */
-    private List<CandidateStock> build(Long strategyId, Long userId, LocalDate tradeDate, Long runId,
+    private List<CandidateStock> build(Long strategyId, LocalDate tradeDate, Long runId,
                                        WaveRiderConfig cfg, List<MarketStock> picked,
                                        Double temperature, Double tempScale) {
         if (picked.isEmpty()) {
@@ -402,7 +401,7 @@ public class WaveRiderEngine {
         // 认的列和策略选股页那个「节点票」标相同，但这里多卡失效与窗口两道闸，
         // 「有标不加分」是设计而非 bug，判据见 NodeService#scoredNodeStocks。
         Map<String, NodeEvent> nodeStocks =
-                nodeService.scoredNodeStocks(userId, tradeDate, cfg.getNodeScanWindow());
+                nodeService.scoredNodeStocks(tradeDate, cfg.getNodeScanWindow());
         int maxBoard = 0;
         for (MarketStock m : picked) {
             maxBoard = Math.max(maxBoard, nz(m.getConsecutive()));

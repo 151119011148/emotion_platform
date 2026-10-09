@@ -2,6 +2,7 @@ package com.emotion.util;
 
 import java.util.Optional;
 
+import com.emotion.exception.BizException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -50,5 +51,17 @@ public final class AuthContext {
             }
         }
         return false;
+    }
+
+    /**
+     * 不是超管就抛业务异常，消息是「仅超级管理员可{@code what}」。
+     *
+     * <p>走 BizException 而不是 Spring 的 403：HTTP 仍是 200、code=400 带中文原因，
+     * 前端才不会被 {@code api/index.js} 的 401/403 分支当成掉线而清 token 跳登录。
+     */
+    public static void requireSuperAdmin(String what) {
+        if (!isSuperAdmin()) {
+            throw new com.emotion.exception.BizException("仅超级管理员可" + what);
+        }
     }
 }

@@ -44,7 +44,6 @@ class NodeSuggestServiceTest {
     private static NodeEvent shenZhonghuaA() {
         NodeEvent node = new NodeEvent();
         node.setId(3L);
-        node.setUserId(2L);
         node.setSystemType("A");
         node.setAnchorStock("深中华A");
         node.setAnchorMaxBoard(7);

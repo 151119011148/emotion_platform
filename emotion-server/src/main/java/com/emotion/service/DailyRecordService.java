@@ -20,7 +20,6 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -49,20 +48,20 @@ public class DailyRecordService {
         this.marketDailyStore = marketDailyStore;
     }
 
-    public DailyRecord createOrUpdate(Long userId, DailyRecordRequest req, Set<String> present) {
+    public DailyRecord createOrUpdate(DailyRecordRequest req, Set<String> present) {
         LocalDate date = req.getTradeDate() != null ? req.getTradeDate() : today();
 
         // 客观九数与用户无关：先落全局 t_market_daily（七数空值守卫、涨跌家数看键在场），
         // 再落主观行。下面 scoreAndPlace 的 fillMarketDefaults 会把同一天刚落的客观值合并进 carrier。
         marketDailyStore.upsertForm(date, req, present);
 
-        DailyRecord existing = rawByDate(userId, date);
-        DailyRecord record = existing != null ? existing : blank(userId, date);
+        DailyRecord existing = rawByDate(date);
+        DailyRecord record = existing != null ? existing : blank(date);
 
         copyFields(record, req, present);
-        scoreAndPlace(userId, date, record);
+        scoreAndPlace(date, record);
 
-        save(userId, date, record, existing);
+        save(date, record, existing);
         return record;
     }
 
@@ -75,9 +74,9 @@ public class DailyRecordService {
      * 「键没写 = 不动」因此天然成立。派生列一律 ALWAYS 策略，
      * 拿一个只带 id 的半行去 update 会把九个分一并洗成 NULL。
      */
-    public DailyRecord importManual(Long userId, LocalDate date, Consumer<DailyRecord> mutator) {
-        DailyRecord existing = rawByDate(userId, date);
-        DailyRecord record = existing != null ? existing : blank(userId, date);
+    public DailyRecord importManual(LocalDate date, Consumer<DailyRecord> mutator) {
+        DailyRecord existing = rawByDate(date);
+        DailyRecord record = existing != null ? existing : blank(date);
 
         // 改判过的日子先记住人工结论：导入不接收「阶段」这个键，所以它没资格把改判盖掉。
         // 复盘页那条路（copyFields 之后 scoreAndPlace 无条件重写 stage）上的同类问题不在这里动，等你点头。
@@ -86,12 +85,12 @@ public class DailyRecordService {
         String manualStage = overridden ? existing.getStage() : null;
 
         mutator.accept(record);
-        scoreAndPlace(userId, date, record);
+        scoreAndPlace(date, record);
         if (manualStage != null) {
             record.setStage(manualStage);
         }
 
-        save(userId, date, record, existing);
+        save(date, record, existing);
         return record;
     }
 
@@ -101,25 +100,24 @@ public class DailyRecordService {
      * <p>为的是点确认之前就能看到「导入会把温度从 50.0 改成 52.9」——
      * 主线明确度是第 7 维，真的会动分子和分母，这个可见性是刻意的。
      */
-    public DailyRecord scoredCopy(Long userId, LocalDate date, DailyRecord base) {
+    public DailyRecord scoredCopy(LocalDate date, DailyRecord base) {
         DailyRecord copy = new DailyRecord();
         BeanUtils.copyProperties(base, copy);
-        scoreAndPlace(userId, date, copy);
+        scoreAndPlace(date, copy);
         return copy;
     }
 
-    private void save(Long userId, LocalDate date, DailyRecord record, DailyRecord existing) {
+    private void save(LocalDate date, DailyRecord record, DailyRecord existing) {
         if (existing != null) {
             dailyRecordMapper.updateById(record);
         } else {
             dailyRecordMapper.insert(record);
         }
-        resequence(userId);
+        resequence();
     }
 
-    private DailyRecord blank(Long userId, LocalDate date) {
+    private DailyRecord blank(LocalDate date) {
         DailyRecord record = new DailyRecord();
-        record.setUserId(userId);
         record.setTradeDate(date);
         return record;
     }
@@ -133,21 +131,21 @@ public class DailyRecordService {
      *
      * <p>那天没有记录就返回 null：重算不是录入，凭空造一行会把"这天没复盘"显示成"这天什么都没发生"。
      */
-    public DailyRecord recalc(Long userId, LocalDate date) {
-        DailyRecord record = rawByDate(userId, date);
+    public DailyRecord recalc(LocalDate date) {
+        DailyRecord record = rawByDate(date);
         if (record == null) {
             return null;
         }
-        scoreAndPlace(userId, date, record);
+        scoreAndPlace(date, record);
         dailyRecordMapper.updateById(record);
-        resequence(userId);
+        resequence();
         return record;
     }
 
     /**
      * 定时任务专用的录入：<b>只写客观数据</b>。
      *
-     * <p>那天没有记录就补一行空壳（只有 user_id + trade_date；客观九数由 {@code fillMarketDefaults}
+     * <p>那天没有记录就补一行空壳（只有 trade_date；客观九数由 {@code fillMarketDefaults}
      * 从 t_market_daily 回填，五维/温度/阶段带交给引擎算），有记录就只重算派生列。
      * 十三项主观字段（主线/龙头/轮动/复盘笔记/明日计划/仓位/manual_*）与持仓台账一个字都不碰——
      * 那些归他人工维护，机器代填等于把「没判断」伪装成「判断过了」。
@@ -159,40 +157,33 @@ public class DailyRecordService {
      *
      * @return true = 新建了一行；false = 本来就有（只重算）
      */
-    public boolean ensureObjectiveRecord(Long userId, LocalDate date) {
-        DailyRecord existing = rawByDate(userId, date);
-        DailyRecord record = existing != null ? existing : blank(userId, date);
+    public boolean ensureObjectiveRecord(LocalDate date) {
+        DailyRecord existing = rawByDate(date);
+        DailyRecord record = existing != null ? existing : blank(date);
 
         boolean overridden = existing != null && existing.getStageOverridden() != null
                 && existing.getStageOverridden() == 1 && !isBlank(existing.getStage());
         String manualStage = overridden ? existing.getStage() : null;
 
-        scoreAndPlace(userId, date, record);
+        scoreAndPlace(date, record);
         if (manualStage != null) {
             record.setStage(manualStage);
         }
 
-        save(userId, date, record, existing);
+        save(date, record, existing);
         return existing == null;
     }
 
-    /** 写过复盘的账号名单：定时任务只给这些人补客观行，不给没用过复盘的账号凭空建行。 */
-    public List<Long> reviewerUserIds() {
-        List<Long> ids = dailyRecordMapper.listReviewerUserIds();
-        return ids == null ? Collections.emptyList() : ids;
-    }
-
     /** 按日期升序逐日重算：prevTemperature 读的是上一条，倒着跑会让前一天的温差取自一个还没更新的数。 */
-    public int recalcAll(Long userId) {
+    public int recalcAll() {
         List<DailyRecord> all = dailyRecordMapper.selectList(
                 new LambdaQueryWrapper<DailyRecord>()
-                        .eq(DailyRecord::getUserId, userId)
                         .orderByAsc(DailyRecord::getTradeDate));
         for (DailyRecord record : all) {
-            scoreAndPlace(userId, record.getTradeDate(), record);
+            scoreAndPlace(record.getTradeDate(), record);
             dailyRecordMapper.updateById(record);
         }
-        resequence(userId);
+        resequence();
         return all.size();
     }
 
@@ -203,10 +194,9 @@ public class DailyRecordService {
      * 回写用的是从库里读出来的整行对象——派生列全是 ALWAYS 策略，
      * new 一个只带 id + 两列的实体去 updateById 会把九个分一并清成 NULL。
      */
-    private void resequence(Long userId) {
+    private void resequence() {
         List<DailyRecord> all = dailyRecordMapper.selectList(
                 new LambdaQueryWrapper<DailyRecord>()
-                        .eq(DailyRecord::getUserId, userId)
                         .orderByAsc(DailyRecord::getTradeDate));
         Integer[] beforeSeq = new Integer[all.size()];
         String[] beforePhase = new String[all.size()];
@@ -228,11 +218,11 @@ public class DailyRecordService {
             }
         }
         if (changed > 0) {
-            log.info("子段重排：{} 账号 {} 行有变", userId, changed);
+            log.info("子段重排：{} 行有变", changed);
         }
     }
 
-    private void scoreAndPlace(Long userId, LocalDate date, DailyRecord record) {
+    private void scoreAndPlace(LocalDate date, DailyRecord record) {
         // 客观九数已与用户隔离：打分前从全局 t_market_daily 回填 carrier 上还空着的客观字段。
         // carrier 上非空的（本次表单/md 刚提交的）保持不动——upsert 已先落库，两者本就是同一份值。
         fillMarketDefaults(record, date);
@@ -242,13 +232,12 @@ public class DailyRecordService {
         // for the legacy path (only reads the most recent).
         List<DailyRecord> recent = dailyRecordMapper.selectList(
                 new LambdaQueryWrapper<DailyRecord>()
-                        .eq(DailyRecord::getUserId, userId)
                         .lt(DailyRecord::getTradeDate, date)
                         .orderByDesc(DailyRecord::getTradeDate)
                         .last("LIMIT 20"));
 
         // 公开读数一次性装配：档位溢价 / 盘面三池 / 阵眼 / 监管 / 五维 metrics；人工 manual_* 叠在最后。
-        ScoreInputs in = scoreContext.forDate(userId, date, record);
+        ScoreInputs in = scoreContext.forDate(date, record);
 
         // 1) 旧 9 维引擎：仍写 score_height…theme / anchor_score / surv_* / sealed_home_rate 等展示列，
         //    以及临时的 total_score/temperature。Stage 7 前保留，之后随前端一起下线。
@@ -315,12 +304,12 @@ public class DailyRecordService {
      * Stage 9 只读端点：给定日期现装 metrics + tree 走一遍引擎，返回整棵 eval 树 + 结构信号 + 原始读数快照。
      * 不写库；改一 sub 权重或一 ladder 阈值后刷新即可反映（真数据驱动）。
      */
-    public ScoreDetailVO scoreDetail(Long userId, LocalDate date) {
-        DailyRecord record = rawByDate(userId, date);
-        DailyRecord base = record != null ? record : blank(userId, date);
+    public ScoreDetailVO scoreDetail(LocalDate date) {
+        DailyRecord record = rawByDate(date);
+        DailyRecord base = record != null ? record : blank(date);
         // 即使这天没有主观行，五维明细也要能看到全局客观读数（涨停/量能/红盘率来自 t_market_daily）。
         fillMarketDefaults(base, date);
-        ScoreInputs in = scoreContext.forDate(userId, date, base);
+        ScoreInputs in = scoreContext.forDate(date, base);
         ScoringTree tree = in.getScoringTree();
         boolean fromDb = tree != null;
         if (tree == null) {
@@ -349,47 +338,45 @@ public class DailyRecordService {
     }
 
 
-    public DailyRecord getToday(Long userId) {
-        return mergeMarket(rawToday(userId));
+    public DailyRecord getToday() {
+        return mergeMarket(rawToday());
     }
 
-    private DailyRecord rawToday(Long userId) {
+    private DailyRecord rawToday() {
         return dailyRecordMapper.selectOne(
                 new LambdaQueryWrapper<DailyRecord>()
-                        .eq(DailyRecord::getUserId, userId)
                         .eq(DailyRecord::getTradeDate, today()));
     }
 
     /**
-     * 该用户某天的主观行（不含客观日表数据）。内部写链路用它判断"这天存没存过复盘"，
+     * 某天的主观行（不含客观日表数据）。内部写链路用它判断"这天存没存过复盘"，
      * 不要用 {@link #viewByDate}：那个接口在没有主观行时会返回一个 id=null 的客观合成行。
      */
-    public DailyRecord rawByDate(Long userId, LocalDate date) {
+    public DailyRecord rawByDate(LocalDate date) {
         return dailyRecordMapper.selectOne(
                 new LambdaQueryWrapper<DailyRecord>()
-                        .eq(DailyRecord::getUserId, userId)
                         .eq(DailyRecord::getTradeDate, date));
     }
 
     /**
-     * 读接口主力：用户主观行 + 全局客观九数合并。没有主观行时返回 null——
+     * 读接口主力：当天主观行 + 全局客观九数合并。没有主观行时返回 null——
      * "这天没复盘"在历史/曲线/导出里仍按缺一天处理；只想看客观盘面用 {@link #viewByDate}。
      */
-    public DailyRecord getByDate(Long userId, LocalDate date) {
-        return mergeMarket(rawByDate(userId, date));
+    public DailyRecord getByDate(LocalDate date) {
+        return mergeMarket(rawByDate(date));
     }
 
     /**
      * 复盘页/五维明细用的视图：没有主观行但 t_market_daily 有这天的客观数据时，
      * 返回 id=null 的合成 carrier（前端据此走 create 路径保存主观内容）；两边都没有才是 null。
      */
-    public DailyRecord viewByDate(Long userId, LocalDate date) {
-        DailyRecord row = rawByDate(userId, date);
+    public DailyRecord viewByDate(LocalDate date) {
+        DailyRecord row = rawByDate(date);
         MarketDaily market = marketDailyStore.getByDate(date);
         if (row == null && market == null) {
             return null;
         }
-        DailyRecord view = row != null ? row : blank(userId, date);
+        DailyRecord view = row != null ? row : blank(date);
         mergeMarket(view, market);
         return view;
     }
@@ -454,19 +441,17 @@ public class DailyRecordService {
         return rows;
     }
 
-    public List<DailyRecord> getRange(Long userId, LocalDate start, LocalDate end) {
+    public List<DailyRecord> getRange(LocalDate start, LocalDate end) {
         return mergeMarketAll(dailyRecordMapper.selectList(
                 new LambdaQueryWrapper<DailyRecord>()
-                        .eq(DailyRecord::getUserId, userId)
                         .ge(DailyRecord::getTradeDate, start)
                         .le(DailyRecord::getTradeDate, end)
                         .orderByAsc(DailyRecord::getTradeDate)));
     }
 
-    public List<DailyRecord> getLatest(Long userId, int days) {
+    public List<DailyRecord> getLatest(int days) {
         return mergeMarketAll(dailyRecordMapper.selectList(
                 new LambdaQueryWrapper<DailyRecord>()
-                        .eq(DailyRecord::getUserId, userId)
                         .orderByDesc(DailyRecord::getTradeDate)
                         .last("LIMIT " + days)));
     }

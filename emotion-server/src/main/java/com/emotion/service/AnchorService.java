@@ -51,9 +51,8 @@ public class AnchorService {
      * <p>一律按起爆日倒序返回（最近一轮起爆的在前）：面板、节点页下拉、导出 md 都直接吃这个顺序，
      * 各消费方自己排就会出现"面板倒序、导出正序"这种对不上的情况。打分取的是最差/加权平均，与顺序无关。
      */
-    public List<Anchor> listInPosition(Long userId, LocalDate date) {
+    public List<Anchor> listInPosition(LocalDate date) {
         return anchorMapper.selectList(new LambdaQueryWrapper<Anchor>()
-                .eq(Anchor::getUserId, userId)
                 .le(Anchor::getStartDate, date)
                 .and(w -> w.isNull(Anchor::getEndDate).or().ge(Anchor::getEndDate, date))
                 // 起爆时间倒序：最近一轮起爆的排最前，看盘时先看到"这一波"；
@@ -63,9 +62,8 @@ public class AnchorService {
     }
 
     /** 跨度与 [from, to] 有交集的全部阵眼，含已经下位的：曲线画 markArea 用。 */
-    public List<Anchor> listOverlapping(Long userId, LocalDate from, LocalDate to) {
+    public List<Anchor> listOverlapping(LocalDate from, LocalDate to) {
         return anchorMapper.selectList(new LambdaQueryWrapper<Anchor>()
-                .eq(Anchor::getUserId, userId)
                 .le(Anchor::getStartDate, to)
                 .and(w -> w.isNull(Anchor::getEndDate).or().ge(Anchor::getEndDate, from))
                 // 起爆时间倒序：最近一轮起爆的排最前，看盘时先看到"这一波"；
@@ -74,8 +72,7 @@ public class AnchorService {
                 .orderByDesc(Anchor::getId));
     }
 
-    public Anchor create(Long userId, Anchor anchor) {
-        anchor.setUserId(userId);
+    public Anchor create(Anchor anchor) {
         anchor.setId(null);
         validate(anchor);
         anchorMapper.insert(anchor);
@@ -89,10 +86,9 @@ public class AnchorService {
      * 一个 patch 分不清"要清空终点"和"这次没打算改终点"。必填项由 {@link #validate} 拦住，
      * 少传代码或起点会直接报错，不会静默把别的列清掉。
      */
-    public Anchor update(Long userId, Long id, Anchor patch) {
-        Anchor target = own(userId, id);
+    public Anchor update(Long id, Anchor patch) {
+        Anchor target = existing(id);
         patch.setId(target.getId());
-        patch.setUserId(userId);
         patch.setCreatedAt(target.getCreatedAt());
         patch.setUpdatedAt(target.getUpdatedAt());
         validate(patch);
@@ -100,15 +96,13 @@ public class AnchorService {
         return patch;
     }
 
-    public void delete(Long userId, Long id) {
-        own(userId, id);
+    public void delete(Long id) {
+        existing(id);
         anchorMapper.deleteById(id);
     }
 
-    private Anchor own(Long userId, Long id) {
-        Anchor existing = anchorMapper.selectOne(new LambdaQueryWrapper<Anchor>()
-                .eq(Anchor::getId, id)
-                .eq(Anchor::getUserId, userId));
+    private Anchor existing(Long id) {
+        Anchor existing = anchorMapper.selectById(id);
         if (existing == null) {
             throw new IllegalArgumentException("阵眼记录不存在：" + id);
         }
@@ -154,7 +148,6 @@ public class AnchorService {
             }
         }
         Long dup = anchorMapper.selectCount(new LambdaQueryWrapper<Anchor>()
-                .eq(Anchor::getUserId, anchor.getUserId())
                 .eq(Anchor::getStockCode, code)
                 .eq(Anchor::getStartDate, start)
                 .ne(anchor.getId() != null, Anchor::getId, anchor.getId()));

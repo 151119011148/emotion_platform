@@ -9,6 +9,7 @@ import com.emotion.mapper.StrategyMapper;
 import com.emotion.mapper.StrategyRunMapper;
 import com.emotion.mapper.StrategyTemplateMapper;
 import com.emotion.mapper.StrategyVersionMapper;
+import com.emotion.util.AuthContext;
 import com.emotion.waverider.WaveRiderConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
@@ -59,17 +60,17 @@ public class WaveRiderConfigService {
 
     // ------------------------------------------------------------------ 策略
 
-    /** 某个账号的全部策略，附带当前版本号与最近一次运行情况（界面上那一列「上次跑成什么样」）。 */
-    public List<Map<String, Object>> listStrategies(Long userId) {
+    /** 全部策略（全平台共享一份），附带当前版本号与最近一次运行情况（界面上那一列「上次跑成什么样」）。 */
+    public List<Map<String, Object>> listStrategies() {
         List<Strategy> rows = strategyMapper.selectList(new LambdaQueryWrapper<Strategy>()
-                .eq(Strategy::getUserId, userId)
                 .orderByDesc(Strategy::getUpdatedAt));
-        // 新账号（或尚无任何策略）时自动建一个「震荡市」默认策略，否则策略选股页的策略下拉永远为空，
-        // 而前端又没有任何创建策略的入口。create 内部已按 用户+名称 去重。
-        if (rows.isEmpty()) {
-            create(userId, "默认策略", "自动创建的默认策略（震荡市模板），可换模板或调整参数", null);
+        // 库里一条策略都没有时自动建一个「震荡市」默认策略，否则策略选股页的下拉永远为空，
+        // 而前端又没有任何创建策略的入口。策略全局共享，这份种子只能由超管落——
+        // 一个只读账号刷页面不该往共享表里插一行。
+        if (rows.isEmpty() && AuthContext.isSuperAdmin()) {
+            create(AuthContext.currentUserId(), "默认策略",
+                    "自动创建的默认策略（震荡市模板），可换模板或调整参数", null);
             rows = strategyMapper.selectList(new LambdaQueryWrapper<Strategy>()
-                    .eq(Strategy::getUserId, userId)
                     .orderByDesc(Strategy::getUpdatedAt));
         }
         List<Map<String, Object>> out = new ArrayList<>();
@@ -96,19 +97,18 @@ public class WaveRiderConfigService {
 
     /** 新建策略。默认参数取「震荡市」模板，避免新策略一上来就是空配置。 */
     @Transactional
-    public Strategy create(Long userId, String name, String description, String templateCode) {
+    public Strategy create(Long createdBy, String name, String description, String templateCode) {
         String trimmed = name == null ? "" : name.trim();
         if (trimmed.isEmpty()) {
             throw new IllegalArgumentException("策略名称不能为空");
         }
         Long dup = strategyMapper.selectCount(new LambdaQueryWrapper<Strategy>()
-                .eq(Strategy::getUserId, userId).eq(Strategy::getName, trimmed));
+                .eq(Strategy::getName, trimmed));
         if (dup != null && dup > 0) {
             throw new IllegalArgumentException("已经有同名策略：" + trimmed);
         }
 
         Strategy s = new Strategy();
-        s.setUserId(userId);
         s.setName(trimmed);
         s.setEnabled(1);
         s.setDescription(description);
@@ -117,7 +117,7 @@ public class WaveRiderConfigService {
         strategyMapper.insert(s);
 
         WaveRiderConfig cfg = configOfTemplate(templateCode);
-        StrategyVersion v = insertVersion(s.getId(), cfg, "初始版本", userId);
+        StrategyVersion v = insertVersion(s.getId(), cfg, "初始版本", createdBy);
         s.setCurrentVersionId(v.getId());
         strategyMapper.updateById(s);
         return s;
@@ -165,7 +165,7 @@ public class WaveRiderConfigService {
      * @param changeNote 这次改了什么，必填——没有说明的版本最后会变成没人敢动的黑盒
      */
     @Transactional
-    public StrategyVersion saveVersion(Long strategyId, String configJson, String changeNote, Long userId) {
+    public StrategyVersion saveVersion(Long strategyId, String configJson, String changeNote, Long operator) {
         Strategy s = requireStrategy(strategyId);
         WaveRiderConfig cfg = parse(configJson);
         List<String> errs = cfg.validate();
@@ -181,7 +181,7 @@ public class WaveRiderConfigService {
             return current;
         }
 
-        StrategyVersion v = insertVersion(strategyId, canonical, changeNote, userId);
+        StrategyVersion v = insertVersion(strategyId, canonical, changeNote, operator);
         s.setCurrentVersionId(v.getId());
         s.setUpdatedAt(LocalDateTime.now());
         strategyMapper.updateById(s);
@@ -201,14 +201,14 @@ public class WaveRiderConfigService {
      * 版本号只增不减，历史永远读得出来。
      */
     @Transactional
-    public StrategyVersion rollback(Long strategyId, Long versionId, Long userId) {
+    public StrategyVersion rollback(Long strategyId, Long versionId, Long operator) {
         Strategy s = requireStrategy(strategyId);
         StrategyVersion target = versionMapper.selectById(versionId);
         if (target == null || !target.getStrategyId().equals(strategyId)) {
             throw new IllegalArgumentException("版本 " + versionId + " 不属于策略 " + strategyId);
         }
         StrategyVersion v = insertVersion(strategyId, target.getConfigJson(),
-                "回滚到 v" + target.getVersionNo(), userId);
+                "回滚到 v" + target.getVersionNo(), operator);
         s.setCurrentVersionId(v.getId());
         s.setUpdatedAt(LocalDateTime.now());
         strategyMapper.updateById(s);
@@ -254,10 +254,10 @@ public class WaveRiderConfigService {
 
     /** 套用模板 = 把模板参数写成一个新版本，不产生新策略实体。 */
     @Transactional
-    public StrategyVersion applyTemplate(Long strategyId, String templateCode, Long userId) {
+    public StrategyVersion applyTemplate(Long strategyId, String templateCode, Long operator) {
         requireStrategy(strategyId);
         return saveVersion(strategyId, serialize(configOfTemplate(templateCode)),
-                "套用模板 " + templateCode, userId);
+                "套用模板 " + templateCode, operator);
     }
 
     private WaveRiderConfig configOfTemplate(String templateCode) {
@@ -274,11 +274,11 @@ public class WaveRiderConfigService {
 
     // ------------------------------------------------------------------ 内部
 
-    private StrategyVersion insertVersion(Long strategyId, WaveRiderConfig cfg, String note, Long userId) {
-        return insertVersion(strategyId, serialize(cfg), note, userId);
+    private StrategyVersion insertVersion(Long strategyId, WaveRiderConfig cfg, String note, Long operator) {
+        return insertVersion(strategyId, serialize(cfg), note, operator);
     }
 
-    private StrategyVersion insertVersion(Long strategyId, String canonicalJson, String note, Long userId) {
+    private StrategyVersion insertVersion(Long strategyId, String canonicalJson, String note, Long operator) {
         Integer maxNo = maxVersionNo(strategyId);
         StrategyVersion v = new StrategyVersion();
         v.setStrategyId(strategyId);
@@ -286,7 +286,7 @@ public class WaveRiderConfigService {
         v.setConfigJson(canonicalJson);
         v.setConfigHash(md5(canonicalJson));
         v.setChangeNote(note);
-        v.setCreatedBy(userId);
+        v.setCreatedBy(operator);
         v.setCreatedAt(LocalDateTime.now());
         versionMapper.insert(v);
         return v;

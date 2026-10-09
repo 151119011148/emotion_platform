@@ -8,7 +8,6 @@ import com.emotion.service.NodeSuggestService;
 import com.emotion.vo.ApiResponse;
 import com.emotion.vo.BreakNodeCreateVO;
 import com.emotion.vo.NodeSuggestVO;
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -21,6 +20,7 @@ import java.util.List;
  * <p>「待验证 → 有效/失效」这一步只能由他点：{@code /suggest} 把平台按盘面明细复算的结论连来路一起
  * 交出去，{@code /adopt} 才落库，中间没有任何自动写入。判据不齐时 suggest 会直接说"判不了"，
  * 而不是给一个看起来正常的数。
+ * <p>节点全平台共享一份，谁能改由 {@code SuperAdminWriteInterceptor} 统一挡。
  */
 @RestController
 @RequestMapping("/api/nodes")
@@ -38,34 +38,28 @@ public class NodeController {
     }
 
     @GetMapping
-    public ApiResponse<List<com.emotion.vo.NodeVO>> list(Authentication auth) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(nodeService.listByUser(userId));
+    public ApiResponse<List<com.emotion.vo.NodeVO>> list() {
+        return ApiResponse.ok(nodeService.listAll());
     }
 
     @GetMapping("/current")
-    public ApiResponse<com.emotion.vo.NodeVO> getCurrent(Authentication auth) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(nodeService.getCurrent(userId));
+    public ApiResponse<com.emotion.vo.NodeVO> getCurrent() {
+        return ApiResponse.ok(nodeService.getCurrent());
     }
 
     @PostMapping
-    public ApiResponse<com.emotion.vo.NodeVO> create(Authentication auth, @RequestBody NodeEvent event) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(nodeService.create(userId, event));
+    public ApiResponse<com.emotion.vo.NodeVO> create(@RequestBody NodeEvent event) {
+        return ApiResponse.ok(nodeService.create(event));
     }
 
     @PutMapping("/{id}")
-    public ApiResponse<NodeEvent> update(Authentication auth, @PathVariable Long id,
-                                         @RequestBody NodeEvent event) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(nodeService.update(userId, id, event));
+    public ApiResponse<NodeEvent> update(@PathVariable Long id, @RequestBody NodeEvent event) {
+        return ApiResponse.ok(nodeService.update(id, event));
     }
 
     @DeleteMapping("/{id}")
-    public ApiResponse<Void> delete(Authentication auth, @PathVariable Long id) {
-        Long userId = (Long) auth.getPrincipal();
-        nodeService.deleteNode(userId, id);
+    public ApiResponse<Void> delete(@PathVariable Long id) {
+        nodeService.deleteNode(id);
         return ApiResponse.ok(null);
     }
 
@@ -74,16 +68,14 @@ public class NodeController {
      * 判定读的是 {@link com.emotion.service.TiantiService#breakDay}，页面不自己判、也不自己拼字段。
      */
     @PostMapping("/break")
-    public ApiResponse<BreakNodeCreateVO> createBreak(Authentication auth,
-                                                     @RequestParam String date) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(nodeBreakService.createNodes(userId, parseDate(date)));
+    public ApiResponse<BreakNodeCreateVO> createBreak(@RequestParam String date) {
+        return ApiResponse.ok(nodeBreakService.createNodes(parseDate(date)));
     }
 
     /** 「从今日天梯新增节点」的轻量预填：D0日期/涨停跌停家数/最高板/今日龙头候选。只读本地表。 */
     @GetMapping("/ladder-intel")
-    public ApiResponse<com.emotion.vo.NodePrefillVO> ladderIntel(Authentication auth,
-                                                                 @RequestParam(required = false) String date) {
+    public ApiResponse<com.emotion.vo.NodePrefillVO> ladderIntel(
+            @RequestParam(required = false) String date) {
         return ApiResponse.ok(nodeService.ladderIntel(parseDate(date)));
     }
 
@@ -102,17 +94,14 @@ public class NodeController {
     /**
      * 复算一遍：建议是什么、哪几条读数、缺哪一样，全部摊开。只读，不写库。 */
     @GetMapping("/{id}/suggest")
-    public ApiResponse<NodeSuggestVO> suggest(Authentication auth, @PathVariable Long id) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(nodeSuggestService.suggest(userId, id));
+    public ApiResponse<NodeSuggestVO> suggest(@PathVariable Long id) {
+        return ApiResponse.ok(nodeSuggestService.suggest(id));
     }
 
     /** 采纳：服务端重算并逐字段比对，一致才把八个字段连状态来路一起写进去。 */
     @PostMapping("/{id}/adopt")
-    public ApiResponse<NodeEvent> adopt(Authentication auth, @PathVariable Long id,
-                                       @RequestBody NodeAdoptRequest body) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(nodeSuggestService.adopt(userId, id,
+    public ApiResponse<NodeEvent> adopt(@PathVariable Long id, @RequestBody NodeAdoptRequest body) {
+        return ApiResponse.ok(nodeSuggestService.adopt(id,
                 body == null ? null : body.getFingerprint()));
     }
 }

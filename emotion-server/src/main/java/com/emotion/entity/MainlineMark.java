@@ -17,7 +17,6 @@ import java.time.LocalDateTime;
 public class MainlineMark {
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long userId;
     private LocalDate tradeDate;
     private String industry;
     private Integer manual;

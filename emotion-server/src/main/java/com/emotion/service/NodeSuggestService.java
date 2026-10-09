@@ -188,12 +188,12 @@ public class NodeSuggestService {
         this.breakDetailService = breakDetailService;
     }
 
-    public NodeSuggestVO suggest(Long userId, Long id) {
-        NodeEvent node = own(userId, id);
+    public NodeSuggestVO suggest(Long id) {
+        NodeEvent node = existing(id);
         // 破壁两行判的是"次日续没续板"，跟高低切那套晋级率没有关系：按登记的类型分流，两条路互不改
         return breakRow(node)
-                ? decideBreak(node, fetchBreak(node, userId), json)
-                : decide(node, fetch(node, userId), json);
+                ? decideBreak(node, fetchBreak(node), json)
+                : decide(node, fetch(node), json);
     }
 
     private static boolean breakRow(NodeEvent node) {
@@ -206,12 +206,12 @@ public class NodeSuggestService {
      * <p>不能照抄前端传来的 body 落库：他点的那条建议和最后写进去的那个数必须是同一个东西，
      * 而"看到建议"和"点采纳"之间他完全可以又拉了一次行情、把那天的明细换了。
      */
-    public NodeEvent adopt(Long userId, Long id, String fingerprint) {
-        NodeEvent node = own(userId, id);
+    public NodeEvent adopt(Long id, String fingerprint) {
+        NodeEvent node = existing(id);
         boolean breakRow = breakRow(node);
         NodeSuggestVO fresh = breakRow
-                ? decideBreak(node, fetchBreak(node, userId), json)
-                : decide(node, fetch(node, userId), json);
+                ? decideBreak(node, fetchBreak(node), json)
+                : decide(node, fetch(node), json);
         if (!fresh.isReady()) {
             throw new IllegalArgumentException("这条节点还不能采纳：" + join(fresh.getMissing(), "；"));
         }
@@ -294,7 +294,7 @@ public class NodeSuggestService {
         List<String> missing = new ArrayList<>();
     }
 
-    private Readings fetch(NodeEvent node, Long userId) {
+    private Readings fetch(NodeEvent node) {
         Readings r = new Readings();
         r.d0 = node.getD0Date();
         if (r.d0 == null) {
@@ -888,14 +888,14 @@ public class NodeSuggestService {
      * <b>一条判据都不在这儿重算</b>——续没续板是 {@code TiantiService.detectBreaks} 的结论，
      * 曲线上的 ★ 与面板已经共用它；这里再算一遍就是第二份判定，两份迟早打架。
      */
-    private Readings fetchBreak(NodeEvent node, Long userId) {
+    private Readings fetchBreak(NodeEvent node) {
         Readings r = new Readings();
         r.d0 = node.getD0Date();
         if (r.d0 == null) {
             r.missing.add("D0 日期未填：没有破壁那天，续没续板判不了");
             return r;
         }
-        r.breakDetail = breakDetailService.vo(userId, r.d0);
+        r.breakDetail = breakDetailService.vo(r.d0);
         BreakDetailVO.Outcome o = r.breakDetail.getOutcome();
         r.t1 = o == null ? null : o.getNextDate();
         return r;
@@ -1498,10 +1498,8 @@ public class NodeSuggestService {
 
     // ---------- 杂项 ----------
 
-    private NodeEvent own(Long userId, Long id) {
-        NodeEvent node = nodeEventMapper.selectOne(new LambdaQueryWrapper<NodeEvent>()
-                .eq(NodeEvent::getId, id)
-                .eq(NodeEvent::getUserId, userId));
+    private NodeEvent existing(Long id) {
+        NodeEvent node = nodeEventMapper.selectById(id);
         if (node == null) {
             throw new IllegalArgumentException("节点事件不存在：" + id);
         }

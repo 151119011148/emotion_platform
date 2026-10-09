@@ -42,7 +42,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  */
 class NodeSuggestServiceBreakTest {
 
-    private static final Long USER = 1L;
     private static final LocalDate D0 = LocalDate.of(2026, 8, 28);
     private static final LocalDate T1 = LocalDate.of(2026, 8, 31);
     private static final String SHEN = "000017";
@@ -323,13 +322,13 @@ class NodeSuggestServiceBreakTest {
         row.setT1AnchorRepack(1);
         NodeEventMapper mapper = mock(NodeEventMapper.class);
         BreakDetailService detail = mock(BreakDetailService.class);
-        when(detail.vo(USER, D0)).thenReturn(probe(T1, BreakDetailVO.OUTCOME_SUCCESS, "8-31 续板到 8 板"));
-        when(mapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(row);
+        when(detail.vo(D0)).thenReturn(probe(T1, BreakDetailVO.OUTCOME_SUCCESS, "8-31 续板到 8 板"));
+        when(mapper.selectById(any())).thenReturn(row);
         NodeSuggestService service =
                 new NodeSuggestService(mapper, null, null, new ObjectMapper(), null, detail);
 
-        NodeSuggestVO seen = service.suggest(USER, 1L);
-        service.adopt(USER, 1L, seen.getFingerprint());
+        NodeSuggestVO seen = service.suggest(1L);
+        service.adopt(1L, seen.getFingerprint());
 
         ArgumentCaptor<NodeEvent> saved = ArgumentCaptor.forClass(NodeEvent.class);
         verify(mapper).updateById(saved.capture());
@@ -345,14 +344,14 @@ class NodeSuggestServiceBreakTest {
     void adoptRefusesWhileTheNextDayIsUnsettled() {
         NodeEventMapper mapper = mock(NodeEventMapper.class);
         BreakDetailService detail = mock(BreakDetailService.class);
-        when(detail.vo(USER, D0)).thenReturn(probe(null, BreakDetailVO.OUTCOME_PENDING, "次一交易日的明细还没落库"));
-        when(mapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(probeRow());
+        when(detail.vo(D0)).thenReturn(probe(null, BreakDetailVO.OUTCOME_PENDING, "次一交易日的明细还没落库"));
+        when(mapper.selectById(any())).thenReturn(probeRow());
         NodeSuggestService service = new NodeSuggestService(mapper, null, null,
                 new ObjectMapper(), null, detail);
-        NodeSuggestVO seen = service.suggest(USER, 1L);
+        NodeSuggestVO seen = service.suggest(1L);
 
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-                () -> service.adopt(USER, 1L, seen.getFingerprint()));
+                () -> service.adopt(1L, seen.getFingerprint()));
 
         assertTrue(e.getMessage().contains("还不能采纳"), e.getMessage());
         assertTrue(e.getMessage().contains("还没落库"), e.getMessage());
@@ -380,7 +379,6 @@ class NodeSuggestServiceBreakTest {
     private static NodeEvent row(String nodeType) {
         NodeEvent n = new NodeEvent();
         n.setId(1L);
-        n.setUserId(USER);
         n.setD0Date(D0);
         n.setNodeType(nodeType);
         n.setStatus(NodeSuggestService.STATUS_PENDING);

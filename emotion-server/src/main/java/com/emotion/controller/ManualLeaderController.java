@@ -18,10 +18,10 @@ import com.emotion.service.ManualLeaderService;
 import com.emotion.vo.ApiResponse;
 
 /**
- * 连板天梯人工总龙头：某日用户手动指定谁当"总龙头"。
+ * 连板天梯人工总龙头：某日手动指定谁当"总龙头"。
  *
  * <p>写侧只碰库（{@link ManualLeaderService}），读侧由天梯服务装配标签；
- * {@code user_id} 一律取自登录态——总龙头是账号各自的判断。
+ * 一天一行、全平台共享同一份判断，谁能改由 {@code SuperAdminWriteInterceptor} 统一挡。
  */
 @RestController
 @RequestMapping("/api/leader")
@@ -35,9 +35,8 @@ public class ManualLeaderController {
 
     /** 某日人工总龙头；没登记返回 <code>data=null</code>。date 缺省按今天。 */
     @GetMapping
-    public ApiResponse<ManualLeader> get(Authentication auth, @RequestParam(required = false) String date) {
-        LocalDate d = parse(date);
-        String code = service.codeOf(userId(auth), d);
+    public ApiResponse<ManualLeader> get(@RequestParam(required = false) String date) {
+        String code = service.codeOf(parse(date));
         if (code == null) {
             return ApiResponse.ok(null);
         }
@@ -45,14 +44,14 @@ public class ManualLeaderController {
     }
 
     @PutMapping
-    public ApiResponse<ManualLeader> save(Authentication auth, @RequestBody ManualLeader body) {
-        return ApiResponse.ok(service.save(userId(auth), parse(body.getTradeDate() == null
+    public ApiResponse<ManualLeader> save(@RequestBody ManualLeader body) {
+        return ApiResponse.ok(service.save(parse(body.getTradeDate() == null
                 ? null : body.getTradeDate().toString()), body.getCode()));
     }
 
     @DeleteMapping
-    public ApiResponse<Void> clear(Authentication auth, @RequestParam(required = false) String date) {
-        service.clear(userId(auth), parse(date));
+    public ApiResponse<Void> clear(@RequestParam(required = false) String date) {
+        service.clear(parse(date));
         return ApiResponse.ok(null);
     }
 
@@ -60,10 +59,6 @@ public class ManualLeaderController {
         ManualLeader m = new ManualLeader();
         m.setCode(code);
         return m;
-    }
-
-    private static Long userId(Authentication auth) {
-        return (Long) auth.getPrincipal();
     }
 
     private static LocalDate parse(String raw) {

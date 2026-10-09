@@ -4,7 +4,6 @@ import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,8 +28,8 @@ import com.emotion.vo.TiantiVO;
 /**
  * PRD 2.0 三条只读页面接口：连板天梯 / 首板池 / 主线详情。
  *
- * <p>都要登录态：主线判定与龙头标签按账号的题材登记对齐（催化剂硬度取自各自的 t_theme），
- * 主线详情还会读当日人工列。服务间共用 {@link PrdMetricsService} 快照——三个页面看到的
+ * <p>主线判定与龙头标签读全平台共享的题材登记（催化剂硬度取自 t_theme），主线详情还读当日人工列。
+ * 服务间共用 {@link PrdMetricsService} 快照——三个页面看到的
  * 主线与打分引擎进分的是同一份，不存在页面一套、算分一套。
  */
 @RestController
@@ -54,9 +53,8 @@ public class PrdController {
 
     /** 连板天梯：四层分组 + 龙头分工标签（PRD P2）。 */
     @GetMapping("/tianti")
-    public ApiResponse<TiantiVO> tianti(Authentication auth,
-                                        @RequestParam(required = false) String date) {
-        return ApiResponse.ok(tiantiService.vo(userId(auth), parse(date)));
+    public ApiResponse<TiantiVO> tianti(@RequestParam(required = false) String date) {
+        return ApiResponse.ok(tiantiService.vo(parse(date)));
     }
 
     /**
@@ -76,42 +74,32 @@ public class PrdController {
 
     /** 破壁详情：曲线上 ☆（试探）/★（破壁成功）那天的助攻、盘口、情绪闸门与次日结算。 */
     @GetMapping("/tianti/break-detail")
-    public ApiResponse<BreakDetailVO> breakDetail(Authentication auth,
-                                                  @RequestParam(required = false) String date) {
-        return ApiResponse.ok(breakDetailService.vo(userId(auth), parse(date)));
+    public ApiResponse<BreakDetailVO> breakDetail(@RequestParam(required = false) String date) {
+        return ApiResponse.ok(breakDetailService.vo(parse(date)));
     }
 
     /** 首板池：封住/炸板两表 + 1 进 2 晋级统计（PRD P3）。 */
     @GetMapping("/shouban")
-    public ApiResponse<ShoubanVO> shouban(Authentication auth,
-                                          @RequestParam(required = false) String date) {
-        return ApiResponse.ok(shoubanService.vo(userId(auth), parse(date)));
+    public ApiResponse<ShoubanVO> shouban(@RequestParam(required = false) String date) {
+        return ApiResponse.ok(shoubanService.vo(parse(date)));
     }
 
     /** 主线详情：五要素 + 生命周期 + 龙头分工 + 轮动信号（PRD P6）。 */
     @GetMapping("/mainline")
-    public ApiResponse<MainlineVO> mainline(Authentication auth,
-                                            @RequestParam(required = false) String date) {
-        return ApiResponse.ok(mainlineService.vo(userId(auth), parse(date)));
+    public ApiResponse<MainlineVO> mainline(@RequestParam(required = false) String date) {
+        return ApiResponse.ok(mainlineService.vo(parse(date)));
     }
 
     /** 双轨 v0.2：雷达区「升级到主线区」→ 落人工主线标记，返回更新后的双轨数据。 */
     @PostMapping("/mainline/promote")
-    public ApiResponse<MainlineVO> promote(Authentication auth,
-                                           @RequestBody MainlinePromoteRequest req) {
-        return ApiResponse.ok(mainlineService.promote(userId(auth), req.getTradeDate(), req.getIndustry()));
+    public ApiResponse<MainlineVO> promote(@RequestBody MainlinePromoteRequest req) {
+        return ApiResponse.ok(mainlineService.promote(req.getTradeDate(), req.getIndustry()));
     }
 
     /** 双轨 v0.2：取消人工主线标记，返回更新后的双轨数据。 */
     @DeleteMapping("/mainline/promote")
-    public ApiResponse<MainlineVO> cancel(Authentication auth,
-                                          @RequestBody MainlinePromoteRequest req) {
-        return ApiResponse.ok(mainlineService.cancel(userId(auth), req.getTradeDate(), req.getIndustry()));
-    }
-
-    /** 登录态里带的是账号 id（JwtAuthFilter 放进 principal），题材行按它查各自的登记。 */
-    private static Long userId(Authentication auth) {
-        return (Long) auth.getPrincipal();
+    public ApiResponse<MainlineVO> cancel(@RequestBody MainlinePromoteRequest req) {
+        return ApiResponse.ok(mainlineService.cancel(req.getTradeDate(), req.getIndustry()));
     }
 
     private static LocalDate parse(String raw) {

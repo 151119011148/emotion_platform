@@ -15,10 +15,10 @@ public interface ThemeSnapshotMapper extends BaseMapper<ThemeSnapshot> {
 
     @Insert("<script>"
             + "INSERT INTO t_theme_daily_snapshot "
-            + "(trade_date, user_id, `rank`, theme_name, zt_count, strength, max_board, "
+            + "(trade_date, `rank`, theme_name, zt_count, strength, max_board, "
             + " continuous_days, hardness, lifecycle, related_industries, leader_code, leader_name, leader_board) VALUES "
             + "<foreach collection='rows' item='r' separator=','>"
-            + "(#{r.tradeDate},#{r.userId},#{r.rank},#{r.themeName},#{r.ztCount},#{r.strength},#{r.maxBoard},"
+            + "(#{r.tradeDate},#{r.rank},#{r.themeName},#{r.ztCount},#{r.strength},#{r.maxBoard},"
             + " #{r.continuousDays},#{r.hardness},#{r.lifecycle},#{r.relatedIndustries},#{r.leaderCode},#{r.leaderName},#{r.leaderBoard})"
             + "</foreach></script>")
     int insertBatch(@Param("rows") List<ThemeSnapshot> rows);

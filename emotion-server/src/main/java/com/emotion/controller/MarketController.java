@@ -8,7 +8,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -105,8 +104,7 @@ public class MarketController {
     }
 
     @GetMapping("/snapshot")
-    public ApiResponse<MarketSnapshotVO> snapshot(Authentication auth,
-                                                  @RequestParam(required = false) String date,
+    public ApiResponse<MarketSnapshotVO> snapshot(@RequestParam(required = false) String date,
                                                   @RequestParam(defaultValue = "false") boolean refresh) {
         LocalDate tradeDate = parse(date);
         MarketSnapshotVO vo = marketDataService.snapshot(tradeDate, refresh);
@@ -139,14 +137,12 @@ public class MarketController {
     /**
      * 子项读数：第 4 维两个家数口径、第 8 维阵眼、第 9 维监管名单，各带自己的算式。
      *
-     * <p>要带登录态：第 8 维问的是"他设的阵眼今天反馈如何"，那是账号各自的登记，不是公开事实。
      * <p>只交公开读数，八列 {@code manual_*} 一概不回——人工值从表单走 {@code /api/records}，
      * 响应里带一份就有第二份真值，也就给了"拉一次行情把手改洗成自动值"的机会。
      */
     @GetMapping("/score-context")
-    public ApiResponse<ScoreContextVO> scoreContext(Authentication auth,
-                                                    @RequestParam(required = false) String date) {
-        return ApiResponse.ok(scoreContextService.scoreContextVO(userId(auth), parse(date)));
+    public ApiResponse<ScoreContextVO> scoreContext(@RequestParam(required = false) String date) {
+        return ApiResponse.ok(scoreContextService.scoreContextVO(parse(date)));
     }
 
     /**
@@ -239,11 +235,6 @@ public class MarketController {
     @PostMapping("/stock-dict/sync")
     public ApiResponse<StockDictService.SyncResult> syncStockDict() {
         return ApiResponse.ok(stockDictService.sync());
-    }
-
-    /** 登录态里带的是账号 id（JwtAuthFilter 放进 principal），阵眼按它查各自的登记。 */
-    private static Long userId(Authentication auth) {
-        return (Long) auth.getPrincipal();
     }
 
     private static LocalDate require(String raw) {

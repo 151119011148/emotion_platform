@@ -34,7 +34,6 @@ import java.util.Map;
  */
 class NodeServiceTest {
 
-    private static final Long USER = 2L;
 
     /** lambda 列名要查 TableInfo 缓存，没有 Spring 就得自己把这张表的元数据灌进去。 */
     @BeforeAll
@@ -220,7 +219,7 @@ class NodeServiceTest {
         CandidateStock staleD0 = candidate("600892", "龙版传媒", day);
 
         svc.tagCandidates(Arrays.asList(byNodeStock, byAnchor, poolNotRoster, rosterNotPool,
-                none, both, staleD0), USER);
+                none, both, staleD0));
 
         assertEquals(Arrays.asList("NODE_STOCK"), kinds(byNodeStock), "节点票该被认出来");
         assertEquals(Arrays.asList("ANCHOR"), kinds(byAnchor), "锚定龙头按名称匹配");
@@ -255,7 +254,7 @@ class NodeServiceTest {
 
         CandidateStock nextDay = candidate("002285", "世联行", LocalDate.of(2026, 9, 18));
         CandidateStock laterDay = candidate("002285", "世联行", LocalDate.of(2026, 9, 22));
-        svc.tagCandidates(Arrays.asList(nextDay, laterDay), USER);
+        svc.tagCandidates(Arrays.asList(nextDay, laterDay));
 
         assertEquals(Arrays.asList("D0_CAND"), kinds(nextDay), "D0 的次一交易日该挂标");
         assertEquals(0, kinds(laterDay).size(), "往后第二天起就不是这份池子的接力日了");
@@ -282,7 +281,7 @@ class NodeServiceTest {
         NodeService empty = new NodeService(eventMapper(Arrays.asList(noDetail)),
                 null, null, stockMapper(PREV), null, null, null);
         CandidateStock noPool = candidate("002285", "世联行", LocalDate.of(2026, 9, 18));
-        empty.tagCandidates(Arrays.asList(noPool), USER);
+        empty.tagCandidates(Arrays.asList(noPool));
         assertEquals(0, kinds(noPool).size(), "D0 那天没明细 → 池子无从复算，别拿手打名单兜底");
 
         NodeService b = new NodeService(eventMapper(Arrays.asList(systemB)),
@@ -290,7 +289,7 @@ class NodeServiceTest {
                         twoBoard(LocalDate.of(2026, 9, 17), "002285", "世联行")),
                 null, null, null);
         CandidateStock bRow = candidate("002285", "世联行", LocalDate.of(2026, 9, 18));
-        b.tagCandidates(Arrays.asList(bRow), USER);
+        b.tagCandidates(Arrays.asList(bRow));
         assertEquals(0, kinds(bRow).size(), "B 的池子是板块内首板，不能拿全市场二板挂标");
     }
 
@@ -300,7 +299,7 @@ class NodeServiceTest {
         NodeService svc = new NodeService(eventMapper(new ArrayList<NodeEvent>()),
                 null, null, null, null, null, null);
         CandidateStock c = candidate("600865", "百大集团", LocalDate.of(2026, 9, 18));
-        svc.tagCandidates(Arrays.asList(c), USER);
+        svc.tagCandidates(Arrays.asList(c));
         assertEquals(0, kinds(c).size());
     }
 
@@ -321,7 +320,7 @@ class NodeServiceTest {
                 eventMapper(Arrays.asList(inWindow, tooOld, dead, noD0, noCode)),
                 null, null, stockMapper(WINDOW), null, null, null);
 
-        Map<String, NodeEvent> got = svc.scoredNodeStocks(USER, LocalDate.of(2026, 9, 21), 3);
+        Map<String, NodeEvent> got = svc.scoredNodeStocks(LocalDate.of(2026, 9, 21), 3);
 
         assertEquals(Arrays.asList("603230"), new ArrayList<>(got.keySet()),
                 "09-21 往前数 3 个有明细的日子是 09-21/09-18/09-17，只有这条 D0 撞得上");
@@ -337,7 +336,7 @@ class NodeServiceTest {
         NodeService svc = new NodeService(eventMapper(Arrays.asList(older, newer)),
                 null, null, stockMapper(WINDOW), null, null, null);
 
-        Map<String, NodeEvent> got = svc.scoredNodeStocks(USER, LocalDate.of(2026, 9, 21), 3);
+        Map<String, NodeEvent> got = svc.scoredNodeStocks(LocalDate.of(2026, 9, 21), 3);
 
         assertEquals(1, got.size(), "同一只票只留一条");
         assertEquals(newer, got.get("603230"));
@@ -346,7 +345,6 @@ class NodeServiceTest {
     private static NodeEvent node(Long id, String nodeStock, LocalDate d0, String status) {
         NodeEvent e = new NodeEvent();
         e.setId(id);
-        e.setUserId(USER);
         e.setNodeStock(nodeStock);
         e.setD0Date(d0);
         e.setStatus(status);
@@ -355,14 +353,14 @@ class NodeServiceTest {
 
     private static Wrapper<NodeEvent> historyWrapper() {
         CAUGHT.clear();
-        new NodeService(capturingMapper(), null, null, null, null, null, null).listByUser(USER);
-        assertEquals(1, CAUGHT.size(), "listByUser 应该只发一次查询");
+        new NodeService(capturingMapper(), null, null, null, null, null, null).listAll();
+        assertEquals(1, CAUGHT.size(), "listAll 应该只发一次查询");
         return CAUGHT.get(0);
     }
 
     private static Wrapper<NodeEvent> currentWrapper() {
         CAUGHT.clear();
-        new NodeService(capturingMapper(), null, null, null, null, null, null).getCurrent(USER);
+        new NodeService(capturingMapper(), null, null, null, null, null, null).getCurrent();
         assertEquals(1, CAUGHT.size(), "getCurrent 应该只发一次查询");
         return CAUGHT.get(0);
     }
@@ -377,13 +375,6 @@ class NodeServiceTest {
     void historyLeadsWithD0NotCreatedAt() {
         // 补录一个几个月前的节点，不该把它顶到第一行：他看的是"哪一天起的"
         assertEquals("ORDER BY d0_date DESC,created_at DESC", orderBy(historyWrapper()));
-    }
-
-    @Test
-    void historyStillFiltersToThisUser() {
-        String sql = historyWrapper().getSqlSegment();
-        assertTrue(sql.contains("user_id = "), sql);
-        assertTrue(sql.indexOf("user_id") < sql.indexOf("ORDER BY"), "过滤该在排序之前：" + sql);
     }
 
     @Test

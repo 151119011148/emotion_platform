@@ -33,7 +33,6 @@ class ReviewFetchServiceTest {
 
     private static final LocalDate TRADING = LocalDate.of(2026, 9, 10); // 周四，非周末且晚于今天(09-13)
     private static final LocalDate SUNDAY = LocalDate.of(2026, 9, 13);
-    private static final long USER = 1L;
 
     private final MarketDataService marketDataService = mock(MarketDataService.class);
     private final MarketDailyStore marketDailyStore = mock(MarketDailyStore.class);
@@ -57,7 +56,7 @@ class ReviewFetchServiceTest {
     @Test
     void weekendDateIsRejectedBeforeAnyUpstreamCall() {
         Collector c = new Collector();
-        service.runFetch(SUNDAY, USER, c.events::add);
+        service.runFetch(SUNDAY, c.events::add);
 
         assertTrue(c.events.stream().anyMatch(e -> "T1".equals(e.task) && "fail".equals(e.status)));
         assertEquals(2, c.events.size(), "周末应只有 T1 的 running+fail 两条事件");
@@ -82,10 +81,10 @@ class ReviewFetchServiceTest {
         when(premiumTierStore.read(TRADING)).thenReturn(null);
         when(industrySnapshotService.replaceForDate(TRADING)).thenReturn(3);
         when(surveillanceService.trackedCodes(TRADING, TRADING)).thenReturn(java.util.Collections.emptyList());
-        when(dailyRecordService.recalc(USER, TRADING)).thenReturn(null);
+        when(dailyRecordService.recalc(TRADING)).thenReturn(null);
 
         Collector c = new Collector();
-        service.runFetch(TRADING, USER, c.events::add);
+        service.runFetch(TRADING, c.events::add);
 
         // 每个任务恰好有一次终结态（T1..T8 + done，不含 running 起手）
         Map<String, Long> terminal = countTerminal(c.events);

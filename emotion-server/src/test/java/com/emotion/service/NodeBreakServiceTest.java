@@ -44,7 +44,6 @@ import com.emotion.vo.TiantiVO;
  */
 class NodeBreakServiceTest {
 
-    private static final Long USER = 1L;
     private static final LocalDate D_0722 = LocalDate.of(2026, 7, 22);
     private static final LocalDate D_0723 = LocalDate.of(2026, 7, 23);
     private static final LocalDate D_0827 = LocalDate.of(2026, 8, 27);
@@ -169,12 +168,12 @@ class NodeBreakServiceTest {
     @Test
     void createOnSuccessDayInsertsBothRowsAtOnce() {
         Fixture f = fixture(Arrays.asList(probePoint(), breakPoint()));
-        when(f.nodes.create(eq(USER), any(NodeEvent.class))).thenReturn(new NodeVO());
+        when(f.nodes.create(any(NodeEvent.class))).thenReturn(new NodeVO());
 
-        BreakNodeCreateVO out = f.service.createNodes(USER, D_0723);
+        BreakNodeCreateVO out = f.service.createNodes(D_0723);
 
         ArgumentCaptor<NodeEvent> created = ArgumentCaptor.forClass(NodeEvent.class);
-        verify(f.nodes, times(2)).create(eq(USER), created.capture());
+        verify(f.nodes, times(2)).create(created.capture());
         assertEquals(Arrays.asList(NodeBreakService.TYPE_BREAK, NodeBreakService.TYPE_PROBE),
                 Arrays.asList(created.getAllValues().get(0).getNodeType(),
                         created.getAllValues().get(1).getNodeType()));
@@ -182,7 +181,7 @@ class NodeBreakServiceTest {
         assertEquals(D_0722, created.getAllValues().get(1).getD0Date());
         assertEquals(Boolean.FALSE, out.getAlreadyExists());
         assertEquals(2, out.getRows().size());
-        verify(f.detail).scoreImpact(eq(USER), any(), any(), any());
+        verify(f.detail).scoreImpact(any(), any(), any());
     }
 
     /**
@@ -196,12 +195,12 @@ class NodeBreakServiceTest {
         Fixture f = fixture(Arrays.asList(probePoint(), breakPoint()));
         when(f.mapper.selectOne(any(LambdaQueryWrapper.class)))
                 .thenReturn(held(77L), held(78L));
-        when(f.nodes.detail(USER, 77L)).thenReturn(row(77L));
-        when(f.nodes.detail(USER, 78L)).thenReturn(row(78L));
+        when(f.nodes.detail(77L)).thenReturn(row(77L));
+        when(f.nodes.detail(78L)).thenReturn(row(78L));
 
-        BreakNodeCreateVO out = f.service.createNodes(USER, D_0723);
+        BreakNodeCreateVO out = f.service.createNodes(D_0723);
 
-        verify(f.nodes, never()).create(any(), any());
+        verify(f.nodes, never()).create(any());
         assertEquals(Boolean.TRUE, out.getAlreadyExists());
         assertEquals(Arrays.asList(77L, 78L),
                 Arrays.asList(out.getRows().get(0).getId(), out.getRows().get(1).getId()));
@@ -226,12 +225,12 @@ class NodeBreakServiceTest {
         NodeEvent held = new NodeEvent();
         held.setId(88L);
         when(f.mapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(held, (NodeEvent) null);
-        when(f.nodes.create(eq(USER), any(NodeEvent.class))).thenReturn(new NodeVO());
-        when(f.nodes.detail(eq(USER), eq(88L))).thenReturn(new NodeVO());
+        when(f.nodes.create(any(NodeEvent.class))).thenReturn(new NodeVO());
+        when(f.nodes.detail(eq(88L))).thenReturn(new NodeVO());
 
-        BreakNodeCreateVO out = f.service.createNodes(USER, D_0723);
+        BreakNodeCreateVO out = f.service.createNodes(D_0723);
 
-        verify(f.nodes, times(1)).create(eq(USER), any(NodeEvent.class));
+        verify(f.nodes, times(1)).create(any(NodeEvent.class));
         assertEquals(Boolean.FALSE, out.getAlreadyExists());
         assertEquals(2, out.getRows().size());
     }
@@ -242,10 +241,10 @@ class NodeBreakServiceTest {
         Fixture f = fixture(Arrays.asList(plainPoint(), plainPoint(D_0723)));
 
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-                () -> f.service.createNodes(USER, D_0723));
+                () -> f.service.createNodes(D_0723));
 
         assertTrue(e.getMessage().contains("没有破壁事件"), e.getMessage());
-        verify(f.nodes, never()).create(any(), any());
+        verify(f.nodes, never()).create(any());
     }
 
     /** 曲线上没有这一天：与"有那天但那天天平无奇"是同一种没有节点可立。 */
@@ -253,7 +252,7 @@ class NodeBreakServiceTest {
     void createOnADayWithoutCurvePointRefuses() {
         Fixture f = fixture(Arrays.asList(plainPoint(), plainPoint(D_0723)));
 
-        assertThrows(IllegalArgumentException.class, () -> f.service.createNodes(USER, LocalDate.of(2026, 7, 24)));
+        assertThrows(IllegalArgumentException.class, () -> f.service.createNodes(LocalDate.of(2026, 7, 24)));
     }
 
     // ---------- fixture ----------
@@ -279,7 +278,7 @@ class NodeBreakServiceTest {
             this.nodes = mock(NodeService.class);
             this.mapper = mock(NodeEventMapper.class);
             this.detail = mock(BreakDetailService.class);
-            when(this.detail.scoreImpact(any(), any(), any(), any())).thenReturn("节点分说明");
+            when(this.detail.scoreImpact(any(), any(), any())).thenReturn("节点分说明");
             this.service = new NodeBreakService(tianti, nodes, mapper, detail);
         }
     }

@@ -333,9 +333,11 @@ public class ReviewLedgerService {
      * 整日替换当天的预判与对答案，<b>两种 kind 一起换</b>（见 {@link #BOTH_KINDS}）。
      * 所以前端必须把两批一起发回来——只发 PLAN 会把 ANSWER 一起清掉，这是这个端点唯一的口径。
      *
+     * <p>预判不是台账：它进分、进复盘文档，全平台共享一份，改它的权限由写门槛统一挡。
+     *
      * @return 落库行数
      */
-    public int savePredictions(Long userId, LocalDate date, List<PredictionRequest> rows) {
+    public int savePredictions(LocalDate date, List<PredictionRequest> rows) {
         List<PredictionRequest> incoming = rows == null ? new ArrayList<PredictionRequest>() : rows;
         List<String> errors = new ArrayList<>();
         List<Prediction> out = new ArrayList<>();
@@ -363,7 +365,6 @@ public class ReviewLedgerService {
                 continue;
             }
             Prediction p = new Prediction();
-            p.setUserId(userId);
             p.setTradeDate(date);
             p.setKind(kind);
             p.setName(name);
@@ -390,7 +391,7 @@ public class ReviewLedgerService {
             out.add(p);
         }
         throwIfAny(errors);
-        return predictionStore.replaceForDate(userId, date, out, BOTH_KINDS);
+        return predictionStore.replaceForDate(date, out, BOTH_KINDS);
     }
 
     /** 代码只查一次，名字以 t_stock 为准——和导入器同一个规矩，两页不该给出两个名。 */

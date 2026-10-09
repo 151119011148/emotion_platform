@@ -2,7 +2,6 @@ package com.emotion.controller;
 
 import com.emotion.dto.LoginRequest;
 import com.emotion.dto.RegisterRequest;
-import com.emotion.exception.BizException;
 import com.emotion.service.AuthService;
 import com.emotion.util.AuthContext;
 import com.emotion.vo.ApiResponse;
@@ -30,7 +29,7 @@ public class AuthController {
      */
     @PostMapping("/register")
     public ApiResponse<LoginResponse> register(@Valid @RequestBody RegisterRequest req) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作账号");
         return ApiResponse.ok(authService.register(req));
     }
 
@@ -54,11 +53,5 @@ public class AuthController {
 
     private static Long userId(Authentication auth) {
         return auth == null ? null : (Long) auth.getPrincipal();
-    }
-
-    private static void requireSuperAdmin() {
-        if (!AuthContext.isSuperAdmin()) {
-            throw new BizException("仅超级管理员可操作账号");
-        }
     }
 }

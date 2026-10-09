@@ -17,7 +17,7 @@ import java.util.List;
 /**
  * 日内核心题材 Top5 快照的唯一写口：题材榜（{@code IntradayVO.ThemeRow}）按强度已排好序，
  * 取前 N 名持久化到 {@code t_theme_daily_snapshot}，先删后插（同行业快照约定）。
- * 题材维度按用户个性化，快照含 userId；当日已有快照时跳过（幂等，读取不重复刷写）。
+ * 快照按交易日全局一份（键 (trade_date, rank)）；当日已有快照时跳过（幂等，读取不重复刷写）。
  */
 @Service
 public class ThemeSnapshotService {
@@ -35,13 +35,12 @@ public class ThemeSnapshotService {
 
     /** 从已排序的题材名次里落 Top N；当日已有快照则跳过。返回写入条数；0 表示已有/为空。 */
     @Transactional(rollbackFor = Exception.class)
-    public int snapshotTop5(Long userId, LocalDate date,
+    public int snapshotTop5(LocalDate date,
                             List<IntradayVO.ThemeRow> rankedRows) {
-        if (userId == null || rankedRows == null || rankedRows.isEmpty()) {
+        if (rankedRows == null || rankedRows.isEmpty()) {
             return 0;
         }
         long exists = mapper.selectCount(new LambdaQueryWrapper<ThemeSnapshot>()
-                .eq(ThemeSnapshot::getUserId, userId)
                 .eq(ThemeSnapshot::getTradeDate, date));
         if (exists > 0) {
             return 0;
@@ -50,7 +49,6 @@ public class ThemeSnapshotService {
         for (int i = 0; i < Math.min(TOP_N, rankedRows.size()); i++) {
             IntradayVO.ThemeRow r = rankedRows.get(i);
             ThemeSnapshot s = new ThemeSnapshot();
-            s.setUserId(userId);
             s.setTradeDate(date);
             s.setRank(i + 1);
             s.setThemeName(r.getName());
@@ -74,16 +72,14 @@ public class ThemeSnapshotService {
             return 0;
         }
         mapper.delete(new LambdaQueryWrapper<ThemeSnapshot>()
-                .eq(ThemeSnapshot::getUserId, userId)
                 .eq(ThemeSnapshot::getTradeDate, date));
         mapper.insertBatch(top);
-        log.info("题材 Top{} 快照写入 user={} {}：{}", TOP_N, userId, date, top.size());
+        log.info("题材 Top{} 快照写入 {}：{}", TOP_N, date, top.size());
         return top.size();
     }
 
-    public List<ThemeSnapshot> list(Long userId, LocalDate date) {
+    public List<ThemeSnapshot> list(LocalDate date) {
         return mapper.selectList(new LambdaQueryWrapper<ThemeSnapshot>()
-                .eq(ThemeSnapshot::getUserId, userId)
                 .eq(ThemeSnapshot::getTradeDate, date)
                 .orderByAsc(ThemeSnapshot::getRank));
     }

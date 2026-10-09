@@ -93,9 +93,9 @@ public class TiantiService {
         this.industryClassify = industryClassify;
     }
 
-    public TiantiVO vo(Long userId, LocalDate requested) {
+    public TiantiVO vo(LocalDate requested) {
         LocalDate date = requested != null ? requested : LocalDate.now(CN);
-        PrdMetricsService.Snapshot snap = prdMetrics.snapshot(userId, date);
+        PrdMetricsService.Snapshot snap = prdMetrics.snapshot(date);
 
         List<MarketStock> zt = listPool(date, MarketStock.POOL_LIMIT_UP);
         List<MarketStock> zb = listPool(date, MarketStock.POOL_BROKEN);
@@ -140,8 +140,8 @@ public class TiantiService {
         String kaWeiCode = snap.kaWei == null ? null : snap.kaWei.getCode();
 
         int h = Math.max(snap.maxBoard, 2);
-        // 人工总龙头：某日用户手动指定的身份（与自动"空间板"并列，可同可异）
-        String manualLeader = manualLeaderService.codeOf(userId, date);
+        // 人工总龙头：某日手动指定的身份（与自动"空间板"并列，可同可异）
+        String manualLeader = manualLeaderService.codeOf(date);
 
         // 天梯：n 从 H 往下到 2，每层独立判晋级
         Set<String> ztCodes = new HashSet<>();

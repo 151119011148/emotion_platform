@@ -49,7 +49,6 @@ public class NodeDetect {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long userId;
     /** NULL=人工标记，不属于任何策略。 */
     private Long strategyId;
     private LocalDate tradeDate;

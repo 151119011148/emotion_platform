@@ -26,7 +26,7 @@ import com.emotion.vo.TiantiVO;
  * 与详情面板和曲线上那颗标记同一个来源。这里只负责把它翻译成 {@code t_node_event} 的行。
  *
  * <p>幂等只在服务里挡：{@code t_node_event} 上没有唯一键（只有三个普通索引），
- * 同 {@code user + d0Date + nodeType} 已存在就把既有行交回去，不重复插。
+ * 同 {@code d0Date + nodeType} 已存在就把既有行交回去，不重复插。
  */
 @Service
 public class NodeBreakService {
@@ -61,7 +61,7 @@ public class NodeBreakService {
      * @throws IllegalArgumentException 这天曲线上没有 ☆/★，没有破壁事件可立
      */
     @Transactional
-    public BreakNodeCreateVO createNodes(Long userId, LocalDate date) {
+    public BreakNodeCreateVO createNodes(LocalDate date) {
         TiantiService.BreakDay day = tiantiService.breakDay(date);
         List<Line> lines = linesOf(day.getPoint(), day.getPrev());
         if (lines.isEmpty()) {
@@ -71,19 +71,19 @@ public class NodeBreakService {
         List<NodeVO> rows = new ArrayList<>();
         int inserted = 0;
         for (Line line : lines) {
-            NodeEvent held = findExisting(userId, line.d0Date, line.nodeType);
+            NodeEvent held = findExisting(line.d0Date, line.nodeType);
             if (held == null) {
-                rows.add(nodeService.create(userId, toEntity(line)));
+                rows.add(nodeService.create(toEntity(line)));
                 inserted++;
             } else {
-                rows.add(nodeService.detail(userId, held.getId()));
+                rows.add(nodeService.detail(held.getId()));
             }
         }
         BreakNodeCreateVO out = new BreakNodeCreateVO();
         out.setRows(rows);
         out.setAlreadyExists(inserted == 0);
         Line head = lines.get(0);
-        out.setScoreImpact(breakDetailService.scoreImpact(userId, head.d0Date,
+        out.setScoreImpact(breakDetailService.scoreImpact(head.d0Date,
                 head.stockCode, head.nodeType));
         return out;
     }
@@ -184,9 +184,8 @@ public class NodeBreakService {
         return (name == null || name.trim().isEmpty() ? "" : name.trim()) + "(" + code + ")";
     }
 
-    private NodeEvent findExisting(Long userId, LocalDate d0Date, String nodeType) {
+    private NodeEvent findExisting(LocalDate d0Date, String nodeType) {
         return nodeEventMapper.selectOne(new LambdaQueryWrapper<NodeEvent>()
-                .eq(NodeEvent::getUserId, userId)
                 .eq(NodeEvent::getD0Date, d0Date)
                 .eq(NodeEvent::getNodeType, nodeType)
                 .last("LIMIT 1"));

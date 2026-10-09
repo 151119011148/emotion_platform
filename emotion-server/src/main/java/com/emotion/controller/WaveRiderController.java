@@ -102,8 +102,8 @@ public class WaveRiderController {
     // ------------------------------------------------------------------ 策略
 
     @GetMapping("/strategies")
-    public ApiResponse<List<Map<String, Object>>> strategies(Authentication auth) {
-        return ApiResponse.ok(configService.listStrategies(userId(auth)));
+    public ApiResponse<List<Map<String, Object>>> strategies() {
+        return ApiResponse.ok(configService.listStrategies());
     }
 
     @PostMapping("/strategies")
@@ -113,8 +113,8 @@ public class WaveRiderController {
     }
 
     @GetMapping("/strategies/{id}")
-    public ApiResponse<Map<String, Object>> detail(Authentication auth, @PathVariable Long id) {
-        Strategy s = owned(auth, id);
+    public ApiResponse<Map<String, Object>> detail(@PathVariable Long id) {
+        Strategy s = configService.requireStrategy(id);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("strategy", s);
         out.put("currentConfig", configService.currentConfig(id));
@@ -124,23 +124,23 @@ public class WaveRiderController {
 
     /** 停用只影响定时任务，界面的「立即运行」照常可用。 */
     @PutMapping("/strategies/{id}/enabled")
-    public ApiResponse<Strategy> setEnabled(Authentication auth, @PathVariable Long id,
-                                           @RequestParam boolean enabled) {
-        owned(auth, id);
+    public ApiResponse<Strategy> setEnabled(@PathVariable Long id,
+ @RequestParam boolean enabled) {
+        configService.requireStrategy(id);
         return ApiResponse.ok(configService.setEnabled(id, enabled));
     }
 
     @PostMapping("/strategies/{id}/versions")
     public ApiResponse<StrategyVersion> saveVersion(Authentication auth, @PathVariable Long id,
                                                     @RequestBody WaveRiderSaveVersionRequest req) {
-        owned(auth, id);
+        configService.requireStrategy(id);
         String json = toJson(req.getConfig());
         return ApiResponse.ok(configService.saveVersion(id, json, req.getChangeNote(), userId(auth)));
     }
 
     @GetMapping("/strategies/{id}/versions")
-    public ApiResponse<List<StrategyVersion>> versions(Authentication auth, @PathVariable Long id) {
-        owned(auth, id);
+    public ApiResponse<List<StrategyVersion>> versions(@PathVariable Long id) {
+        configService.requireStrategy(id);
         return ApiResponse.ok(configService.listVersions(id));
     }
 
@@ -148,7 +148,7 @@ public class WaveRiderController {
     @PostMapping("/strategies/{id}/rollback/{versionId}")
     public ApiResponse<StrategyVersion> rollback(Authentication auth, @PathVariable Long id,
                                                  @PathVariable Long versionId) {
-        owned(auth, id);
+        configService.requireStrategy(id);
         return ApiResponse.ok(configService.rollback(id, versionId, userId(auth)));
     }
 
@@ -160,9 +160,9 @@ public class WaveRiderController {
      * 分成两类是为了让界面能把「提醒」和「拦住」画得不一样。
      */
     @PostMapping("/strategies/{id}/validate")
-    public ApiResponse<Map<String, Object>> validate(Authentication auth, @PathVariable Long id,
-                                                     @RequestBody WaveRiderSaveVersionRequest req) {
-        owned(auth, id);
+    public ApiResponse<Map<String, Object>> validate(@PathVariable Long id,
+ @RequestBody WaveRiderSaveVersionRequest req) {
+        configService.requireStrategy(id);
         WaveRiderConfig cfg = configService.parse(toJson(req.getConfig()));
         List<String> fatal = cfg.validate();
         Map<String, Object> out = new LinkedHashMap<>();
@@ -194,24 +194,24 @@ public class WaveRiderController {
     @PostMapping("/templates/{code}/apply")
     public ApiResponse<StrategyVersion> applyTemplate(Authentication auth, @PathVariable String code,
                                                       @RequestParam Long strategyId) {
-        owned(auth, strategyId);
+        configService.requireStrategy(strategyId);
         return ApiResponse.ok(configService.applyTemplate(strategyId, code, userId(auth)));
     }
 
     @GetMapping("/versions/{v1}/diff/{v2}")
-    public ApiResponse<Map<String, Object>> diff(Authentication auth,
-                                                 @PathVariable Long v1, @PathVariable Long v2) {
+    public ApiResponse<Map<String, Object>> diff(
+ @PathVariable Long v1, @PathVariable Long v2) {
         return ApiResponse.ok(configService.diff(v1, v2));
     }
 
     // ------------------------------------------------------------------ 运行
 
     @PostMapping("/run")
-    public ApiResponse<Map<String, Object>> run(Authentication auth, @RequestBody WaveRiderRunRequest req) {
+    public ApiResponse<Map<String, Object>> run(@RequestBody WaveRiderRunRequest req) {
         if (req.getStrategyId() == null) {
             throw new IllegalArgumentException("strategyId 不能为空");
         }
-        owned(auth, req.getStrategyId());
+        configService.requireStrategy(req.getStrategyId());
         LocalDate date = parse(req.getTradeDate(), LocalDate.now());
         boolean dryRun = Boolean.TRUE.equals(req.getDryRun());
         WaveRiderEngine.Outcome o = engine.run(req.getStrategyId(), date, StrategyRun.TRIGGER_MANUAL, dryRun);
@@ -232,7 +232,7 @@ public class WaveRiderController {
         out.put("t1Backfill", dryRun ? "skipped" : "scheduled");
         out.put("funnel", o.getFunnel());
         out.put("warnings", o.getWarnings());
-        nodeService.tagCandidates(o.getCandidates(), userId(auth));
+        nodeService.tagCandidates(o.getCandidates());
         topicHeatService.tagTdxThemes(o.getCandidates(), date);
         tagAlerts(o.getCandidates(), date);
         out.put("candidates", o.getCandidates());
@@ -246,9 +246,9 @@ public class WaveRiderController {
      * 以及候选是手工试跑出来的（试跑不经定时任务，没有前置步骤替它补）。
      */
     @PostMapping("/backfill")
-    public ApiResponse<Map<String, Object>> backfill(Authentication auth, @RequestParam Long strategyId,
-                                                     @RequestParam String date) {
-        owned(auth, strategyId);
+    public ApiResponse<Map<String, Object>> backfill(@RequestParam Long strategyId,
+ @RequestParam String date) {
+        configService.requireStrategy(strategyId);
         LocalDate d = parse(date, LocalDate.now());
         int n = engine.backfillT1(strategyId, d);
         Map<String, Object> out = new LinkedHashMap<>();
@@ -259,9 +259,9 @@ public class WaveRiderController {
     }
 
     @GetMapping("/runs")
-    public ApiResponse<List<StrategyRun>> runs(Authentication auth, @RequestParam Long strategyId,
-                                               @RequestParam(required = false) String date) {
-        owned(auth, strategyId);
+    public ApiResponse<List<StrategyRun>> runs(@RequestParam Long strategyId,
+ @RequestParam(required = false) String date) {
+        configService.requireStrategy(strategyId);
         LambdaQueryWrapper<StrategyRun> q = new LambdaQueryWrapper<StrategyRun>()
                 .eq(StrategyRun::getStrategyId, strategyId)
                 .orderByDesc(StrategyRun::getStartedAt)
@@ -279,9 +279,9 @@ public class WaveRiderController {
      * 直接回一个空表格会让人以为策略坏了。
      */
     @GetMapping("/candidates")
-    public ApiResponse<Map<String, Object>> candidates(Authentication auth, @RequestParam Long strategyId,
-                                                      @RequestParam(required = false) String date) {
-        owned(auth, strategyId);
+    public ApiResponse<Map<String, Object>> candidates(@RequestParam Long strategyId,
+ @RequestParam(required = false) String date) {
+        configService.requireStrategy(strategyId);
         LocalDate target = (date == null || date.trim().isEmpty())
                 ? latestCandidateDate(strategyId) : parse(date, LocalDate.now());
 
@@ -296,7 +296,7 @@ public class WaveRiderController {
 
         List<CandidateStock> rows = candidateMapper.listOfDay(strategyId, target);
         // 读侧打「来自节点追踪」的标（瞬态）：节点事件会被复算改写，落库等于把当时的判断冻在候选行上
-        nodeService.tagCandidates(rows, userId(auth));
+        nodeService.tagCandidates(rows);
         // 题材同上：读侧现算。题材成分与当日热度都会变，落库等于把「今天谁最热」冻住
         topicHeatService.tagTdxThemes(rows, target);
         tagAlerts(rows, target);
@@ -328,12 +328,11 @@ public class WaveRiderController {
     // ------------------------------------------------------------------ 节点
 
     @GetMapping("/nodes")
-    public ApiResponse<List<NodeDetect>> nodes(Authentication auth,
-                                               @RequestParam(required = false) String from,
-                                               @RequestParam(required = false) String to,
-                                               @RequestParam(required = false) String type) {
+    public ApiResponse<List<NodeDetect>> nodes(
+ @RequestParam(required = false) String from,
+ @RequestParam(required = false) String to,
+ @RequestParam(required = false) String type) {
         LambdaQueryWrapper<NodeDetect> q = new LambdaQueryWrapper<NodeDetect>()
-                .eq(NodeDetect::getUserId, userId(auth))
                 .orderByDesc(NodeDetect::getTradeDate);
         if (from != null && !from.trim().isEmpty()) {
             q = q.ge(NodeDetect::getTradeDate, parse(from, LocalDate.now()));
@@ -357,7 +356,6 @@ public class WaveRiderController {
         String type = req.getNodeType().trim().toUpperCase();
 
         NodeDetect exist = nodeMapper.selectOne(new LambdaQueryWrapper<NodeDetect>()
-                .eq(NodeDetect::getUserId, userId(auth))
                 .eq(NodeDetect::getTradeDate, date)
                 .eq(NodeDetect::getNodeType, type)
                 .last("LIMIT 1"));
@@ -371,7 +369,6 @@ public class WaveRiderController {
             return ApiResponse.ok(exist);
         }
         NodeDetect n = new NodeDetect();
-        n.setUserId(userId(auth));
         n.setStrategyId(req.getStrategyId());
         n.setTradeDate(date);
         n.setNodeType(type);
@@ -392,7 +389,7 @@ public class WaveRiderController {
     @DeleteMapping("/nodes/{id}")
     public ApiResponse<NodeDetect> cancelNode(Authentication auth, @PathVariable Long id) {
         NodeDetect n = nodeMapper.selectById(id);
-        if (n == null || !userId(auth).equals(n.getUserId())) {
+        if (n == null) {
             throw new IllegalArgumentException("没有这个节点标记：" + id);
         }
         n.setConfirmed(-1);
@@ -404,24 +401,24 @@ public class WaveRiderController {
     // ------------------------------------------------------------------ 复盘与导出
 
     @GetMapping("/review")
-    public ApiResponse<Map<String, Object>> review(Authentication auth, @RequestParam Long strategyId,
-                                                   @RequestParam String from, @RequestParam String to) {
-        owned(auth, strategyId);
+    public ApiResponse<Map<String, Object>> review(@RequestParam Long strategyId,
+ @RequestParam String from, @RequestParam String to) {
+        configService.requireStrategy(strategyId);
         return ApiResponse.ok(reviewService.review(strategyId, parse(from, LocalDate.now()),
                 parse(to, LocalDate.now())));
     }
 
     /** 导出当日候选。format=md（默认）或 csv，内容以文本返回，前端自己存文件。 */
     @GetMapping("/export")
-    public ApiResponse<Map<String, Object>> export(Authentication auth, @RequestParam Long strategyId,
-                                                   @RequestParam(required = false) String date,
-                                                   @RequestParam(required = false, defaultValue = "md") String format) {
-        owned(auth, strategyId);
+    public ApiResponse<Map<String, Object>> export(@RequestParam Long strategyId,
+ @RequestParam(required = false) String date,
+ @RequestParam(required = false, defaultValue = "md") String format) {
+        configService.requireStrategy(strategyId);
         LocalDate target = (date == null || date.trim().isEmpty())
                 ? latestCandidateDate(strategyId) : parse(date, LocalDate.now());
         List<CandidateStock> rows = target == null ? new ArrayList<CandidateStock>()
                 : candidateMapper.listOfDay(strategyId, target);
-        nodeService.tagCandidates(rows, userId(auth));
+        nodeService.tagCandidates(rows);
         topicHeatService.tagTdxThemes(rows, target);
         tagAlerts(rows, target);
         boolean csv = "csv".equalsIgnoreCase(format);
@@ -620,15 +617,6 @@ public class WaveRiderController {
                 .orderByDesc(CandidateStock::getTradeDate)
                 .last("LIMIT 1"));
         return top == null ? null : top.getTradeDate();
-    }
-
-    /** 归属校验：别人的策略一律当不存在。 */
-    private Strategy owned(Authentication auth, Long strategyId) {
-        Strategy s = configService.requireStrategy(strategyId);
-        if (!userId(auth).equals(s.getUserId())) {
-            throw new IllegalArgumentException("没有这个策略：" + strategyId);
-        }
-        return s;
     }
 
     private String toJson(Object o) {

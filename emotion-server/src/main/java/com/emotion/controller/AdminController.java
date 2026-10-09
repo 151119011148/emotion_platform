@@ -42,25 +42,25 @@ public class AdminController {
 
     @GetMapping("/users")
     public ApiResponse<List<UserVO>> users() {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作账号");
         return ApiResponse.ok(adminService.listUsers());
     }
 
     @PostMapping("/users")
     public ApiResponse<UserVO> create(@Valid @RequestBody CreateUserRequest req) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作账号");
         return ApiResponse.ok(adminService.createUser(req));
     }
 
     @PutMapping("/users/{id}")
     public ApiResponse<UserVO> update(@PathVariable Long id, @Valid @RequestBody UpdateUserRequest req) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作账号");
         return ApiResponse.ok(adminService.updateUser(id, req));
     }
 
     @DeleteMapping("/users/{id}")
     public ApiResponse<Void> delete(@PathVariable Long id) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作账号");
         adminService.deleteUser(id);
         return ApiResponse.ok(null);
     }
@@ -68,14 +68,8 @@ public class AdminController {
     /** 强制下线：只作废这个账号已签发的 token，账号与密码都不动。 */
     @PostMapping("/users/{id}/kick")
     public ApiResponse<Void> kick(@PathVariable Long id) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作账号");
         adminService.kickUser(id);
         return ApiResponse.ok(null);
-    }
-
-    private static void requireSuperAdmin() {
-        if (!AuthContext.isSuperAdmin()) {
-            throw new com.emotion.exception.BizException("仅超级管理员可操作账号");
-        }
     }
 }

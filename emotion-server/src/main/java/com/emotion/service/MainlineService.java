@@ -45,9 +45,9 @@ public class MainlineService {
         this.mainlineMarkMapper = mainlineMarkMapper;
     }
 
-    public MainlineVO vo(Long userId, LocalDate requested) {
+    public MainlineVO vo(LocalDate requested) {
         LocalDate date = requested != null ? requested : LocalDate.now(CN);
-        PrdMetricsService.Snapshot snap = prdMetrics.snapshot(userId, date);
+        PrdMetricsService.Snapshot snap = prdMetrics.snapshot(date);
 
         MainlineVO vo = new MainlineVO();
         vo.setTradeDate(date);
@@ -88,32 +88,29 @@ public class MainlineService {
      * 升级到主线区：落人工主线标记（t_mainline_mark）。当日已有人工标记则覆盖为本次行业；
      * 写库后重取该日双轨数据。DELETE before INSERT 保证幂等。
      */
-    public MainlineVO promote(Long userId, LocalDate date, String industry) {
+    public MainlineVO promote(LocalDate date, String industry) {
         if (industry == null || industry.trim().isEmpty()) {
             throw new IllegalArgumentException("人工主线标记行业不能为空");
         }
         LocalDate d = date != null ? date : LocalDate.now(CN);
         mainlineMarkMapper.delete(new LambdaQueryWrapper<MainlineMark>()
-                .eq(MainlineMark::getUserId, userId)
                 .eq(MainlineMark::getTradeDate, d));
         MainlineMark m = new MainlineMark();
-        m.setUserId(userId);
         m.setTradeDate(d);
         m.setIndustry(industry.trim());
         m.setManual(1);
         m.setCreatedAt(LocalDateTime.now());
         mainlineMarkMapper.insert(m);
-        return vo(userId, d);
+        return vo(d);
     }
 
     /** 取消升级：删除该日该行业的人工主线标记，重取双轨数据。 */
-    public MainlineVO cancel(Long userId, LocalDate date, String industry) {
+    public MainlineVO cancel(LocalDate date, String industry) {
         LocalDate d = date != null ? date : LocalDate.now(CN);
         mainlineMarkMapper.delete(new LambdaQueryWrapper<MainlineMark>()
-                .eq(MainlineMark::getUserId, userId)
                 .eq(MainlineMark::getTradeDate, d)
                 .eq(MainlineMark::getIndustry, industry));
-        return vo(userId, d);
+        return vo(d);
     }
 
     /** 无主线打标：未确认主线时提示"仅日内核心炒作"，N 取雷达榜首持续天数。 */

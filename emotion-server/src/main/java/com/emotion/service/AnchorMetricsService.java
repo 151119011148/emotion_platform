@@ -48,9 +48,9 @@ public class AnchorMetricsService {
     }
 
     /** 某日的在位阵眼 + 跨度指标。列表为空就是"没设阵眼"，与"设了但拉不到行情"必须分得开。 */
-    public AnchorVO vo(Long userId, LocalDate date) {
+    public AnchorVO vo(LocalDate date) {
         LocalDate day = date == null ? LocalDate.now() : date;
-        List<Anchor> anchors = anchorService.listInPosition(userId, day);
+        List<Anchor> anchors = anchorService.listInPosition(day);
         AnchorVO vo = new AnchorVO();
         vo.setTradeDate(day);
         vo.setItems(new ArrayList<AnchorVO.Item>());
@@ -74,8 +74,8 @@ public class AnchorMetricsService {
     }
 
     /** 曲线画跨度区间用：只按登记的起止日给区间，不拉当日行情。 */
-    public List<AnchorVO.Span> spans(Long userId, LocalDate from, LocalDate to) {
-        List<Anchor> anchors = anchorService.listOverlapping(userId, from, to);
+    public List<AnchorVO.Span> spans(LocalDate from, LocalDate to) {
+        List<Anchor> anchors = anchorService.listOverlapping(from, to);
         Map<String, String> boards = boardsOf(anchors);
         List<AnchorVO.Span> spans = new ArrayList<>(anchors.size());
         for (Anchor anchor : anchors) {
@@ -110,8 +110,8 @@ public class AnchorMetricsService {
      * <p>取最差那只：柱子和当天进的分必须出自同一个判据，否则图上那根负柱对不上分。
      * 拉不到行情的那天直接没有点，不补 0 —— 0% 在图上会被读成"横盘"。
      */
-    public List<AnchorVO.Daily> dailySeries(Long userId, LocalDate from, LocalDate to) {
-        List<Anchor> anchors = anchorService.listOverlapping(userId, from, to);
+    public List<AnchorVO.Daily> dailySeries(LocalDate from, LocalDate to) {
+        List<Anchor> anchors = anchorService.listOverlapping(from, to);
         Map<String, String> boards = boardsOf(anchors);
         java.util.TreeMap<LocalDate, AnchorVO.Daily> byDate =
                 new java.util.TreeMap<LocalDate, AnchorVO.Daily>();
@@ -299,9 +299,9 @@ public class AnchorMetricsService {
         return AnchorService.ROLE_LEADER.equals(role) ? "周期总龙" : "周期阵眼";
     }
 
-    /** 供打分路径复用：一个用户某天在位的阵眼代码。 */
-    public Collection<String> codesOf(Long userId, LocalDate day) {
-        List<Anchor> anchors = anchorService.listInPosition(userId, day);
+    /** 供打分路径复用：某天在位的阵眼代码。 */
+    public Collection<String> codesOf(LocalDate day) {
+        List<Anchor> anchors = anchorService.listInPosition(day);
         List<String> codes = new ArrayList<>(anchors.size());
         for (Anchor anchor : anchors) {
             codes.add(anchor.getStockCode());

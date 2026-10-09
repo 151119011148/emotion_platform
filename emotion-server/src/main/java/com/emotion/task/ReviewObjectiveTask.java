@@ -22,8 +22,8 @@ import java.util.Objects;
  * 每交易日 19:30 把复盘页那两步（一键拉取行情 → 保存复盘）里的<b>客观部分</b>做掉。
  *
  * <p>写什么：T1–T7 的公开原始数据（三池明细/五大指数/全市场统计/行业快照/档位溢价/监管名单），
- * 以及每个复盘账号当天的 {@code t_daily_record} 一行——只有客观九数与引擎算出来的派生列
- * （五维分/温度/阶段带/方向/信号）。当天已有行就只重算派生列。
+ * 以及当天那一行 {@code t_daily_record}——只有客观九数与引擎算出来的派生列
+ * （五维分/温度/阶段带/方向/信号）。一个交易日全局一行，当天已有行就只重算派生列。
  *
  * <p><b>绝不写什么</b>：十三项主观字段（主线、龙头、龙二、轮动笔记、复盘笔记、明日计划、
  * 我的仓位、题材评分、九个 {@code manual_*} 覆盖列）与持仓台账 {@code t_position}。
@@ -68,17 +68,12 @@ public class ReviewObjectiveTask implements ManagedTask {
             return TaskResult.skip(today + " 非交易日（周末或休市），跳过复盘客观数据录入");
         }
 
-        List<Long> users = dailyRecordService.reviewerUserIds();
-        if (users.isEmpty()) {
-            return TaskResult.skip("还没有任何账号写过复盘，跳过——不给没用过复盘的账号凭空建记录行");
-        }
-
         // ① T1–T7 客观原始数据落库，与复盘页「一键拉取行情」是同一条编排。
-        //    userId 只被 T8 用来重算已有记录，所以传名单第一个即可；
-        //    第 ② 步会再给这个账号重算一次（幂等），为省这一次去按事件文案分支不值得。
+        //    编排里的 T8 会顺手重算当天已有的那一行复盘记录；
+        //    第 ② 步会再跑一次（幂等），为省这一次去按事件文案分支不值得。
         List<ReviewFetchService.Event> events = new ArrayList<>();
         try {
-            reviewFetchService.runFetch(today, users.get(0), events::add);
+            reviewFetchService.runFetch(today, events::add);
         } catch (RuntimeException e) {
             log.error("{} 复盘客观数据编排异常", today, e);
             return TaskResult.fail(today + " 拉取编排异常，未建复盘记录行：" + e.getMessage());
@@ -102,25 +97,22 @@ public class ReviewObjectiveTask implements ManagedTask {
                             + "拿到数据后手工再跑一次本任务即可", today, ready, warns));
         }
 
-        // ② 补/重算记录行：只写客观数据，主观十三项与持仓不碰。
-        int created = 0;
-        for (Long userId : users) {
-            try {
-                if (dailyRecordService.ensureObjectiveRecord(userId, today)) {
-                    created++;
-                }
-            } catch (RuntimeException e) {
-                log.error("{} 账号 {} 的客观记录行写入失败", today, userId, e);
-                return TaskResult.fail(String.format(
-                        "%s 客观数据已就绪（涨停 %d 家），但账号 %d 的记录行写入失败：%s",
-                        today, pools.getZtCount(), userId, e.getMessage()));
-            }
+        // ② 补/重算当天那一行：一个交易日全局一行，只写客观数据，主观十三项与持仓不碰。
+        boolean created;
+        try {
+            created = dailyRecordService.ensureObjectiveRecord(today);
+        } catch (RuntimeException e) {
+            log.error("{} 客观记录行写入失败", today, e);
+            return TaskResult.fail(String.format(
+                    "%s 客观数据已就绪（涨停 %d 家），但当天的复盘记录行写入失败：%s",
+                    today, pools.getZtCount(), e.getMessage()));
         }
 
         return TaskResult.ok(String.format(
                 "%s 客观数据已录入：就绪 %d 项 / 警告 %d 项 / 失败 %d 项，涨停 %d 家；"
-                        + "复盘记录 新建 %d 行、重算 %d 行（主观十三项与持仓未动）",
-                today, ready, warns, fails, pools.getZtCount(), created, users.size() - created));
+                        + "复盘记录 %s（主观十三项与持仓未动）",
+                today, ready, warns, fails, pools.getZtCount(),
+                created ? "当天新建一行" : "当天已有那一行，只重算派生列"));
     }
 
     private static String statusOf(List<ReviewFetchService.Event> events, String task) {

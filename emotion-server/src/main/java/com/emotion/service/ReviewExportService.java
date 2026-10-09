@@ -128,15 +128,18 @@ public class ReviewExportService {
     }
 
     /** 不管那天有没有原文，一律按库里当前的值重建。写周五的复盘用这个。 */
-    public ReviewExportVO template(Long userId, LocalDate date) {
-        return build(userId, date, false);
+    public ReviewExportVO template(Long ledgerUserId, LocalDate date) {
+        return build(ledgerUserId, date, false);
     }
 
     /**
      * 那天导入过就原样给出原文（贴回去改完再导入是幂等的），没导入过没什么可"导出"的，退化成重建。
+     *
+     * <p>{@code ledgerUserId} 只服务持仓那一段：复盘文档里的行情、题材、预判都是全平台共享的一份，
+     * 唯独台账每个账号各记一套。
      */
-    public ReviewExportVO export(Long userId, LocalDate date) {
-        DailyRecord record = dailyRecordService.getByDate(userId, date);
+    public ReviewExportVO export(Long ledgerUserId, LocalDate date) {
+        DailyRecord record = dailyRecordService.getByDate(date);
         if (record != null && notBlank(record.getReviewMd())) {
             ReviewExportVO vo = new ReviewExportVO();
             vo.setDate(date);
@@ -146,7 +149,7 @@ public class ReviewExportService {
                     + "要是你在表单页改过某些格，用「生成模板」拿重建的那份。");
             return vo;
         }
-        return build(userId, date, true);
+        return build(ledgerUserId, date, true);
     }
 
     /**
@@ -155,8 +158,8 @@ public class ReviewExportService {
      * 不承诺可导入。判断文字平台造不出，也不从库里回填（{@code doc_notes} 已停用）：
      * 每节固定留一行 {@code ✍️ 判断} 占位，他写完的那份就是当天的 md。
      */
-    public ReviewExportVO reviewDoc(Long userId, LocalDate date) {
-        ReviewDocFormatter.Model m = docModel(userId, date);
+    public ReviewExportVO reviewDoc(Long ledgerUserId, LocalDate date) {
+        ReviewDocFormatter.Model m = docModel(ledgerUserId, date);
         ReviewExportVO vo = new ReviewExportVO();
         vo.setDate(date);
         vo.setGenerated(true);
@@ -182,10 +185,10 @@ public class ReviewExportService {
      * <p>公开出来是给 AI 草稿复用的：草稿引用的读数必须和文档表格里那几张<b>同一次、同口径</b>，
      * 两边各查各的迟早会给出两个温度。装配本身仍是只读的那几条查询，不写任何东西。
      */
-    public ReviewDocFormatter.Model docModel(Long userId, LocalDate date) {
+    public ReviewDocFormatter.Model docModel(Long ledgerUserId, LocalDate date) {
         // viewByDate：没有主观复盘行时，客观行情节（七数/盘面）仍由 t_market_daily 合成回填，全账号同一份。
-        DailyRecord today = dailyRecordService.viewByDate(userId, date);
-        DailyRecord prev = previousRecord(userId, date);
+        DailyRecord today = dailyRecordService.viewByDate(date);
+        DailyRecord prev = previousRecord(date);
 
         ReviewDocFormatter.Model m = new ReviewDocFormatter.Model();
         m.date = date;
@@ -193,10 +196,10 @@ public class ReviewExportService {
         m.prev = prev;
         m.indexes = indexCloseStore.read(date);
         m.stocks = marketDataService.stocks(date);
-        m.positions = positionStore.read(userId, date);
-        m.predictions = predictionStore.read(userId, date);
-        m.anchors = anchorService.listInPosition(userId, date);
-        m.coreThemes = coreThemes(userId, date);
+        m.positions = positionStore.read(ledgerUserId, date);
+        m.predictions = predictionStore.read(date);
+        m.anchors = anchorService.listInPosition(date);
+        m.coreThemes = coreThemes(date);
         m.industries = industrySnapshots(date);
         PoolCounts pools = marketStockMapper.countPools(date);
         Integer yizi = null;
@@ -217,10 +220,9 @@ public class ReviewExportService {
     }
 
     /** 当天盘出来的核心题材 Top5。rank 在 Java 里排：MySQL 8 认 {@code rank} 为保留字，ORDER BY 它得反引号。 */
-    private List<ThemeSnapshot> coreThemes(Long userId, LocalDate date) {
+    private List<ThemeSnapshot> coreThemes(LocalDate date) {
         List<ThemeSnapshot> rows = themeSnapshotMapper.selectList(new LambdaQueryWrapper<ThemeSnapshot>()
-                .eq(ThemeSnapshot::getTradeDate, date)
-                .eq(ThemeSnapshot::getUserId, userId));
+                .eq(ThemeSnapshot::getTradeDate, date));
         rows.sort(Comparator.<ThemeSnapshot, Integer>comparing(
                 ThemeSnapshot::getRank, Comparator.nullsLast(Comparator.naturalOrder())));
         return rows;
@@ -313,9 +315,9 @@ public class ReviewExportService {
     }
 
     /** 上一交易日：近 40 条里 trade_date 严格早于 date 的最近一条。缺历史就返回 null，对照表昨列显 —。 */
-    private DailyRecord previousRecord(Long userId, LocalDate date) {
+    private DailyRecord previousRecord(LocalDate date) {
         DailyRecord best = null;
-        for (DailyRecord r : dailyRecordService.getLatest(userId, 40)) {
+        for (DailyRecord r : dailyRecordService.getLatest(40)) {
             if (r.getTradeDate() != null && r.getTradeDate().isBefore(date)
                     && (best == null || r.getTradeDate().isAfter(best.getTradeDate()))) {
                 best = r;
@@ -324,9 +326,9 @@ public class ReviewExportService {
         return best;
     }
 
-    private ReviewExportVO build(Long userId, LocalDate date, boolean fromExport) {
+    private ReviewExportVO build(Long ledgerUserId, LocalDate date, boolean fromExport) {
         // viewByDate：涨跌家数等客观键即使没有主观行也能重建进 meta（值来自 t_market_daily）。
-        DailyRecord record = dailyRecordService.viewByDate(userId, date);
+        DailyRecord record = dailyRecordService.viewByDate(date);
         ReviewDoc stored = record != null && record.getId() != null && notBlank(record.getReviewMd())
                 ? ReviewImportParser.parse(record.getReviewMd(), date) : null;
 
@@ -335,7 +337,7 @@ public class ReviewExportService {
         ReviewDoc doc = new ReviewDoc();
         doc.setDate(date);
         fillSingles(doc, record, stored, vo);
-        fillRows(doc, userId, date, stored, vo);
+        fillRows(doc, ledgerUserId, date, stored, vo);
 
         String prose = stored != null ? ReviewMdFormatter.proseOf(record.getReviewMd())
                 : String.format(SKELETON, date);
@@ -457,8 +459,9 @@ public class ReviewExportService {
 
     // ---- 多行键 ----
 
-    private void fillRows(ReviewDoc doc, Long userId, LocalDate date, ReviewDoc stored, ReviewExportVO vo) {
-        for (Position p : positionStore.read(userId, date)) {
+    private void fillRows(ReviewDoc doc, Long ledgerUserId, LocalDate date,
+                          ReviewDoc stored, ReviewExportVO vo) {
+        for (Position p : positionStore.read(ledgerUserId, date)) {
             doc.getPositions().add(new ReviewDoc.PositionRow(0, p.getStockCode(), p.getStockName(),
                     p.getCostPrice(), p.getCurrentPrice(), p.getQuantity(),
                     p.getSellPrice(), p.getSellQty(), p.getFloatPct(),
@@ -468,7 +471,7 @@ public class ReviewExportService {
         if (doc.getPositions().isEmpty()) {
             vo.getOmittedKeys().add("持仓");
         }
-        for (Prediction p : predictionStore.read(userId, date)) {
+        for (Prediction p : predictionStore.read(date)) {
             if (Prediction.KIND_ANSWER.equals(p.getKind())) {
                 doc.getAnswers().add(new ReviewDoc.AnswerRow(0, p.getName(), p.getResult(), p.getResultNote()));
             } else {

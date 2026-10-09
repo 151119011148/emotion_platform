@@ -57,15 +57,15 @@ class MainlineServiceTest {
     /** 升级：先删旧标记（幂等）再插入该行业人工标记；返回的快照命中人工标记 → hasMainline=true。 */
     @Test
     void promote_persistsMark_andFlipsHasMainline() {
-        when(prd.snapshot(eq(1L), eq(D))).thenReturn(snapshot(true, "元件", true));
+        when(prd.snapshot(eq(D))).thenReturn(snapshot(true, "元件", true));
 
-        MainlineVO vo = service.promote(1L, D, "元件");
+        MainlineVO vo = service.promote(D, "元件");
 
         // DELETE before INSERT（幂等）
         verify(mapper).delete(any());
         verify(mapper).insert(Mockito.argThat((MainlineMark m) ->
                 m.getIndustry() == null ? false
-                        : (m.getIndustry().equals("元件") && m.getUserId() == 1L
+                        : (m.getIndustry().equals("元件")
                            && D.equals(m.getTradeDate()) && m.getManual() == 1)));
         assertTrue(vo.getHasMainline(), "升级后 hasMainline 应为 true");
         assertTrue(vo.getManuallyMarked(), "应标人工主线");
@@ -75,9 +75,9 @@ class MainlineServiceTest {
     /** 取消升级：删该日该行业的人工标记；读回未确认主线快照 → hasMainline=false、非人工。 */
     @Test
     void cancel_removesMark_andFlipsHasMainline() {
-        when(prd.snapshot(eq(1L), eq(D))).thenReturn(snapshot(false, "元件", false));
+        when(prd.snapshot(eq(D))).thenReturn(snapshot(false, "元件", false));
 
-        MainlineVO vo = service.cancel(1L, D, "元件");
+        MainlineVO vo = service.cancel(D, "元件");
 
         verify(mapper).delete(any());
         assertFalse(vo.getHasMainline(), "取消后 hasMainline 应为 false");
@@ -88,7 +88,7 @@ class MainlineServiceTest {
     @Test
     void promote_blankIndustry_rejects() {
         try {
-            service.promote(1L, D, "  ");
+            service.promote(D, "  ");
             org.junit.jupiter.api.Assertions.fail("应为 IllegalArgumentException");
         } catch (IllegalArgumentException expected) {
             Mockito.verify(mapper, Mockito.never()).insert(any());
@@ -98,8 +98,8 @@ class MainlineServiceTest {
     /** 升级/取消不落地当天日期的默认场景：date=null 时用系统日（仅验证不抛错、走删除）。 */
     @Test
     void promote_nullDate_usesToday() {
-        when(prd.snapshot(eq(1L), any())).thenReturn(snapshot(true, "元件", true));
-        MainlineVO vo = service.promote(1L, null, "元件");
+        when(prd.snapshot(any())).thenReturn(snapshot(true, "元件", true));
+        MainlineVO vo = service.promote(null, "元件");
         assertEquals("元件", vo.getMainIndustry());
         verify(mapper).delete(any());
     }

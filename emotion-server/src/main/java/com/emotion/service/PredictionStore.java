@@ -34,7 +34,7 @@ public class PredictionStore {
 
     /** rows 里出现过哪种 kind，就只重写那种 kind。空列表什么都不动，返回 0。 */
     @Transactional(rollbackFor = Exception.class)
-    public int replaceForDate(Long userId, LocalDate date, List<Prediction> rows) {
+    public int replaceForDate(LocalDate date, List<Prediction> rows) {
         if (rows == null || rows.isEmpty()) {
             return 0;
         }
@@ -42,7 +42,7 @@ public class PredictionStore {
         for (Prediction row : rows) {
             kinds.add(row.getKind());
         }
-        return replaceForDate(userId, date, rows, kinds);
+        return replaceForDate(date, rows, kinds);
     }
 
     /**
@@ -55,7 +55,7 @@ public class PredictionStore {
      * @param rows null = 这次没说预判，整块跳过（返回 -1）
      */
     @Transactional(rollbackFor = Exception.class)
-    public int replaceForDate(Long userId, LocalDate date, List<Prediction> rows, Set<String> kinds) {
+    public int replaceForDate(LocalDate date, List<Prediction> rows, Set<String> kinds) {
         if (rows == null) {
             return -1;
         }
@@ -63,7 +63,6 @@ public class PredictionStore {
             return 0;
         }
         mapper.delete(new LambdaQueryWrapper<Prediction>()
-                .eq(Prediction::getUserId, userId)
                 .eq(Prediction::getTradeDate, date)
                 .in(Prediction::getKind, kinds));
         for (int from = 0; from < rows.size(); from += CHUNK) {
@@ -73,9 +72,8 @@ public class PredictionStore {
         return rows.size();
     }
 
-    public List<Prediction> read(Long userId, LocalDate date) {
+    public List<Prediction> read(LocalDate date) {
         return mapper.selectList(new LambdaQueryWrapper<Prediction>()
-                .eq(Prediction::getUserId, userId)
                 .eq(Prediction::getTradeDate, date)
                 .orderByAsc(Prediction::getKind)
                 .orderByAsc(Prediction::getId));

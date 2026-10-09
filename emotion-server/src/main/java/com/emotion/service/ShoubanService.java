@@ -38,7 +38,7 @@ public class ShoubanService {
         this.industryClassify = industryClassify;
     }
 
-    public ShoubanVO vo(Long userId, LocalDate requested) {
+    public ShoubanVO vo(LocalDate requested) {
         LocalDate date = requested != null ? requested : LocalDate.now(CN);
         List<MarketStock> todayZT = listPool(date, MarketStock.POOL_LIMIT_UP);
         List<MarketStock> todayZB = listPool(date, MarketStock.POOL_BROKEN);

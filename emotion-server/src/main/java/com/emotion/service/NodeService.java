@@ -27,6 +27,7 @@ import com.emotion.mapper.MarketDailyMapper;
 import com.emotion.mapper.MarketStockMapper;
 import com.emotion.mapper.NodeEventMapper;
 import com.emotion.mapper.SurveillanceMapper;
+import com.emotion.util.AuthContext;
 import com.emotion.vo.NodePrefillVO;
 import com.emotion.vo.NodeSuggestVO;
 import com.emotion.vo.NodeTagVO;
@@ -67,24 +68,22 @@ public class NodeService {
      * 历史节点：按 D0 倒排（同 D0 再按创建时间倒排）。富化到"删一眼就知道这行还活不活"的粒度即可，
      * 不复算 suggestion（那要打 N 次 SQL，历史行没这个必要）。
      */
-    public List<com.emotion.vo.NodeVO> listByUser(Long userId) {
+    public List<com.emotion.vo.NodeVO> listAll() {
         List<NodeEvent> rows = nodeEventMapper.selectList(
                 new LambdaQueryWrapper<NodeEvent>()
-                        .eq(NodeEvent::getUserId, userId)
                         .orderByDesc(NodeEvent::getD0Date)
                         .orderByDesc(NodeEvent::getCreatedAt));
         List<com.emotion.vo.NodeVO> out = new ArrayList<>();
         for (NodeEvent row : rows) {
-            out.add(enrichLite(row, userId));
+            out.add(enrichLite(row));
         }
         return out;
     }
 
     /** 待验证的那一个（按 D0 取最近）。富化完整并挂上 T+1 自动判定。 */
-    public com.emotion.vo.NodeVO getCurrent(Long userId) {
+    public com.emotion.vo.NodeVO getCurrent() {
         NodeEvent node = nodeEventMapper.selectOne(
                 new LambdaQueryWrapper<NodeEvent>()
-                        .eq(NodeEvent::getUserId, userId)
                         .eq(NodeEvent::getStatus, STATUS_PENDING)
                         .orderByDesc(NodeEvent::getD0Date)
                         .orderByDesc(NodeEvent::getCreatedAt)
@@ -92,11 +91,12 @@ public class NodeService {
         if (node == null) {
             return null;
         }
-        com.emotion.vo.NodeVO vo = enrichLite(node, userId);
-        NodeSuggestVO suggestion = nodeSuggestService.suggest(userId, node.getId());
+        com.emotion.vo.NodeVO vo = enrichLite(node);
+        NodeSuggestVO suggestion = nodeSuggestService.suggest(node.getId());
         vo.setSuggestion(suggestion);
         // T+1 自动判定：平台把结论算好写进 status_note，但状态仍留"待验证"，等你采纳才落库。
-        if (suggestion.isReady()) {
+        // 这次回写落在共享的那一行上，所以只有超级管理员做——别人刷一次页面不该改你的节点。
+        if (suggestion.isReady() && AuthContext.isSuperAdmin()) {
             if (!STATUS_PENDING.equals(suggestion.getSuggestedStatus())) {
                 node.setStatusNote(cut("平台自动判定：@" + nowText() + " " + suggestion.getReason()
                         + "（待你采纳）", STATUS_NOTE_MAX));
@@ -113,25 +113,20 @@ public class NodeService {
      * 新建节点：关联阵眼时按 t_anchor 回填龙头（名称反查，不信前端手填）、自动补 D0 情绪分/周期。
      * 新节点一律"待验证"。
      */
-    public com.emotion.vo.NodeVO create(Long userId, NodeEvent event) {
+    public com.emotion.vo.NodeVO create(NodeEvent event) {
         checkNodeType(event.getNodeType());
-        event.setUserId(userId);
         if (event.getStatus() == null || event.getStatus().trim().isEmpty()) {
             event.setStatus(STATUS_PENDING);
         }
-        resolveAnchor(event, userId);
-        fillD0Emotion(event, userId);
+        resolveAnchor(event);
+        fillD0Emotion(event);
         event.setLastRecalcAt(null);
         nodeEventMapper.insert(event);
-        return enrichLite(event, userId);
+        return enrichLite(event);
     }
 
-    public NodeEvent update(Long userId, Long id, NodeEvent event) {
-        NodeEvent existing = nodeEventMapper.selectOne(
-                new LambdaQueryWrapper<NodeEvent>()
-                        .eq(NodeEvent::getId, id)
-                        .eq(NodeEvent::getUserId, userId));
-        if (existing == null) throw new RuntimeException("节点事件不存在");
+    public NodeEvent update(Long id, NodeEvent event) {
+        NodeEvent existing = existing(id);
 
         if (event.getT1Date() != null) existing.setT1Date(event.getT1Date());
         if (event.getT1AnchorRepack() != null) existing.setT1AnchorRepack(event.getT1AnchorRepack());
@@ -158,15 +153,17 @@ public class NodeService {
         return existing;
     }
 
-    /** 单个节点的富化视图；不存在或非本人则抛错。 */
-    public com.emotion.vo.NodeVO detail(Long userId, Long id) {
-        NodeEvent node = nodeEventMapper.selectOne(new LambdaQueryWrapper<NodeEvent>()
-                .eq(NodeEvent::getId, id)
-                .eq(NodeEvent::getUserId, userId));
+    /** 单个节点的富化视图；不存在则抛错。 */
+    public com.emotion.vo.NodeVO detail(Long id) {
+        return enrichLite(existing(id));
+    }
+
+    private NodeEvent existing(Long id) {
+        NodeEvent node = nodeEventMapper.selectById(id);
         if (node == null) {
             throw new IllegalArgumentException("节点事件不存在：" + id);
         }
-        return enrichLite(node, userId);
+        return node;
     }
 
     /**
@@ -185,21 +182,19 @@ public class NodeService {
         }
     }
 
-    /** 删除自己的一个节点事件；不存在/非本人则抛错。 */
-    public void deleteNode(Long userId, Long id) {
-        int n = nodeEventMapper.delete(new LambdaQueryWrapper<NodeEvent>()
-                .eq(NodeEvent::getId, id)
-                .eq(NodeEvent::getUserId, userId));
-        if (n == 0) throw new RuntimeException("节点事件不存在或无权操作");
+    /** 删除一个节点事件；不存在则抛错。 */
+    public void deleteNode(Long id) {
+        existing(id);
+        nodeEventMapper.deleteById(id);
     }
 
     // ---------- 读侧富化 ----------
 
     /** 唯一的富化入口：拷贝 + 阵眼血缘 + 节点票存活 + 监管标记。 */
-    private com.emotion.vo.NodeVO enrichLite(NodeEvent node, Long userId) {
+    private com.emotion.vo.NodeVO enrichLite(NodeEvent node) {
         com.emotion.vo.NodeVO vo = new com.emotion.vo.NodeVO();
         BeanUtils.copyProperties(node, vo);
-        fillAnchor(vo, userId);
+        fillAnchor(vo);
         fillNodeStockLive(vo);
         fillSurveillance(vo);
         fillCauseTags(vo);
@@ -262,13 +257,11 @@ public class NodeService {
     }
 
     /** 阵眼血缘：由 anchor_id 取 t_anchor 回填名称、角色码/标签、跨度。 */
-    private void fillAnchor(com.emotion.vo.NodeVO vo, Long userId) {
+    private void fillAnchor(com.emotion.vo.NodeVO vo) {
         if (vo.getAnchorId() == null) {
             return;
         }
-        Anchor anchor = anchorMapper.selectOne(new LambdaQueryWrapper<Anchor>()
-                .eq(Anchor::getId, vo.getAnchorId())
-                .eq(Anchor::getUserId, userId));
+        Anchor anchor = anchorMapper.selectById(vo.getAnchorId());
         if (anchor == null) {
             return;
         }
@@ -351,16 +344,14 @@ public class NodeService {
 
     // ---------- 写侧辅助 ----------
 
-    /** 关联阵眼：只认同账号的 t_anchor，名称一律反查回填（和 t_stock 一致才能被复算的老龙明细匹配上）。 */
-    private void resolveAnchor(NodeEvent event, Long userId) {
+    /** 关联阵眼：只认 t_anchor 里已有的那一行，名称一律反查回填（和 t_stock 一致才能被复算的老龙明细匹配上）。 */
+    private void resolveAnchor(NodeEvent event) {
         if (event.getAnchorId() == null) {
             return;
         }
-        Anchor anchor = anchorMapper.selectOne(new LambdaQueryWrapper<Anchor>()
-                .eq(Anchor::getId, event.getAnchorId())
-                .eq(Anchor::getUserId, userId));
+        Anchor anchor = anchorMapper.selectById(event.getAnchorId());
         if (anchor == null) {
-            throw new IllegalArgumentException("关联的阵眼不存在或不属于你：" + event.getAnchorId());
+            throw new IllegalArgumentException("关联的阵眼不存在：" + event.getAnchorId());
         }
         event.setAnchorStock(anchor.getStockName());
         if (event.getAnchorMaxBoard() == null) {
@@ -368,13 +359,12 @@ public class NodeService {
         }
     }
 
-    /** D0 当日情绪分/周期：从用户那天的日记录取 five_dim 总分与阶段；没复盘就留空（节点照建）。 */
-    private void fillD0Emotion(NodeEvent event, Long userId) {
+    /** D0 当日情绪分/周期：从那天的日记录取 five_dim 总分与阶段；没复盘就留空（节点照建）。 */
+    private void fillD0Emotion(NodeEvent event) {
         if (event.getD0Date() == null) {
             return;
         }
         DailyRecord rec = dailyRecordMapper.selectOne(new LambdaQueryWrapper<DailyRecord>()
-                .eq(DailyRecord::getUserId, userId)
                 .eq(DailyRecord::getTradeDate, event.getD0Date())
                 .last("LIMIT 1"));
         if (rec == null) {
@@ -415,12 +405,11 @@ public class NodeService {
      * <p>复算之后按<b>代码</b>撞，不再按名称去空白：那一步是为了对上只有名称的手打名单才存在的，
      * 现在两边都是明细行，代码是唯一的。
      */
-    public void tagCandidates(List<CandidateStock> rows, Long userId) {
+    public void tagCandidates(List<CandidateStock> rows) {
         if (rows == null || rows.isEmpty()) {
             return;
         }
-        List<NodeEvent> events = nodeEventMapper.selectList(
-                new LambdaQueryWrapper<NodeEvent>().eq(NodeEvent::getUserId, userId));
+        List<NodeEvent> events = nodeEventMapper.selectList(new LambdaQueryWrapper<NodeEvent>());
         if (events.isEmpty()) {
             return;
         }
@@ -524,14 +513,13 @@ public class NodeService {
      *
      * @return 节点票代码 → 那条节点事件；没有合格节点时是空表
      */
-    public Map<String, NodeEvent> scoredNodeStocks(Long userId, LocalDate tradeDate, int window) {
+    public Map<String, NodeEvent> scoredNodeStocks(LocalDate tradeDate, int window) {
         Map<String, NodeEvent> out = new HashMap<String, NodeEvent>();
         Set<LocalDate> dates = recentDetailDates(tradeDate, window);
         if (dates.isEmpty()) {
             return out;
         }
-        List<NodeEvent> events = nodeEventMapper.selectList(
-                new LambdaQueryWrapper<NodeEvent>().eq(NodeEvent::getUserId, userId));
+        List<NodeEvent> events = nodeEventMapper.selectList(new LambdaQueryWrapper<NodeEvent>());
         for (NodeEvent e : events) {
             if ("失效".equals(e.getStatus()) || e.getD0Date() == null || !dates.contains(e.getD0Date())) {
                 continue;

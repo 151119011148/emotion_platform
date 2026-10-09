@@ -19,7 +19,6 @@ public class Strategy {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long userId;
     private String name;
     /** 1=启用，0=停用。停用只影响定时任务，不影响手工跑。 */
     private Integer enabled;

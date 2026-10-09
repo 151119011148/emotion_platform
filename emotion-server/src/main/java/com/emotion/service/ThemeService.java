@@ -20,24 +20,19 @@ public class ThemeService {
         this.leadingStockMapper = leadingStockMapper;
     }
 
-    public List<Theme> listByUser(Long userId) {
+    public List<Theme> listAll() {
         return themeMapper.selectList(
                 new LambdaQueryWrapper<Theme>()
-                        .eq(Theme::getUserId, userId)
                         .orderByDesc(Theme::getCreatedAt));
     }
 
-    public Theme create(Long userId, Theme theme) {
-        theme.setUserId(userId);
+    public Theme create(Theme theme) {
         themeMapper.insert(theme);
         return theme;
     }
 
-    public Theme update(Long userId, Long id, Theme theme) {
-        Theme existing = themeMapper.selectOne(
-                new LambdaQueryWrapper<Theme>()
-                        .eq(Theme::getId, id)
-                        .eq(Theme::getUserId, userId));
+    public Theme update(Long id, Theme theme) {
+        Theme existing = themeMapper.selectById(id);
         if (existing == null) throw new RuntimeException("题材不存在");
 
         if (theme.getName() != null) existing.setName(theme.getName());
@@ -48,15 +43,13 @@ public class ThemeService {
         return existing;
     }
 
-    public List<LeadingStock> listStocks(Long userId, Long themeId) {
+    public List<LeadingStock> listStocks(Long themeId) {
         return leadingStockMapper.selectList(
                 new LambdaQueryWrapper<LeadingStock>()
-                        .eq(LeadingStock::getUserId, userId)
                         .eq(LeadingStock::getThemeId, themeId));
     }
 
-    public LeadingStock addStock(Long userId, Long themeId, LeadingStock stock) {
-        stock.setUserId(userId);
+    public LeadingStock addStock(Long themeId, LeadingStock stock) {
         stock.setThemeId(themeId);
         leadingStockMapper.insert(stock);
         return stock;

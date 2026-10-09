@@ -30,6 +30,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 复盘记录与台账。
+ *
+ * <p>这里两种归属并存：{@code /positions*} 那几条是<b>持仓台账</b>，每个账号各记一套，
+ * 登录态必须带上；其余（复盘行、重算、导入导出、预判、曲线）读写的都是全平台共享的一份，
+ * 只有持仓那几段仍按账号取，所以导出/导入/明细这几个入口传的叫做 ledgerUserId。
+ */
 @RestController
 @RequestMapping("/api/records")
 public class DailyRecordController {
@@ -56,18 +63,14 @@ public class DailyRecordController {
     }
 
     @PostMapping
-    public ApiResponse<DailyRecord> create(Authentication auth,
-                                           @RequestBody Map<String, Object> raw) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(dailyRecordService.createOrUpdate(userId, toRequest(raw), raw.keySet()));
+    public ApiResponse<DailyRecord> create(@RequestBody Map<String, Object> raw) {
+        return ApiResponse.ok(dailyRecordService.createOrUpdate(toRequest(raw), raw.keySet()));
     }
 
     @PutMapping("/{id}")
-    public ApiResponse<DailyRecord> update(Authentication auth,
-                                           @PathVariable Long id,
+    public ApiResponse<DailyRecord> update(@PathVariable Long id,
                                            @RequestBody Map<String, Object> raw) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(dailyRecordService.createOrUpdate(userId, toRequest(raw), raw.keySet()));
+        return ApiResponse.ok(dailyRecordService.createOrUpdate(toRequest(raw), raw.keySet()));
     }
 
     /**
@@ -80,9 +83,8 @@ public class DailyRecordController {
     }
 
     @GetMapping("/today")
-    public ApiResponse<DailyRecord> getToday(Authentication auth) {
-        Long userId = (Long) auth.getPrincipal();
-        DailyRecord record = dailyRecordService.getToday(userId);
+    public ApiResponse<DailyRecord> getToday() {
+        DailyRecord record = dailyRecordService.getToday();
         return ApiResponse.ok(record);
     }
 
@@ -91,36 +93,29 @@ public class DailyRecordController {
      * （客观九数照填）。前端据此渲染行情读数，保存时走 create。
      */
     @GetMapping("/date/{date}")
-    public ApiResponse<DailyRecord> getByDate(Authentication auth,
-                                              @PathVariable String date) {
-        Long userId = (Long) auth.getPrincipal();
+    public ApiResponse<DailyRecord> getByDate(@PathVariable String date) {
         LocalDate d = LocalDate.parse(date);
-        return ApiResponse.ok(dailyRecordService.viewByDate(userId, d));
+        return ApiResponse.ok(dailyRecordService.viewByDate(d));
     }
 
     @GetMapping("/range")
-    public ApiResponse<List<DailyRecord>> getRange(Authentication auth,
-                                                   @RequestParam String start,
+    public ApiResponse<List<DailyRecord>> getRange(@RequestParam String start,
                                                    @RequestParam String end) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(dailyRecordService.getRange(userId,
+        return ApiResponse.ok(dailyRecordService.getRange(
                 LocalDate.parse(start), LocalDate.parse(end)));
     }
 
     @GetMapping("/latest")
-    public ApiResponse<List<DailyRecord>> getLatest(Authentication auth,
-                                                    @RequestParam(defaultValue = "20") int days) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(dailyRecordService.getLatest(userId, days));
+    public ApiResponse<List<DailyRecord>> getLatest(@RequestParam(defaultValue = "20") int days) {
+        return ApiResponse.ok(dailyRecordService.getLatest(days));
     }
 
     @GetMapping("/advice")
-    public ApiResponse<StageAdviceVO> getAdvice(Authentication auth) {
-        Long userId = (Long) auth.getPrincipal();
-        DailyRecord today = dailyRecordService.getToday(userId);
+    public ApiResponse<StageAdviceVO> getAdvice() {
+        DailyRecord today = dailyRecordService.getToday();
         if (today == null || isBlank(today.getStage())) {
             // 当日没复盘时回落到最近一条，和仪表盘头部卡片保持同一口径
-            List<DailyRecord> latest = dailyRecordService.getLatest(userId, 1);
+            List<DailyRecord> latest = dailyRecordService.getLatest(1);
             today = latest.isEmpty() ? null : latest.get(0);
         }
         if (today != null && !isBlank(today.getStage())) {
@@ -143,10 +138,9 @@ public class DailyRecordController {
     }
 
     @PostMapping("/recalc")
-    public ApiResponse<DailyRecord> recalc(Authentication auth, @RequestParam String date) {
-        Long userId = (Long) auth.getPrincipal();
+    public ApiResponse<DailyRecord> recalc(@RequestParam String date) {
         LocalDate day = parse(date);
-        DailyRecord record = dailyRecordService.recalc(userId, day);
+        DailyRecord record = dailyRecordService.recalc(day);
         if (record == null) {
             throw new IllegalArgumentException(day + " 那天没有复盘记录：重算只改派生列，不会替你新建一条");
         }
@@ -155,8 +149,8 @@ public class DailyRecordController {
 
     /** 打分口径一改就要整体重跑。人工填的那十三项原样不动，所以不需要重新提交复盘。 */
     @PostMapping("/recalc-all")
-    public ApiResponse<Integer> recalcAll(Authentication auth) {
-        return ApiResponse.ok(dailyRecordService.recalcAll((Long) auth.getPrincipal()));
+    public ApiResponse<Integer> recalcAll() {
+        return ApiResponse.ok(dailyRecordService.recalcAll());
     }
 
     /**
@@ -168,8 +162,7 @@ public class DailyRecordController {
     @PostMapping("/import")
     public ApiResponse<ImportPreviewVO> importMd(Authentication auth,
                                                  @RequestBody ImportRequest req) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(reviewImportService.importDoc(userId, req.getContent(), req.isConfirm()));
+        return ApiResponse.ok(reviewImportService.importDoc(userId(auth), req.getContent(), req.isConfirm()));
     }
 
     /**
@@ -180,15 +173,13 @@ public class DailyRecordController {
      */
     @GetMapping("/import/export")
     public ApiResponse<ReviewExportVO> exportReviewMd(Authentication auth, @RequestParam String date) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(reviewExportService.export(userId, parse(date)));
+        return ApiResponse.ok(reviewExportService.export(userId(auth), parse(date)));
     }
 
     /** 按库里当前的值重建一份可导入的 md。写今天的复盘用这个：系统那些数不用手抄。 */
     @GetMapping("/import/template")
     public ApiResponse<ReviewExportVO> templateReviewMd(Authentication auth, @RequestParam String date) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(reviewExportService.template(userId, parse(date)));
+        return ApiResponse.ok(reviewExportService.template(userId(auth), parse(date)));
     }
 
     /**
@@ -197,8 +188,7 @@ public class DailyRecordController {
      */
     @GetMapping("/review-doc")
     public ApiResponse<ReviewExportVO> reviewDoc(Authentication auth, @RequestParam String date) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(reviewExportService.reviewDoc(userId, parse(date)));
+        return ApiResponse.ok(reviewExportService.reviewDoc(userId(auth), parse(date)));
     }
 
     /**
@@ -206,9 +196,8 @@ public class DailyRecordController {
      * 改一 sub 权重或一 ladder 阈值 → 刷新即反映。Dashboard 卡片 tooltip 唯一数据源。
      */
     @GetMapping("/score-detail")
-    public ApiResponse<ScoreDetailVO> scoreDetail(Authentication auth, @RequestParam String date) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(dailyRecordService.scoreDetail(userId, parse(date)));
+    public ApiResponse<ScoreDetailVO> scoreDetail(@RequestParam String date) {
+        return ApiResponse.ok(dailyRecordService.scoreDetail(parse(date)));
     }
 
     /**
@@ -218,8 +207,7 @@ public class DailyRecordController {
      */
     @GetMapping("/import/detail")
     public ApiResponse<ReviewDetailVO> importDetail(Authentication auth, @RequestParam String date) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(reviewImportService.detail(userId, parse(date)));
+        return ApiResponse.ok(reviewImportService.detail(userId(auth), parse(date)));
     }
 
     /**
@@ -230,16 +218,14 @@ public class DailyRecordController {
     public ApiResponse<Integer> savePositions(Authentication auth,
                                               @RequestParam String date,
                                               @RequestBody List<PositionRequest> rows) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(reviewLedgerService.savePositions(userId, parse(date), rows));
+        return ApiResponse.ok(reviewLedgerService.savePositions(userId(auth), parse(date), rows));
     }
 
     /** 读取某日持仓台账（三条段式扩展列随行返回），日期切换时前端回填编辑表。 */
     @GetMapping("/positions")
     public ApiResponse<List<com.emotion.entity.Position>> getPositions(Authentication auth,
                                                                        @RequestParam String date) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(reviewLedgerService.readPositions(userId, parse(date)));
+        return ApiResponse.ok(reviewLedgerService.readPositions(userId(auth), parse(date)));
     }
 
     /**
@@ -249,9 +235,8 @@ public class DailyRecordController {
     @GetMapping("/positions/pending/latest")
     public ApiResponse<com.emotion.entity.Position> latestPending(Authentication auth,
                                                                   @RequestParam(required = false) String before) {
-        Long userId = (Long) auth.getPrincipal();
         LocalDate b = before == null ? LocalDate.now() : parse(before);
-        return ApiResponse.ok(reviewLedgerService.latestPendingPosition(userId, b));
+        return ApiResponse.ok(reviewLedgerService.latestPendingPosition(userId(auth), b));
     }
 
     /** 外溢点②：次日（T+1）复盘页顶部——最近一批未执行决策（昨日遗留），limit 缺省 5。 */
@@ -259,17 +244,15 @@ public class DailyRecordController {
     public ApiResponse<List<com.emotion.entity.Position>> pendingPositions(Authentication auth,
                                                                            @RequestParam(required = false) String before,
                                                                            @RequestParam(defaultValue = "5") int limit) {
-        Long userId = (Long) auth.getPrincipal();
         LocalDate b = before == null ? LocalDate.now() : parse(before);
-        return ApiResponse.ok(reviewLedgerService.pendingPositions(userId, b, limit));
+        return ApiResponse.ok(reviewLedgerService.pendingPositions(userId(auth), b, limit));
     }
 
     /** 外溢点①的痕迹行：待裁决列表空了以后，仪表盘用它显示「最近已裁决」，limit 缺省 3。 */
     @GetMapping("/positions/executed")
     public ApiResponse<List<com.emotion.entity.Position>> executedPositions(Authentication auth,
                                                                             @RequestParam(defaultValue = "3") int limit) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(reviewLedgerService.executedPositions(userId, limit));
+        return ApiResponse.ok(reviewLedgerService.executedPositions(userId(auth), limit));
     }
 
     /** 标记某持仓已执行：回填真实动作，executed 置 1，闭环完成。 */
@@ -277,8 +260,7 @@ public class DailyRecordController {
     public ApiResponse<Boolean> markExecuted(Authentication auth,
                                              @PathVariable Long id,
                                              @RequestParam(required = false) String action) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(reviewLedgerService.markPositionExecuted(userId, id, action));
+        return ApiResponse.ok(reviewLedgerService.markPositionExecuted(userId(auth), id, action));
     }
 
     /**
@@ -288,8 +270,7 @@ public class DailyRecordController {
     @GetMapping("/positions/all")
     public ApiResponse<List<com.emotion.entity.Position>> allPositions(Authentication auth,
                                                                        @RequestParam(required = false) Integer days) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(reviewLedgerService.allPositions(userId, days == null ? 365 : days));
+        return ApiResponse.ok(reviewLedgerService.allPositions(userId(auth), days == null ? 365 : days));
     }
 
     /**
@@ -297,11 +278,9 @@ public class DailyRecordController {
      * <b>复盘页已经没有这块编辑口</b>：这两批行现在只由那天导入的 md 写，这个入口留作同一套语义的手工口。
      */
     @PutMapping("/predictions")
-    public ApiResponse<Integer> savePredictions(Authentication auth,
-                                                @RequestParam String date,
+    public ApiResponse<Integer> savePredictions(@RequestParam String date,
                                                 @RequestBody List<PredictionRequest> rows) {
-        Long userId = (Long) auth.getPrincipal();
-        return ApiResponse.ok(reviewLedgerService.savePredictions(userId, parse(date), rows));
+        return ApiResponse.ok(reviewLedgerService.savePredictions(parse(date), rows));
     }
 
     private static LocalDate parse(String raw) {
@@ -315,11 +294,14 @@ public class DailyRecordController {
         }
     }
 
+    /** 持仓台账按账号各记一套，这个 id 只喂给台账与那份文档里的持仓段。 */
+    private static Long userId(Authentication auth) {
+        return (Long) auth.getPrincipal();
+    }
+
     @GetMapping("/curve")
-    public ApiResponse<TemperatureCurveVO> getCurve(Authentication auth,
-                                                    @RequestParam(defaultValue = "20") int days) {
-        Long userId = (Long) auth.getPrincipal();
-        List<DailyRecord> records = dailyRecordService.getLatest(userId, days);
+    public ApiResponse<TemperatureCurveVO> getCurve(@RequestParam(defaultValue = "20") int days) {
+        List<DailyRecord> records = dailyRecordService.getLatest(days);
 
         TemperatureCurveVO vo = new TemperatureCurveVO();
         List<String> dates = new ArrayList<>();

@@ -77,7 +77,7 @@ public class BreakDetailService {
      * 一次点击的全部读数：三条已有查询（曲线全窗口 / 当日天梯 / 当日首板池）+ 两条闸门小查。
      * 日期不传按今天，与天梯、首板池两个接口同一个约定。
      */
-    public BreakDetailVO vo(Long userId, LocalDate requested) {
+    public BreakDetailVO vo(LocalDate requested) {
         LocalDate date = requested != null ? requested : LocalDate.now(CN);
         Source s = new Source();
         s.date = date;
@@ -88,25 +88,22 @@ public class BreakDetailService {
         s.subjectCode = codeOf(subjectOf(s.point));
 
         if (s.point != null) {
-            TiantiVO tv = tiantiService.vo(userId, date);
+            TiantiVO tv = tiantiService.vo(date);
             s.ladderRows = flatten(tv.getLevels());
             s.subjectRow = rowOf(s.ladderRows, s.subjectCode);
-            ShoubanVO sv = shoubanService.vo(userId, date);
+            ShoubanVO sv = shoubanService.vo(date);
             s.sealed = sv.getSealed() == null ? new ArrayList<ShoubanVO.Row>() : sv.getSealed();
             s.detailAvailable = hasQuoteDetail(s.ladderRows, s.sealed);
         }
         s.day = marketDailyMapper.selectOne(new LambdaQueryWrapper<MarketDaily>()
                 .eq(MarketDaily::getTradeDate, date)
                 .last("LIMIT 1"));
-        if (userId != null) {
-            s.record = dailyRecordMapper.selectOne(new LambdaQueryWrapper<DailyRecord>()
-                    .eq(DailyRecord::getUserId, userId)
-                    .eq(DailyRecord::getTradeDate, date)
-                    .last("LIMIT 1"));
-        }
+        s.record = dailyRecordMapper.selectOne(new LambdaQueryWrapper<DailyRecord>()
+                .eq(DailyRecord::getTradeDate, date)
+                .last("LIMIT 1"));
         BreakDetailVO vo = compose(s);
         // 立节点之前就得让他看清会动谁的分数，不能等写完再回头说
-        vo.setScoreImpact(scoreImpact(userId, date,
+        vo.setScoreImpact(scoreImpact(date,
                 vo.getSubject() == null ? null : vo.getSubject().getCode(),
                 NodeBreakService.typeOfEvent(vo.getEvent())));
         return vo;
@@ -119,12 +116,11 @@ public class BreakDetailService {
      * <p>权重读 {@link WaveRiderConfig#defaultNodeTypeWeights()}：破壁这两个键是新的，
      * 存量策略版本里不可能写过，读取时 {@code fillMissingNodeTypeWeights()} 补的就是这个默认值。
      */
-    public String scoreImpact(Long userId, LocalDate date, String code, String nodeType) {
-        if (code == null || nodeType == null || userId == null) {
+    public String scoreImpact(LocalDate date, String code, String nodeType) {
+        if (code == null || nodeType == null) {
             return null;
         }
         List<NodeEvent> rows = nodeEventMapper.selectList(new LambdaQueryWrapper<NodeEvent>()
-                .eq(NodeEvent::getUserId, userId)
                 .ne(NodeEvent::getStatus, "失效"));
         return scoreImpactNote(rows, date, code, nodeType);
     }

@@ -21,7 +21,6 @@ public class ThemeStock {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long userId;
     private Long themeId;
     private LocalDate tradeDate;
     private String code;

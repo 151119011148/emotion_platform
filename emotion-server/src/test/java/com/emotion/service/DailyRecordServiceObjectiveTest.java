@@ -13,8 +13,6 @@ import static org.mockito.Mockito.when;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,7 +37,6 @@ import com.emotion.util.ScoreInputs;
  */
 class DailyRecordServiceObjectiveTest {
 
-    private static final Long USER = 1L;
     private static final LocalDate DAY = LocalDate.of(2026, 9, 29);
 
     private DailyRecordMapper mapper;
@@ -55,9 +52,8 @@ class DailyRecordServiceObjectiveTest {
         service = new DailyRecordService(mapper, scoreContext, marketDailyStore);
 
         when(mapper.selectList(any())).thenReturn(new ArrayList<>());
-        when(mapper.listReviewerUserIds()).thenReturn(new ArrayList<>());
         // 空 metrics = 一维都评不出来，正好用来验「缺数不兜 0」
-        when(scoreContext.forDate(any(), any(), any())).thenReturn(ScoreInputs.empty());
+        when(scoreContext.forDate(any(), any())).thenReturn(ScoreInputs.empty());
         when(marketDailyStore.getByDate(any())).thenReturn(null);
     }
 
@@ -65,7 +61,7 @@ class DailyRecordServiceObjectiveTest {
     void insertsObjectiveShellLeavingEverySubjectiveColumnNull() {
         when(mapper.selectOne(any())).thenReturn(null);
 
-        boolean created = service.ensureObjectiveRecord(USER, DAY);
+        boolean created = service.ensureObjectiveRecord(DAY);
 
         assertTrue(created, "当天没有行，应该是新建");
         ArgumentCaptor<DailyRecord> cap = ArgumentCaptor.forClass(DailyRecord.class);
@@ -73,7 +69,6 @@ class DailyRecordServiceObjectiveTest {
         verify(mapper, never()).updateById(any());
 
         DailyRecord row = cap.getValue();
-        assertEquals(USER, row.getUserId());
         assertEquals(DAY, row.getTradeDate());
         // 主观十三项：机器一格都不填
         assertNull(row.getMainTheme(), "主线");
@@ -106,7 +101,7 @@ class DailyRecordServiceObjectiveTest {
         existing.setStageOverridden(0);
         when(mapper.selectOne(any())).thenReturn(existing);
 
-        boolean created = service.ensureObjectiveRecord(USER, DAY);
+        boolean created = service.ensureObjectiveRecord(DAY);
 
         assertFalse(created, "当天已有行，不该报新建");
         verify(mapper, never()).insert(any());
@@ -127,7 +122,7 @@ class DailyRecordServiceObjectiveTest {
         existing.setStageOverridden(1);
         when(mapper.selectOne(any())).thenReturn(existing);
 
-        service.ensureObjectiveRecord(USER, DAY);
+        service.ensureObjectiveRecord(DAY);
 
         assertEquals("退潮", existing.getStage(), "改判过的阶段带不能被机器算出来的盖掉");
         assertEquals(1, existing.getStageOverridden().intValue(),
@@ -135,20 +130,9 @@ class DailyRecordServiceObjectiveTest {
         verify(mapper).updateById(existing);
     }
 
-    @Test
-    void reviewerUserIdsForwardsMapperAndSurvivesNull() {
-        when(mapper.listReviewerUserIds()).thenReturn(Arrays.asList(1L, 7L));
-        assertEquals(Arrays.asList(1L, 7L), service.reviewerUserIds());
-
-        when(mapper.listReviewerUserIds()).thenReturn(null);
-        List<Long> none = service.reviewerUserIds();
-        assertTrue(none.isEmpty(), "mapper 回 null 时给空名单，别把 NPE 抛给调度器");
-    }
-
     private static DailyRecord existingRow() {
         DailyRecord r = new DailyRecord();
         r.setId(99L);
-        r.setUserId(USER);
         r.setTradeDate(DAY);
         return r;
     }

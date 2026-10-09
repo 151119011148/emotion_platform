@@ -18,7 +18,6 @@ import com.emotion.entity.ScoringDim;
 import com.emotion.entity.ScoringModelConfig;
 import com.emotion.entity.ScoringRule;
 import com.emotion.entity.ScoringSub;
-import com.emotion.exception.BizException;
 import com.emotion.service.ScoringModelService;
 import com.emotion.service.ScoringModelStore;
 import com.emotion.util.AuthContext;
@@ -57,19 +56,19 @@ public class ScoringModelController {
 
     @GetMapping("/models")
     public ApiResponse<List<ScoringModelConfig>> listModels() {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作打分配置");
         return ApiResponse.ok(service.listModels());
     }
 
     @GetMapping("/models/{id}")
     public ApiResponse<ScoringModelVO> modelDetail(@PathVariable Long id) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作打分配置");
         return ApiResponse.ok(service.modelDetail(id));
     }
 
     @PostMapping("/models")
     public ApiResponse<ScoringModelConfig> createModel(Authentication auth, @RequestBody ScoringModelConfig body) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作打分配置");
         ScoringModelConfig created = service.createModel(body);
         log.info("打分配置审计 user={} 新建模型 id={} key={}", userId(auth), created.getId(), created.getModelKey());
         return ApiResponse.ok(created);
@@ -78,7 +77,7 @@ public class ScoringModelController {
     @PutMapping("/models/{id}")
     public ApiResponse<ScoringModelConfig> updateModel(Authentication auth, @PathVariable Long id,
                                                        @RequestBody ScoringModelConfig body) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作打分配置");
         ScoringModelConfig updated = service.updateModel(id, body);
         log.info("打分配置审计 user={} 改模型 id={}", userId(auth), id);
         return ApiResponse.ok(updated);
@@ -86,7 +85,7 @@ public class ScoringModelController {
 
     @DeleteMapping("/models/{id}")
     public ApiResponse<Void> deleteModel(Authentication auth, @PathVariable Long id) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作打分配置");
         service.deleteModel(id);
         log.info("打分配置审计 user={} 删模型 id={}（级联删维度/规则）", userId(auth), id);
         return ApiResponse.ok(null);
@@ -94,7 +93,7 @@ public class ScoringModelController {
 
     @PostMapping("/models/{id}/activate")
     public ApiResponse<ScoringModelConfig> activate(Authentication auth, @PathVariable Long id) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作打分配置");
         ScoringModelConfig activated = service.activate(id);
         log.info("打分配置审计 user={} 激活模型 id={} key={}", userId(auth), id, activated.getModelKey());
         return ApiResponse.ok(activated);
@@ -102,7 +101,7 @@ public class ScoringModelController {
 
     @PostMapping("/dims")
     public ApiResponse<ScoringDim> createDim(Authentication auth, @RequestBody ScoringDim body) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作打分配置");
         ScoringDim created = service.createDim(body);
         log.info("打分配置审计 user={} 新建维度 model={} key={}", userId(auth), created.getModelId(), created.getDimKey());
         return ApiResponse.ok(created);
@@ -111,7 +110,7 @@ public class ScoringModelController {
     @PutMapping("/dims/{id}")
     public ApiResponse<ScoringDim> updateDim(Authentication auth, @PathVariable Long id,
                                              @RequestBody ScoringDim body) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作打分配置");
         ScoringDim updated = service.updateDim(id, body);
         log.info("打分配置审计 user={} 改维度 id={} key={} weight={}", userId(auth), id, updated.getDimKey(), updated.getWeight());
         return ApiResponse.ok(updated);
@@ -119,7 +118,7 @@ public class ScoringModelController {
 
     @DeleteMapping("/dims/{id}")
     public ApiResponse<Void> deleteDim(Authentication auth, @PathVariable Long id) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作打分配置");
         service.deleteDim(id);
         log.info("打分配置审计 user={} 删维度 id={}（级联删该维规则）", userId(auth), id);
         return ApiResponse.ok(null);
@@ -127,7 +126,7 @@ public class ScoringModelController {
 
     @PostMapping("/rules")
     public ApiResponse<ScoringRule> createRule(Authentication auth, @RequestBody ScoringRule body) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作打分配置");
         ScoringRule created = service.createRule(body);
         log.info("打分配置审计 user={} 新建规则 model={} dim={}#{}", userId(auth),
                 created.getModelId(), created.getDimKey(), created.getRuleNo());
@@ -137,7 +136,7 @@ public class ScoringModelController {
     @PutMapping("/rules/{id}")
     public ApiResponse<ScoringRule> updateRule(Authentication auth, @PathVariable Long id,
                                                @RequestBody ScoringRule body) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作打分配置");
         ScoringRule updated = service.updateRule(id, body);
         log.info("打分配置审计 user={} 改规则 id={}", userId(auth), id);
         return ApiResponse.ok(updated);
@@ -145,7 +144,7 @@ public class ScoringModelController {
 
     @DeleteMapping("/rules/{id}")
     public ApiResponse<Void> deleteRule(Authentication auth, @PathVariable Long id) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作打分配置");
         service.deleteRule(id);
         log.info("打分配置审计 user={} 删规则 id={}", userId(auth), id);
         return ApiResponse.ok(null);
@@ -153,7 +152,7 @@ public class ScoringModelController {
 
     @PostMapping("/subs")
     public ApiResponse<ScoringSub> createSub(Authentication auth, @RequestBody ScoringSub body) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作打分配置");
         ScoringSub created = service.createSub(body);
         log.info("打分配置审计 user={} 新建子指标 model={} dim={} sub={}", userId(auth),
                 created.getModelId(), created.getDimKey(), created.getSubKey());
@@ -163,7 +162,7 @@ public class ScoringModelController {
     @PutMapping("/subs/{id}")
     public ApiResponse<ScoringSub> updateSub(Authentication auth, @PathVariable Long id,
                                              @RequestBody ScoringSub body) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作打分配置");
         ScoringSub updated = service.updateSub(id, body);
         log.info("打分配置审计 user={} 改子指标 id={} weight={}", userId(auth), id, updated.getWeight());
         return ApiResponse.ok(updated);
@@ -171,7 +170,7 @@ public class ScoringModelController {
 
     @DeleteMapping("/subs/{id}")
     public ApiResponse<Void> deleteSub(Authentication auth, @PathVariable Long id) {
-        requireSuperAdmin();
+        AuthContext.requireSuperAdmin("操作打分配置");
         service.deleteSub(id);
         log.info("打分配置审计 user={} 删子指标 id={}（级联删该 sub 的 ladder 与子层）", userId(auth), id);
         return ApiResponse.ok(null);
@@ -179,12 +178,5 @@ public class ScoringModelController {
 
     private static Long userId(Authentication auth) {
         return auth == null ? null : (Long) auth.getPrincipal();
-    }
-
-    /** 判据只有一处：token 里的角色声明。改角色会同时把令牌版本 +1，旧 token 立刻失效。 */
-    private static void requireSuperAdmin() {
-        if (!AuthContext.isSuperAdmin()) {
-            throw new BizException("仅超级管理员可操作打分配置");
-        }
     }
 }

@@ -233,7 +233,7 @@ class ReviewImportWriterTest {
 
         assertNull(ReviewImportWriter.positionRows(2L, DAY, doc, Collections.<String, String>emptyMap()));
         assertNull(ReviewImportWriter.indexRows(DAY, doc));
-        assertTrue(ReviewImportWriter.predictionRows(2L, DAY, doc).isEmpty());
+        assertTrue(ReviewImportWriter.predictionRows(DAY, doc).isEmpty());
     }
 
     @Test
@@ -243,7 +243,7 @@ class ReviewImportWriterTest {
                 "预判: 反包修复 概率45",
                 "对答案: 路径二 命中 跌停扩至17家");
 
-        List<Prediction> rows = ReviewImportWriter.predictionRows(2L, DAY, doc);
+        List<Prediction> rows = ReviewImportWriter.predictionRows(DAY, doc);
 
         assertEquals(3, rows.size());
         assertEquals(Prediction.KIND_PLAN, rows.get(0).getKind());
@@ -279,7 +279,7 @@ class ReviewImportWriterTest {
                 "预判: 路径二 概率50 条件 跌停≥20",
                 "对答案: 路径二 命中 跌停扩至17家");
 
-        List<Prediction> rows = ReviewImportWriter.predictionRows(2L, DAY, doc);
+        List<Prediction> rows = ReviewImportWriter.predictionRows(DAY, doc);
 
         assertEquals(2, rows.size());
         assertEquals(Prediction.KIND_PLAN, rows.get(0).getKind());

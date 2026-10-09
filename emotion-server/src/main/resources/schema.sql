@@ -15,7 +15,6 @@ CREATE TABLE IF NOT EXISTS t_user (
 -- 每日记录表（核心）
 CREATE TABLE IF NOT EXISTS t_daily_record (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL,
     trade_date DATE NOT NULL,
 
     -- 九维原始指标
@@ -135,15 +134,13 @@ CREATE TABLE IF NOT EXISTS t_daily_record (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-    UNIQUE KEY uk_user_date (user_id, trade_date),
-    INDEX idx_trade_date (trade_date),
-    INDEX idx_user_id (user_id)
+    UNIQUE KEY uk_date (trade_date),
+    INDEX idx_trade_date (trade_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 周期表
 CREATE TABLE IF NOT EXISTS t_cycle (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL,
     start_date DATE NOT NULL COMMENT '周期起始日(冰点日)',
     end_date DATE DEFAULT NULL COMMENT '周期结束日',
     max_temperature DECIMAL(5,1) DEFAULT 0 COMMENT '本轮最高温度',
@@ -153,14 +150,12 @@ CREATE TABLE IF NOT EXISTS t_cycle (
     status VARCHAR(10) DEFAULT 'ONGOING' COMMENT 'ONGOING/COMPLETED',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 
-    INDEX idx_user_id (user_id),
     INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 主线题材表
 CREATE TABLE IF NOT EXISTS t_theme (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL,
     cycle_id BIGINT DEFAULT NULL COMMENT '所属周期',
     name VARCHAR(100) NOT NULL COMMENT '题材名称',
     start_date DATE COMMENT '题材启动日',
@@ -169,7 +164,6 @@ CREATE TABLE IF NOT EXISTS t_theme (
     is_main_line TINYINT DEFAULT 0 COMMENT '是否为人工主线题材(题材表可升级到主线区)',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 
-    INDEX idx_user_id (user_id),
     INDEX idx_cycle_id (cycle_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -178,7 +172,6 @@ CREATE TABLE IF NOT EXISTS t_theme (
 -- 人工归类=MANUAL；自动回填热门行业= AUTO。
 CREATE TABLE IF NOT EXISTS t_theme_stock (
     id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id     BIGINT      NOT NULL,
     theme_id    BIGINT      NOT NULL COMMENT '关联 t_theme.id',
     trade_date  DATE        NOT NULL COMMENT '按日快照(题材轮换可回溯)',
     code        VARCHAR(6)  NOT NULL COMMENT '6位代码',
@@ -189,7 +182,6 @@ CREATE TABLE IF NOT EXISTS t_theme_stock (
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
 
     UNIQUE KEY uk_theme_date_code (theme_id, trade_date, code),
-    INDEX idx_user_date (user_id, trade_date),
     INDEX idx_date (trade_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='题材-个股关系(按日)';
 
@@ -204,7 +196,6 @@ PREPARE themes_stmt FROM @themes_ddl; EXECUTE themes_stmt; DEALLOCATE PREPARE th
 -- 龙头股表
 CREATE TABLE IF NOT EXISTS t_leading_stock (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL,
     theme_id BIGINT DEFAULT NULL COMMENT '所属题材',
     name VARCHAR(50) NOT NULL COMMENT '股票名称',
     role VARCHAR(20) DEFAULT '' COMMENT '总龙头/中军/跟风/卡位/反包龙',
@@ -213,14 +204,12 @@ CREATE TABLE IF NOT EXISTS t_leading_stock (
     status VARCHAR(20) DEFAULT '' COMMENT '当前状态',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 
-    INDEX idx_user_id (user_id),
     INDEX idx_theme_id (theme_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 节点事件表
 CREATE TABLE IF NOT EXISTS t_node_event (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL,
     cycle_id BIGINT DEFAULT NULL COMMENT '所属周期',
     system_type VARCHAR(10) DEFAULT '' COMMENT 'A(市场总节点)/B(板块节点)',
     anchor_stock VARCHAR(50) DEFAULT '' COMMENT '锚定龙头',
@@ -247,7 +236,6 @@ CREATE TABLE IF NOT EXISTS t_node_event (
     note TEXT COMMENT '备注',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 
-    INDEX idx_user_id (user_id),
     INDEX idx_status (status),
     INDEX idx_anchor (anchor_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -329,21 +317,19 @@ CREATE TABLE IF NOT EXISTS t_zt_perf (
     INDEX idx_date_prev (trade_date, prev_consecutive)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='昨日涨停股今日表现逐只(含首板,公开数据,不绑用户)';
 
--- 天梯人工总龙头：全市场最高连板自动标"空间板"，"总龙头"是用户某日手动指定的身份（绑用户）。
+-- 天梯人工总龙头：全市场最高连板自动标"空间板"，"总龙头"是某日人工指定的身份（一天一行，全平台共享）。
 CREATE TABLE IF NOT EXISTS t_manual_leader (
-    user_id BIGINT NOT NULL COMMENT '账号',
     trade_date DATE NOT NULL COMMENT '交易日',
     code VARCHAR(6) NOT NULL COMMENT '6位代码',
     name VARCHAR(20) NOT NULL COMMENT '证券简称(与t_stock反查一致)',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-    PRIMARY KEY (user_id, trade_date)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='连板天梯某日人工总龙头(每账号每交易日一行)';
+    PRIMARY KEY (trade_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='连板天梯某日人工总龙头(每个交易日一行,全平台共享)';
 
 -- 周期阵眼/总龙头：第 8 维的来源。跨度只存起止日，最高连板/回撤等一律从日 K 现算，不让人手填。
 CREATE TABLE IF NOT EXISTS t_anchor (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL,
     stock_code VARCHAR(6) NOT NULL COMMENT '6位代码，名称由 t_stock 反查校验',
     stock_name VARCHAR(20) NOT NULL,
     role VARCHAR(10) NOT NULL DEFAULT 'CYCLE' COMMENT 'CYCLE=周期阵眼 / LEADER=周期总龙',
@@ -354,8 +340,8 @@ CREATE TABLE IF NOT EXISTS t_anchor (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-    UNIQUE KEY uk_user_code_start (user_id, stock_code, start_date),
-    INDEX idx_user_span (user_id, start_date, end_date)
+    UNIQUE KEY uk_code_start (stock_code, start_date),
+    INDEX idx_span (start_date, end_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='周期阵眼与总龙头';
 
 -- 异动监管事件：只存事件，监管期是查的时候推出来的（改窗口长度不必回补数据）
@@ -533,7 +519,6 @@ CREATE TABLE IF NOT EXISTS t_position_history (
 -- 兑现结果就跟着没了——而这一天你多半只是在改错别字。
 CREATE TABLE IF NOT EXISTS t_prediction (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL,
     trade_date DATE NOT NULL COMMENT 'PLAN=下单这一行的那天；ANSWER=回写兑现结果的那天',
     kind VARCHAR(6) NOT NULL COMMENT 'PLAN=盘前三路径预判 / ANSWER=次日对答案',
     name VARCHAR(40) NOT NULL COMMENT '路径名。跨日对齐只认名称，所以名字必须每天复用，不能换说法',
@@ -543,8 +528,8 @@ CREATE TABLE IF NOT EXISTS t_prediction (
     result_note VARCHAR(300) DEFAULT NULL COMMENT 'ANSWER：一句话依据',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 
-    UNIQUE KEY uk_user_date_kind_name (user_id, trade_date, kind, name),
-    INDEX idx_user_kind_date (user_id, kind, trade_date)
+    UNIQUE KEY uk_date_kind_name (trade_date, kind, name),
+    INDEX idx_kind_date (kind, trade_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='预判留痕与对答案(复盘导入)';
 
 -- 五大指数收盘：`指数:` 一天五行。公开数据、不绑用户，和 t_market_stock 同一族。
@@ -1823,12 +1808,11 @@ CREATE TABLE IF NOT EXISTS t_industry_daily_snapshot (
     INDEX idx_date_maxboard (trade_date, max_board)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='行业板块单日聚合快照(公开数据,T5)';
 
--- t_theme_daily_snapshot：日内核心题材榜 Top5 快照。题材维度按用户个性化（t_theme/t_theme_stock
---   带 userId，AUTO 绑定），故带 user_id；仅持久化当日展示的前 5 名，题材表读取时自动回填（已有跳过）。
+-- t_theme_daily_snapshot：日内核心题材榜 Top5 快照。题材是全平台共享的一份，每个交易日各存
+--   展示的前 5 名；读题材表时自动回填（已有跳过），回填改的是共用行、只有超级管理员触发。
 CREATE TABLE IF NOT EXISTS t_theme_daily_snapshot (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     trade_date DATE NOT NULL COMMENT '交易日',
-    user_id BIGINT NOT NULL COMMENT '题材绑定所属用户(AUTO口径)',
     `rank` TINYINT NOT NULL COMMENT '题材榜排名1-5',
     theme_name VARCHAR(80) NOT NULL COMMENT '题材名称',
     zt_count INT NOT NULL DEFAULT 0 COMMENT '题材涨停家数',
@@ -1843,8 +1827,8 @@ CREATE TABLE IF NOT EXISTS t_theme_daily_snapshot (
     leader_board TINYINT NOT NULL DEFAULT 0 COMMENT '题材龙头连板',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 
-    UNIQUE KEY uk_user_date_rank (user_id, trade_date, `rank`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='日内核心题材榜Top5快照(按用户,读取回填)';
+    UNIQUE KEY uk_date_rank (trade_date, `rank`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='日内核心题材榜Top5快照(每日前五,读取回填,全平台共享)';
 
 -- t_review_fetch：每日复盘「一键拉取」最近一次编排的状态留档（T1-T8 逐任务结果 + 汇总）。
 --   只记拉取编排的元信息，不存放任何行情/评分数据；行情数据仍在各自的业务表里。
@@ -1865,14 +1849,13 @@ CREATE TABLE IF NOT EXISTS t_review_fetch (
 --   D2 评分对象优先取人工标记行业（高于 ≥3天自动主线）。
 CREATE TABLE IF NOT EXISTS t_mainline_mark (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id BIGINT NOT NULL COMMENT '归属用户',
     trade_date DATE NOT NULL COMMENT '交易日',
     industry VARCHAR(20) NOT NULL COMMENT '人工标记的主线行业',
     manual TINYINT NOT NULL DEFAULT 1 COMMENT '固定1(人工标记)，保留位',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-    UNIQUE KEY uk_user_date_industry (user_id, trade_date, industry)
+    UNIQUE KEY uk_date_industry (trade_date, industry)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='主线双轨雷达区人工主线标记';
 
 -- ============ D2 题材聚合 v2.3（2026-09-13）：每日主动题材索引 ============

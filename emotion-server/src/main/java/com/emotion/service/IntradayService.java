@@ -9,6 +9,7 @@ import com.emotion.mapper.MarketStockMapper;
 import com.emotion.mapper.StockConceptMapper;
 import com.emotion.mapper.ThemeMapper;
 import com.emotion.mapper.ThemeStockMapper;
+import com.emotion.util.AuthContext;
 import com.emotion.vo.IntradayVO;
 import com.emotion.vo.ThemeStockVO;
 import org.slf4j.Logger;
@@ -70,13 +71,23 @@ public class IntradayService {
 
     // ================= 自动回填 =================
 
-    /** 主读取口：先幂等回填（当天总是重建，历史一次补上），再聚合。@Transactional 保证回填原子。 */
+    /**
+     * 主读取口：先幂等回填（当天总是重建，历史一次补上），再聚合。@Transactional 保证回填原子。
+     *
+     * <p>回填和 Top5 沉降都是写，而且改的是全平台共用的一份：这个接口的方法名是 GET，
+     * 写门槛拦不住，只能在服务内自己判。非超级管理员走纯读聚合——他刷一次页面不该重写别人的题材。
+     */
     @Transactional(rollbackFor = Exception.class)
-    public IntradayVO themeTable(Long userId, LocalDate date) {
-        backfill(userId, date);
-        IntradayVO vo = aggregate(userId, date);
+    public IntradayVO themeTable(LocalDate date) {
+        boolean canWrite = AuthContext.isSuperAdmin();
+        if (canWrite) {
+            backfill(date);
+        }
+        IntradayVO vo = aggregate(date);
         // 题材榜已排好序，顺手把当日 Top5 沉降到快照表（已有则跳过）
-        themeSnapshotService.snapshotTop5(userId, date, vo.getThemes());
+        if (canWrite) {
+            themeSnapshotService.snapshotTop5(date, vo.getThemes());
+        }
         return vo;
     }
 
@@ -86,29 +97,29 @@ public class IntradayService {
      * 避免每次读取都重写历史。幂等可重放。
      */
     @Transactional(rollbackFor = Exception.class)
-    public int backfill(Long userId, LocalDate date) {
-        if (userId == null || date == null) {
+    public int backfill(LocalDate date) {
+        if (date == null) {
             return 0;
         }
-        int built = rebuildAutoForDate(userId, date);
+        int built = rebuildAutoForDate(date);
         LocalDate from = date.minusDays(PrdMetricsService.PERSISTENCE_WINDOW);
         List<LocalDate> dates = marketStockMapper.listDetailDatesBetween(from, date);
         for (LocalDate d : dates) {
             if (d.equals(date)) {
                 continue;
             }
-            if (themeStockMapper.countAuto(userId, d) == 0) {
-                built += rebuildAutoForDate(userId, d);
+            if (themeStockMapper.countAuto(d) == 0) {
+                built += rebuildAutoForDate(d);
             }
         }
         if (built > 0) {
-            log.info("题材自动回填 user={} date={} 落 {} 条绑定", userId, date, built);
+            log.info("题材自动回填 date={} 落 {} 条绑定", date, built);
         }
         return built;
     }
 
     /** 单日重建：删该日 AUTO 行 → 涨停股按概念归属分组（索引来自 t_stock_concept，不联网）→ 缺题材先建 → 整批绑定。 */
-    private int rebuildAutoForDate(Long userId, LocalDate date) {
+    private int rebuildAutoForDate(LocalDate date) {
         List<MarketStock> zt = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
                 .eq(MarketStock::getTradeDate, date)
                 .eq(MarketStock::getPool, MarketStock.POOL_LIMIT_UP));
@@ -131,14 +142,13 @@ public class IntradayService {
         for (StockConcept sc : rels) {
             ztByConcept.computeIfAbsent(sc.getConcept(), k -> new java.util.LinkedHashSet<>()).add(sc.getCode());
         }
-        themeStockMapper.deleteAutoForDate(userId, date);
+        themeStockMapper.deleteAutoForDate(date);
         List<ThemeStock> binds = new ArrayList<>();
         for (Map.Entry<String, java.util.LinkedHashSet<String>> e : ztByConcept.entrySet()) {
-            Theme theme = ensureTheme(userId, e.getKey(), date);
+            Theme theme = ensureTheme(e.getKey(), date);
             for (String code : e.getValue()) {
                 MarketStock s = byCode.get(code);
                 ThemeStock ts = new ThemeStock();
-                ts.setUserId(userId);
                 ts.setThemeId(theme.getId());
                 ts.setTradeDate(date);
                 ts.setCode(code);
@@ -173,10 +183,9 @@ public class IntradayService {
         return concept.equals(best);
     }
 
-    /** 按 (user, name) 找题材，不存在则建（硬度默认 3、状态萌芽、启动日今日）。题材无日粒度，最后一次写为准。 */
-    private Theme ensureTheme(Long userId, String name, LocalDate date) {
+    /** 按题材名找题材，不存在则建（硬度默认 3、状态萌芽、启动日今日）。题材无日粒度，最后一次写为准。 */
+    private Theme ensureTheme(String name, LocalDate date) {
         List<Theme> exists = themeMapper.selectList(new LambdaQueryWrapper<Theme>()
-                .eq(Theme::getUserId, userId)
                 .eq(Theme::getName, name)
                 .orderByAsc(Theme::getId)
                 .last("LIMIT 1"));
@@ -184,7 +193,6 @@ public class IntradayService {
             return exists.get(0);
         }
         Theme t = new Theme();
-        t.setUserId(userId);
         t.setName(name);
         t.setStartDate(date);
         t.setStatus("萌芽");
@@ -198,7 +206,7 @@ public class IntradayService {
     // ================= 聚合 =================
 
     /** 题材表聚合：按题材归并当日主题材股票，算强度，附未归类统计。 */
-    public IntradayVO aggregate(Long userId, LocalDate date) {
+    public IntradayVO aggregate(LocalDate date) {
         IntradayVO vo = new IntradayVO();
         vo.setDate(date);
 
@@ -215,20 +223,17 @@ public class IntradayService {
         vo.setTotalZt(byCode.size());
 
         Map<Long, Theme> themes = new HashMap<>();
-        for (Theme t : themeMapper.selectList(new LambdaQueryWrapper<Theme>()
-                .eq(Theme::getUserId, userId))) {
+        for (Theme t : themeMapper.selectList(new LambdaQueryWrapper<Theme>())) {
             themes.put(t.getId(), t);
         }
 
         // 当日绑定行
         List<ThemeStock> today = themeStockMapper.selectList(new LambdaQueryWrapper<ThemeStock>()
-                .eq(ThemeStock::getUserId, userId)
                 .eq(ThemeStock::getTradeDate, date));
         // 持续天数：窗口内该题材每日主题材数
         Map<Long, TreeMap<LocalDate, Integer>> dailyPrimary = new HashMap<>();
         LocalDate from = date.minusDays(PrdMetricsService.PERSISTENCE_WINDOW);
         for (ThemeStock ts : themeStockMapper.selectList(new LambdaQueryWrapper<ThemeStock>()
-                .eq(ThemeStock::getUserId, userId)
                 .ge(ThemeStock::getTradeDate, from)
                 .le(ThemeStock::getTradeDate, date))) {
             if (ts.getIsPrimary() == null || ts.getIsPrimary() != 1) {
@@ -421,9 +426,8 @@ public class IntradayService {
     // ================= 下钻 / 人工归类 =================
 
     /** 题材梯队：该题材当日全部绑定个股（主+辅）按连板降序分层。 */
-    public List<ThemeStockVO.Tier> tiers(Long userId, Long themeId, LocalDate date) {
+    public List<ThemeStockVO.Tier> tiers(Long themeId, LocalDate date) {
         List<ThemeStock> binds = themeStockMapper.selectList(new LambdaQueryWrapper<ThemeStock>()
-                .eq(ThemeStock::getUserId, userId)
                 .eq(ThemeStock::getThemeId, themeId)
                 .eq(ThemeStock::getTradeDate, date));
         List<MarketStock> zt = marketStockMapper.selectList(new LambdaQueryWrapper<MarketStock>()
@@ -465,9 +469,8 @@ public class IntradayService {
     }
 
     /** 题材→板块映射：该题材主题材个股横跨的行业+计数（体现"跨行业"价值）。 */
-    public List<ThemeStockVO.IndustryCount> industries(Long userId, Long themeId, LocalDate date) {
+    public List<ThemeStockVO.IndustryCount> industries(Long themeId, LocalDate date) {
         List<ThemeStock> binds = themeStockMapper.selectList(new LambdaQueryWrapper<ThemeStock>()
-                .eq(ThemeStock::getUserId, userId)
                 .eq(ThemeStock::getThemeId, themeId)
                 .eq(ThemeStock::getTradeDate, date));
         Map<String, Integer> byInd = new LinkedHashMap<>();
@@ -494,9 +497,8 @@ public class IntradayService {
     }
 
     /** 未归类：当日全市场涨停股里没出现在任何题材绑定里的独立股票。 */
-    public List<ThemeStockVO.StockLine> unassigned(Long userId, LocalDate date) {
+    public List<ThemeStockVO.StockLine> unassigned(LocalDate date) {
         List<ThemeStock> binds = themeStockMapper.selectList(new LambdaQueryWrapper<ThemeStock>()
-                .eq(ThemeStock::getUserId, userId)
                 .eq(ThemeStock::getTradeDate, date));
         Set<String> bound = new HashSet<>();
         for (ThemeStock ts : binds) {
@@ -529,9 +531,8 @@ public class IntradayService {
      * 保证切主题材/辅题材/换题材不残留。name/industry 从当日涨停池补齐。
      */
     @Transactional(rollbackFor = Exception.class)
-    public int bind(Long userId, Long themeId, LocalDate date, List<String> codes, boolean primary) {
-        Theme theme = themeMapper.selectOne(new LambdaQueryWrapper<Theme>()
-                .eq(Theme::getId, themeId).eq(Theme::getUserId, userId));
+    public int bind(Long themeId, LocalDate date, List<String> codes, boolean primary) {
+        Theme theme = themeMapper.selectById(themeId);
         if (theme == null) {
             throw new IllegalArgumentException("题材不存在");
         }
@@ -552,13 +553,11 @@ public class IntradayService {
         int done = 0;
         for (String code : codeSet) {
             themeStockMapper.delete(new LambdaQueryWrapper<ThemeStock>()
-                    .eq(ThemeStock::getUserId, userId)
                     .eq(ThemeStock::getThemeId, themeId)
                     .eq(ThemeStock::getTradeDate, date)
                     .eq(ThemeStock::getCode, code));
             MarketStock s = byCode.get(code);
             ThemeStock ts = new ThemeStock();
-            ts.setUserId(userId);
             ts.setThemeId(themeId);
             ts.setTradeDate(date);
             ts.setCode(code);
