@@ -4,7 +4,7 @@
       <h3>{{ name }}
         <span class="sub" v-if="isNodeMode">近 {{ visibleCount }} 个交易日 · 共 {{ rows.length }} 天可回看 ·
           <i class="lk anchor">━●</i>龙头票 <i class="lk stock">━◆</i>节点票 · 虚线＝待验证 灰＝失效
-          <i class="lk ring">○</i>断板 · 点线切节点</span>
+          <i class="lk ring">○</i>断板 <i class="lk d0">▏</i>D0 · 点线切节点</span>
         <span class="sub" v-else>近 {{ visibleCount }} 个交易日 · 共 {{ rows.length }} 天可回看 · 点任意一天切日期 · <i class="lk probe">☆</i>试探 <i class="lk break">★</i>破壁成功 <i class="lk line" :style="{ color: focusedColor }">- -</i>破壁线{{ originNote }}</span>
       </h3>
     </div>
@@ -43,8 +43,11 @@ import { useCurveZoom, DEFAULT_SPAN, MIN_SPAN } from '../utils/curveZoom'
  * 与 ◆节点票（D0 之后接位的那只），一天一个点，不在梯那天留空，`connectNulls:false` 把它画成断口，
  * 于是「爬升 → 打到最高 → 断板 → 换人接位」是看出来的而不是读标签读出来的。轨迹的逐日板高与关键日
  * 全由 utils/nodeTracks 按 height-range 每天的 ladder 算好，下标按**全量** rows；本组件只管窗口切片、
- * 配色与淡出、标签避让、关键日落在窗口外时的那块牌子。这时 selected 传进来的是当前节点的 D0，
- * 竖线读作「D0 线」，琥珀色的最高连板退成背景。
+ * 配色与淡出、标签避让、关键日落在窗口外时的那块牌子。琥珀色的最高连板退成背景。
+ *
+ * <p>节点页不看 selected（那是天梯页的「选中哪天」竖线）。D0 改由每个节点在自己那一列出的一枚
+ * 贴轴短刻度报：颜色跟节点走，点中谁谁才带 `#967 D0 09-23` 的牌子。早先这里是一根贯穿全高的
+ * 中性虚线，读起来像「今日」，而历史节点各有各的 D0，说不清是谁的。
  */
 const props = defineProps({
   /**
@@ -54,7 +57,7 @@ const props = defineProps({
    * 按日期升序、一天一个点。
    */
   rows: { type: Array, default: () => [] },
-  /** 当前查看的日期，高亮竖线 */
+  /** 天梯页当前查看的日期，画成一根琥珀竖线。节点页不看它——D0 由 nodeTracks 自己报 */
   selected: { type: String, default: '' },
   /** 标题名 */
   name: { type: String, default: '连板高度' },
@@ -169,13 +172,27 @@ function trackColor(t, role) {
 }
 
 /**
+ * D0 刻度用「这个节点的颜色」。节点自己没有色，两条轨迹是按角色分色的，所以取接位那条：
+ * 有节点票＝绿（D0 就是它接位那天），只剩龙头票＝蓝，失效＝灰。
+ */
+function nodeColor(t) {
+  if (t.status === '失效') return C_INVALID
+  return t.stock ? C_STOCK : C_ANCHOR
+}
+
+/**
  * 两条轨迹的落位：每个节点最多两条线（●龙头票 / ◆节点票），一天一个点，
  * 不在梯那天是 null——`connectNulls:false` 就把它画成断口，爬升与断板都是看出来的。
  * 关键日不在当前窗口里的那几条不硬画，改在左上角出一行「◀ 在窗口外」的牌子。
  * 标签按像素位置排一遍队：相邻两天的标很容易压在同一个水平带上。
+ *
+ * <p>顺带出每个节点的 D0 刻度（d0Lines，直接喂 markLine.data）。D0 说的是「这个节点从哪一列开始」，
+ * 是日期不是板高，所以贴在轴上往上一板高，不贯穿；挂在轨迹上会有两个毛病——那天这只票不在梯就整枚
+ * 消失，而且看着像在报它当天几板。只有被点中的那个节点才带 `#967 D0 09-23` 的牌子，
+ * 没点中时一排号码会把曲线糊成台账，靠 focusNode 的淡出把其余的压到读不出。
  * @param all 全量 rows——nodeTracks 里的下标都按它算
  * @param i0  当前窗口第一行在 all 里的下标
- * @returns {{series: Array, off: Array}}
+ * @returns {{series: Array, off: Array, d0Lines: Array}}
  */
 function buildTracks(all, rows, i0, yMin, yMax) {
   const cv = chartRef.value
@@ -188,9 +205,13 @@ function buildTracks(all, rows, i0, yMin, yMax) {
   const n = rows.length
   const focus = props.focusNode
 
+  const dateIdx = new Map()
+  all.forEach((r, i) => { if (!dateIdx.has(r.date)) dateIdx.set(r.date, i) })
+
   const series = []
   const off = []
   const labels = []
+  const d0Lines = []
 
   for (const t of props.nodeTracks || []) {
     const dim = focus != null && String(t.id) !== String(focus)
@@ -198,6 +219,36 @@ function buildTracks(all, rows, i0, yMin, yMax) {
     // 轨迹是这张图的主角（琥珀最高板已退成背景），不聚焦时也接近满色，
     // 半透明会让爬升与断口读不清；只有被焦点淡出的那些才真的淡
     const op = dim ? 0.16 : hot ? 1 : 0.95
+
+    // D0 刻度：贴轴往上一板高，不贯穿。窗口外的那几个不出（关键日已有「在窗口外」的牌子管平移）
+    const d0k = t.d0Date && dateIdx.has(t.d0Date) ? dateIdx.get(t.d0Date) - i0 : -1
+    if (d0k >= 0 && d0k < n) {
+      const col = nodeColor(t)
+      const d0 = rows[d0k].date
+      d0Lines.push([
+        { xAxis: d0, yAxis: yMin },
+        {
+          xAxis: d0,
+          yAxis: yMin + (hot ? 1.6 : 1),
+          // 实心的：虚线是那张图上「破壁线／待验证」的记号，D0 不该跟它们撞脸
+          lineStyle: { type: 'solid', color: col, width: hot ? 2 : 1.4, opacity: op },
+          label: hot ? {
+            show: true,
+            formatter: `#${t.id} D0 ${t.d0Date.slice(5)}`,
+            position: 'end',
+            rotate: 0,
+            distance: 4,
+            color: col,
+            fontSize: 10,
+            fontWeight: 700,
+            backgroundColor: 'rgba(26,35,50,0.9)',
+            padding: [2, 4],
+            borderRadius: 3
+          } : { show: false }
+        }
+      ])
+    }
+
     for (const role of ['anchor', 'stock']) {
       const tr = t[role]
       if (!tr) continue
@@ -319,7 +370,7 @@ function buildTracks(all, rows, i0, yMin, yMax) {
     }
   })
 
-  return { series, off }
+  return { series, off, d0Lines }
 }
 
 /** 关键日在窗口外的：不硬画在曲线上，左上角出一行牌子说它去哪了——往左平移窗口才看得到。 */
@@ -467,13 +518,13 @@ function buildOption() {
   const i0 = all.findIndex((r) => r.date === dates[0])
   const tracks = isNodeMode.value && i0 >= 0
     ? buildTracks(all, rows, i0, yMin, yMax)
-    : { series: [], off: [] }
+    : { series: [], off: [], d0Lines: [] }
 
-  // 选中日期竖线：必须两点式。单点 {xAxis} 的端点贴着网格底，标签会被钳进 X 轴刻度行
+  // 天梯页的选中日竖线：必须两点式。单点 {xAxis} 的端点贴着网格底，标签会被钳进 X 轴刻度行
   // （选最左一天时实测 y182-194，与首个刻度标签正面重叠）；锚到 yMax 后恒在 y157-167。
-  // 节点页传进来的 selected 就是当前节点的 D0，所以这条线在那儿读作「D0 线」，颜色也让给琥珀背景线。
+  // 节点页不画这条：D0 由 tracks.d0Lines 的贴轴短刻度按节点分色报。selIdx 下面破壁线的标签避让还要用。
   const selIdx = props.selected ? dates.indexOf(props.selected) : -1
-  const selectedLine = selIdx >= 0
+  const selectedLine = !isNodeMode.value && selIdx >= 0
     ? [[
         { xAxis: dates[selIdx], yAxis: yMin },
         {
@@ -482,10 +533,10 @@ function buildOption() {
           // rotate:0 关掉沿竖线旋转标签的默认行为，否则日期竖排压住刻度；
           // 底色：标签落在网格内、压在琥珀色面积上，不铺底读不出来
           label: {
-            formatter: isNodeMode.value ? `D0 ${dates[selIdx].slice(5)}` : dates[selIdx].slice(5),
+            formatter: dates[selIdx].slice(5),
             position: 'insideEndTop',
             rotate: 0,
-            color: isNodeMode.value ? '#cbd5e1' : '#fbbf24',
+            color: '#fbbf24',
             fontSize: 10,
             backgroundColor: '#1a2332',
             padding: [2, 3],
@@ -570,6 +621,10 @@ function buildOption() {
       }
     }
   })
+
+  // 节点页那排 D0 刻度与天梯页那根选中日竖线互斥，共用同一个 markLine：
+  // 顶层 lineStyle 只服务后者，前者每对端点自带颜色与线宽
+  const markLineData = tracks.d0Lines.length ? tracks.d0Lines : selectedLine
 
   return {
     tooltip: {
@@ -682,15 +737,11 @@ function buildOption() {
           ])
         },
         markPoint: marks.length ? { data: marks } : undefined,
-        markLine: selectedLine.length ? {
+        markLine: markLineData.length ? {
           silent: true,
           symbol: 'none',
-          lineStyle: {
-            type: 'dashed',
-            color: isNodeMode.value ? '#94a3b8' : '#fbbf24',
-            width: isNodeMode.value ? 1.2 : 1.5
-          },
-          data: selectedLine
+          lineStyle: { type: 'dashed', color: '#fbbf24', width: 1.5 },
+          data: markLineData
         } : undefined
       },
       ...lineSeries,
@@ -792,6 +843,10 @@ onUnmounted(() => {
 }
 .lk.ring {
   color: #94a3b8;
+}
+/* 真刻度按节点上色（绿／蓝／灰），图例这枚不冒充任何一个角色色 */
+.lk.d0 {
+  color: #cbd5e1;
 }
 .lk.stock {
   color: #22c55e;

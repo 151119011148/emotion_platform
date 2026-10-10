@@ -28,7 +28,7 @@
     <!-- ⑤ 节点高度曲线：自成一张卡，置顶在节点演变路径下面，不与下面的复算卡片混在一张卡里。
          组件自己就带卡壳（背景/圆角/20px 内边距），这里不再套一层 div，否则内边距叠加、卡中卡 -->
     <BoardHeightCurve v-if="nodeList.length || activeNode" class="node-curve-card"
-      :rows="curveRows" :selected="panelNode ? panelNode.d0Date : ''"
+      :rows="curveRows"
       :node-tracks="nodeTracks" :focus-node="focusId" :day-points="false" :break-lines="false"
       :height="320" :y-min="1" name="节点高度曲线" zoom-group="node-curve" @select-node="toggleFocus" />
 
@@ -498,7 +498,8 @@ function t1Text(n) {
   return `${n.t1PromotionCount ?? '—'} 只 · ${n.t1PromotionRate}%`
 }
 
-/** 曲线高亮竖线与判据面板跟着的那一节：点定的那节 → 活跃那节 → 最新那节。 */
+/** 节点标签行与判据面板跟着的那一节：点定的那节 → 活跃那节 → 最新那节。
+ *  曲线不看它——D0 由 nodeTracks 里每个节点各自报，免得回落出来的那节被读成「今日」。 */
 const panelNode = computed(() => {
   if (focusId.value != null) return nodeList.value.find((n) => n.id === focusId.value) || null
   return activeNode.value || nodeList.value[0] || null
