@@ -6,6 +6,7 @@ import com.emotion.dto.WaveRiderNodeRequest;
 import com.emotion.dto.WaveRiderRunRequest;
 import com.emotion.dto.WaveRiderSaveVersionRequest;
 import com.emotion.entity.CandidateStock;
+import com.emotion.entity.CandidateT1;
 import com.emotion.entity.NodeDetect;
 import com.emotion.entity.Strategy;
 import com.emotion.entity.StrategyRun;
@@ -13,6 +14,7 @@ import com.emotion.entity.StrategyTemplate;
 import com.emotion.entity.StrategyVersion;
 import com.emotion.mapper.CandidateStockMapper;
 import com.emotion.mapper.CandidateT1Mapper;
+import com.emotion.mapper.MarketStockMapper;
 import com.emotion.mapper.NodeDetectMapper;
 import com.emotion.mapper.StrategyRunMapper;
 import com.emotion.service.NodeService;
@@ -20,6 +22,8 @@ import com.emotion.service.TiantiService;
 import com.emotion.service.TopicHeatService;
 import com.emotion.service.WaveRiderConfigService;
 import com.emotion.service.WaveRiderReviewService;
+import com.emotion.util.AuthContext;
+import com.emotion.util.RuleMask;
 import com.emotion.vo.ApiResponse;
 import com.emotion.vo.NodeTagVO;
 import com.emotion.vo.ThemeTagVO;
@@ -67,6 +71,7 @@ public class WaveRiderController {
     private final StrategyRunMapper runMapper;
     private final CandidateStockMapper candidateMapper;
     private final CandidateT1Mapper t1Mapper;
+    private final MarketStockMapper marketStockMapper;
     private final NodeService nodeService;
     private final TopicHeatService topicHeatService;
     private final TiantiService tiantiService;
@@ -80,6 +85,7 @@ public class WaveRiderController {
                                StrategyRunMapper runMapper,
                                CandidateStockMapper candidateMapper,
                                CandidateT1Mapper t1Mapper,
+                               MarketStockMapper marketStockMapper,
                                NodeService nodeService,
                                TopicHeatService topicHeatService,
                                TiantiService tiantiService,
@@ -92,6 +98,7 @@ public class WaveRiderController {
         this.runMapper = runMapper;
         this.candidateMapper = candidateMapper;
         this.t1Mapper = t1Mapper;
+        this.marketStockMapper = marketStockMapper;
         this.nodeService = nodeService;
         this.topicHeatService = topicHeatService;
         this.tiantiService = tiantiService;
@@ -112,8 +119,15 @@ public class WaveRiderController {
                 req.getDescription(), req.getTemplateCode()));
     }
 
+    /**
+     * 整个策略配置 + 每个版本的 configJson 快照，就是策略本身。
+     *
+     * <p>前端唯一消费者是「得分」表头那颗说明悬浮，而它现在对非超管根本不发这个请求
+     * （见 {@code WaveRiderView.loadConfig}），所以这道闸不会给谁换出一条红。
+     */
     @GetMapping("/strategies/{id}")
     public ApiResponse<Map<String, Object>> detail(@PathVariable Long id) {
+        AuthContext.requireSuperAdmin("查看策略配置");
         Strategy s = configService.requireStrategy(id);
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("strategy", s);
@@ -138,8 +152,10 @@ public class WaveRiderController {
         return ApiResponse.ok(configService.saveVersion(id, json, req.getChangeNote(), userId(auth)));
     }
 
+    /** 每个版本都带完整 configJson 快照；前端没有消费者（modules.js 定义了从不调用）。 */
     @GetMapping("/strategies/{id}/versions")
     public ApiResponse<List<StrategyVersion>> versions(@PathVariable Long id) {
+        AuthContext.requireSuperAdmin("查看策略版本");
         configService.requireStrategy(id);
         return ApiResponse.ok(configService.listVersions(id));
     }
@@ -186,8 +202,10 @@ public class WaveRiderController {
 
     // ------------------------------------------------------------------ 模板
 
+    /** 模板带完整 configJson；前端没有消费者。 */
     @GetMapping("/templates")
     public ApiResponse<List<StrategyTemplate>> templates() {
+        AuthContext.requireSuperAdmin("查看策略模板");
         return ApiResponse.ok(configService.listTemplates());
     }
 
@@ -198,9 +216,11 @@ public class WaveRiderController {
         return ApiResponse.ok(configService.applyTemplate(strategyId, code, userId(auth)));
     }
 
+    /** 两份 configJson 并排；前端没有消费者。 */
     @GetMapping("/versions/{v1}/diff/{v2}")
     public ApiResponse<Map<String, Object>> diff(
  @PathVariable Long v1, @PathVariable Long v2) {
+        AuthContext.requireSuperAdmin("对比策略版本");
         return ApiResponse.ok(configService.diff(v1, v2));
     }
 
@@ -273,10 +293,13 @@ public class WaveRiderController {
     }
 
     /**
-     * 某日候选池。空的时候带空态原因。
+     * 某日候选池，外加它的<strong>复盘池</strong>（上一批候选的 T+1 验证结果）。空的时候带空态原因。
      *
      * <p>date 不给取最近一个有候选的交易日——盘后没跑或当天还没到 15:30 时，
      * 直接回一个空表格会让人以为策略坏了。
+     *
+     * <p>两个池子一次给全，不拆成两个接口：这个前端的已知瓶颈是请求数 × RTT，
+     * 而复盘池的数据量只有几行，多一次往返不划算。
      */
     @GetMapping("/candidates")
     public ApiResponse<Map<String, Object>> candidates(@RequestParam Long strategyId,
@@ -302,11 +325,7 @@ public class WaveRiderController {
         tagAlerts(rows, target);
         out.put("candidates", rows);
         out.put("count", rows.size());
-
-        // T+1 表现（可能还没到验证日，那就没有）
-        out.put("t1", t1Mapper.selectList(new LambdaQueryWrapper<com.emotion.entity.CandidateT1>()
-                .eq(com.emotion.entity.CandidateT1::getStrategyId, strategyId)
-                .eq(com.emotion.entity.CandidateT1::getTradeDate, target)));
+        out.put("reviewPool", buildReviewPool(strategyId, target));
 
         StrategyRun last = runMapper.selectOne(new LambdaQueryWrapper<StrategyRun>()
                 .eq(StrategyRun::getStrategyId, strategyId)
@@ -322,7 +341,45 @@ public class WaveRiderController {
             out.put("emptyReason", emptyReason(last));
         }
         out.put("nodeCount", last == null ? 0 : last.getNodeCount());
-        return ApiResponse.ok(out);
+        // 漏斗的键名里嵌着活的 min_board_count（引擎写的是 "连板≥" + cfg.getMinBoardCount()），
+        // runWarning 是引擎内部的裸代码（NO_NODE 之类），两个都是判据。
+        // 删键而不是置 null：这个 Map 里 null 已经是有意义的信号（reviewPool 为 null＝第一批候选）。
+        return ApiResponse.ok(RuleMask.omitKeys(out, "funnel", "runWarning"));
+    }
+
+    /**
+     * 复盘池：{@code target} 之前最近一个候选日的清单，连同它已经验出来的 T+1 表现。
+     *
+     * <p>返回 {@code null} 表示这就是该策略第一批候选，前面没有可复盘的日子——
+     * 与「有前一日但还没验证」是两件事，前端要分开说话，所以不能用空对象糊过去。
+     *
+     * <p>{@code t1Date} 单独给出来是关键：它是「验证日 D+1」这一天本身，
+     * 与 {@code t1} 里有没有行互相独立。两者一交叉就能区分三种状态——
+     * 验证日还没到（{@code t1Date} 为 null）、验证日过了但日线还没回源（有 {@code t1Date}、{@code t1} 空）、
+     * 已验证。少了这个字段，后两种在界面上长得一样，而「没回源」是可以补的、「没收盘」只能等。
+     *
+     * <p>只补 {@code alertFlag} 这一个瞬态标：它靠当日与前一日两个涨停池现算，落库反而会与判据漂移。
+     * {@code riskFlag} 是落库列，直接读得到。节点标与题材都不在复盘池的列里，
+     * 而题材热度是一组按日的查询——不为不渲染的东西付这个钱。
+     */
+    private Map<String, Object> buildReviewPool(Long strategyId, LocalDate target) {
+        LocalDate prev = candidateMapper.prevCandidateDate(strategyId, target);
+        if (prev == null) {
+            return null;
+        }
+        List<CandidateStock> rows = candidateMapper.listOfDay(strategyId, prev);
+        tagAlerts(rows, prev);
+        List<CandidateT1> t1 = t1Mapper.selectList(new LambdaQueryWrapper<CandidateT1>()
+                .eq(CandidateT1::getStrategyId, strategyId)
+                .eq(CandidateT1::getTradeDate, prev));
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("tradeDate", prev);
+        m.put("t1Date", marketStockMapper.nextDetailDate(prev));
+        m.put("candidates", rows);
+        m.put("t1", t1);
+        m.put("candidateCount", rows.size());
+        m.put("verifiedCount", t1.size());
+        return m;
     }
 
     // ------------------------------------------------------------------ 节点
@@ -400,12 +457,18 @@ public class WaveRiderController {
 
     // ------------------------------------------------------------------ 复盘与导出
 
+    /**
+     * 复盘统计。分档直方图的 bin 标签（{@code < 15%} / {@code 15 ~ 50%}…）是<b>已实现收益</b>的分组，
+     * 属结果，照旧给所有人；要抹的是两个纯配置键——{@code entryGapMax}（过滤阈值）与
+     * {@code entryPriceBasis}（收益以哪个价起算），前端根本不渲染它们，留着只是白送 payload。
+     */
     @GetMapping("/review")
     public ApiResponse<Map<String, Object>> review(@RequestParam Long strategyId,
  @RequestParam String from, @RequestParam String to) {
         configService.requireStrategy(strategyId);
-        return ApiResponse.ok(reviewService.review(strategyId, parse(from, LocalDate.now()),
-                parse(to, LocalDate.now())));
+        return ApiResponse.ok(RuleMask.omitKeys(
+                reviewService.review(strategyId, parse(from, LocalDate.now()), parse(to, LocalDate.now())),
+                "entryGapMax", "entryPriceBasis"));
     }
 
     /** 导出当日候选。format=md（默认）或 csv，内容以文本返回，前端自己存文件。 */
@@ -604,7 +667,11 @@ public class WaveRiderController {
             String k = e.getKey();
             if (k.startsWith("连板") || k.startsWith("剔除") || k.startsWith("取身位") || k.startsWith("清单上限")) {
                 if (Integer.parseInt(String.valueOf(e.getValue())) == 0) {
-                    return "候选在「" + k + "」这一步归零——当日没有满足条件的个股";
+                    // 键名里嵌着活的阈值（"连板≥" + cfg.getMinBoardCount()）。
+                    // 诊断本身对谁都有用——空表不解释会被当成「策略坏了」——所以只摘掉键名。
+                    return RuleMask.canSeeRules()
+                            ? "候选在「" + k + "」这一步归零——当日没有满足条件的个股"
+                            : "当日没有满足条件的个股";
                 }
             }
         }

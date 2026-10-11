@@ -28,4 +28,17 @@ public interface CandidateStockMapper extends BaseMapper<CandidateStock> {
             + "AND run_id = (SELECT MAX(run_id) FROM t_candidate_stock "
             + "              WHERE strategy_id = #{strategyId} AND trade_date = #{date})")
     List<String> listCodesOfDay(@Param("strategyId") Long strategyId, @Param("date") LocalDate date);
+
+    /**
+     * 该策略在 {@code date} 之前最近的一个候选日；没有更早的候选就返回 {@code null}。
+     *
+     * <p>复盘池用它定位「上一批候选」。这里取的是<strong>有候选的日子</strong>而不是上一交易日：
+     * 中间隔着周末、节假日、或者某天策略一只都没选中，都不该让复盘池落到一个空日子上。
+     *
+     * <p>刻意不带 {@code run_id = MAX(run_id)}：那条规则管的是「同一天两批打架」，
+     * 与日期级的 MAX 正交；日期定了之后由 {@link #listOfDay} 再套一次。
+     */
+    @Select("SELECT MAX(trade_date) FROM t_candidate_stock "
+            + "WHERE strategy_id = #{strategyId} AND trade_date < #{date}")
+    LocalDate prevCandidateDate(@Param("strategyId") Long strategyId, @Param("date") LocalDate date);
 }

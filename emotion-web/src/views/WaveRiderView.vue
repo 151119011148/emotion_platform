@@ -3,7 +3,8 @@
     <div class="page-head">
       <div>
         <h2>策略选股</h2>
-        <p class="sub">
+        <!-- 整段是口径说明（买点在哪、收益以哪个价起算、备选口径），属策略定义不是结果 -->
+        <p class="sub" v-if="$canRule">
           WaveRider · 连板周期选股引擎。候选为 <b>T 日已涨停</b>的个股。
           本策略是 <b>打板</b>策略：买点在 T 日涨停板上，收益基准取 <b>T 日收盘价</b>（即 T 日涨停价）；
           同时并排给出「D+1 开盘再接」的备选口径供对比。
@@ -38,7 +39,8 @@
     </div>
 
     <el-alert v-if="emptyReason" :title="emptyReason" type="warning" :closable="false" show-icon class="mb12" />
-    <el-alert v-if="warnText" :title="warnText" type="info" :closable="false" show-icon class="mb12" />
+    <!-- 告警印的是引擎内部的裸代码（NO_NODE 之类），是判据不是结果 -->
+    <el-alert v-if="$canRule && warnText" :title="warnText" type="info" :closable="false" show-icon class="mb12" />
 
     <!-- ---------- 候选池 ---------- -->
     <el-card class="blk" shadow="never">
@@ -47,10 +49,9 @@
           <span>候选池</span>
           <span class="blk-sub" v-if="candidates.length">
             共 {{ candidates.length }} 只<template v-if="nodeTagCount">（其中来自节点追踪 {{ nodeTagCount }} 只）</template>
-            · 组合总仓位 {{ totalPosition }}%
+            · 组合总仓位 {{ totalPosition }}%<template v-if="$canRule">
             · 按「封单强度」<b>降序</b>排列，封单越强越靠前（打板口径下唯一跨档单调的正向因子）
-            · 题材取 <b>通达信概念板块</b>，按当日该题材的涨停家数降序
-            <template v-if="!hasT1">· T+1 表现待补写（今日尚未收盘）</template>
+            · 题材取 <b>通达信概念板块</b>，按当日该题材的涨停家数降序</template>
           </span>
         </div>
       </template>
@@ -59,14 +60,24 @@
            可用宽 = 视口 − 200（el-aside）− 48（.main-content 左右 padding）
                    − 42（el-card：1px 边框×2 + 20px body padding×2）＝ 视口 − 290。
            实测 1440 屏只剩 1150px（容易漏掉 card 那 42px，按 1192 算会乐观 42px）。
-           固定列合计 728 + 弹性列 min-width 合计 330 = 1058 是表格的最小宽度：
-             1440 → 1150（余 92，全被名称/题材吃掉，实测涨到 185/237）
-             1512 → 1222（余 164）    1366 → 1076（余 18）
-             1280 →  990（差 68，出横向滚动条，「接盘收益 / 结果」被推出可视区）
+           固定列合计 452 + 弹性列 min-width 合计 330 = 782 是表格的最小宽度：
+             1440 → 1150（余 368）   1512 → 1222（余 440）
+             1366 → 1076（余 294）   1280 →  990（余 208）
+           四档都放得下、不再出横向滚动条。这不是把预算放松了：T+1 那四列
+           （70+68+72+66＝276px）整组搬去了下面的复盘池——它们在本表最新一天永远是空的，
+           占着宽度却什么都不说。复盘池固定 528 + 弹性 120 = 648，比本表更宽裕。
+
+           实测（浏览器里把 .tbl 钉到对应宽度后 doLayout 再量）：
+             容器 990（＝1280 屏）→ 八列 38/235/60/303/92/108/68/86，合计 990，
+                                    富余 208 按 min-width 比例 144:186 分给名称/题材，
+                                    无横向滚动、单元格零裁切
+             容器 782（最小宽）  → 各列回到声明值 38/144/60/186/92/108/68/86，
+                                    scrollWidth == clientWidth，仍零裁切
            弹性列自身允许折行，压 min-width 只会多折一行，不会撑破表格。
 
            单元格内边距已在下面 .tbl :deep(.el-table .cell) 里压到 6px（Element 默认 8px），
-           12 列一起省 48px——这比逐列抠宽度有效，改列宽前先确认这条还在。
+           本表 8 列一起省 32px（复盘池 9 列省 36px，同一个 .tbl 下）——
+           这比逐列抠宽度有效，改列宽前先确认这条还在。
            size="small" 下实测：字号 12px、排序箭头 .caret-wrapper 宽 24px、
            el-tag--small 高 20px、左右 padding 各 7px + 1px 边框（所以 5 字标 = 60+14+2 = 76px）。
            各列的零裁切地板（.cell 是 overflow:hidden，裁切发生在 **padding box**＝列宽，
@@ -128,7 +139,10 @@
             <template #header>
               <span class="th-score">
                 得分
-                <el-tooltip placement="bottom" effect="dark" :disabled="!cfg">
+                <!-- 整颗 tooltip 是本页最密的一处规则倾倒：逐项权重、风险权重、成交额门槛、
+                     满分（正权重之和）、单票仓位上限、仓位公式、整条温度档位阶梯。
+                     v-if 挂在 el-tooltip 上，连它默认槽里那个「?」标记一起消失，不留坏掉的装饰。 -->
+                <el-tooltip v-if="$canRule" placement="bottom" effect="dark" :disabled="!cfg">
                   <template #content>
                     <div class="sr">
                       <b class="sr-title">得分 = 四项相加 − 风险扣分（满分 {{ scoreRule.ceiling }} 分）</b>
@@ -163,19 +177,19 @@
                   <div class="sr">
                     <b class="sr-title">{{ row.name }} · 得分构成</b>
                     <template v-if="bdOf(row)">
-                      <div class="sr-note sr-note-top">
+                      <div v-if="$canRule" class="sr-note sr-note-top">
                         满分 {{ pt(bdOf(row).ceiling) }} 分（四项正权重之和，不含扣分）
                       </div>
                       <div v-for="t in bdOf(row).terms" :key="t.key" class="sr-row">
-                        <span class="sr-w">{{ pt(t.weight) }} ×</span>
+                        <span v-if="$canRule" class="sr-w">{{ pt(t.weight) }} ×</span>
                         <span class="sr-body">
                           <span class="sr-n">{{ termName(t.key) }}</span>
-                          <span class="sr-d">{{ rawText(t) }}</span>
+                          <span v-if="$canRule" class="sr-d">{{ rawText(t) }}</span>
                         </span>
                         <span class="sr-v" :class="termCls(t.value)">{{ signed(t.value) }}</span>
                       </div>
                       <div class="sr-foot">
-                        合计 <b>{{ pt(bdOf(row).score) }}</b> / 满分 {{ pt(bdOf(row).ceiling) }} 分
+                        合计 <b>{{ pt(bdOf(row).score) }}</b><template v-if="$canRule"> / 满分 {{ pt(bdOf(row).ceiling) }} 分</template>
                         · 当日最高板 {{ bdOf(row).max_board }} 板
                       </div>
                     </template>
@@ -188,7 +202,9 @@
                   <span :class="['sc-val', { 'sc-empty': row.score == null }]">
                     {{ pt(row.score) }}
                   </span>
-                  <span :class="['sc-bar', { 'sc-bar-none': !bdOf(row) }]">
+                  <!-- 条的总长恒等于满分、每段长度正比于该项权重 —— 它就是 score_weights 的图形版，
+                       藏了数字留着条等于白藏。分数本身照旧给所有人。 -->
+                  <span v-if="$canRule" :class="['sc-bar', { 'sc-bar-none': !bdOf(row) }]">
                     <i v-for="(s, i) in segsOf(row)" :key="i" :class="{ pen: s.pen }"
                       :style="{ width: s.width, background: s.pen ? '' : s.color }" />
                   </span>
@@ -212,41 +228,13 @@
               <span v-else class="mut">—</span>
             </template>
           </el-table-column>
-          <el-table-column label="T+1 跳空" width="70" align="right" header-align="right">
-            <template #default="{ row }">
-              <span v-if="t1Of(row) && t1Of(row).gapPct != null" :class="['num', cls(t1Of(row).gapPct)]">
-                {{ pct(t1Of(row).gapPct) }}
-              </span>
-              <span v-else class="mut">—</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="打板收益" width="68" align="right" header-align="right">
-            <template #default="{ row }">
-              <span v-if="t1Of(row) && t1Of(row).t1ChangePct != null" :class="['num', cls(t1Of(row).t1ChangePct)]">
-                {{ pct(t1Of(row).t1ChangePct) }}
-              </span>
-              <span v-else class="mut">—</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="接盘收益" width="72" align="right" header-align="right">
-            <template #default="{ row }">
-              <span v-if="bPct(row) != null" :class="['num', cls(bPct(row))]">
-                <b>{{ pct(bPct(row)) }}</b>
-              </span>
-              <span v-else class="mut">—</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="结果" width="66" align="center">
-            <template #default="{ row }">
-              <span v-if="!t1Of(row)" class="mut">待验证</span>
-              <el-tag v-else-if="t1Of(row).promoted === 1" size="small" type="danger" effect="dark">晋级</el-tag>
-              <el-tag v-else size="small" type="success" effect="dark">未连板</el-tag>
-            </template>
-          </el-table-column>
         </el-table>
       </div>
 
-      <p class="fn">
+      <!-- 本页最大的一处可见泄漏：标签图例、D0候选挂标规则、题材标签规则、两档警示判据、
+           「扣分跟着档位走——高控庄票按两倍扣」、仓位再乘温度档位系数、封单 ≥150% 排队阈值。
+           标签本身（节点票/锚定龙头/D0候选、警示文字）都还在表里，它们是结果；这里藏的是「怎么判出来的」。 -->
+      <p class="fn" v-if="$canRule">
         标签怎么看：名称后面 <b>节点票 / 锚定龙头 / D0候选</b>＝它出现在「节点追踪」的某条节点里，
         悬浮看是哪一段周期、什么状态（鼠标停在名称上显示代码）；
         其中 <b>D0候选</b> 只在该节点 D0 的<b>次一交易日</b>挂标，且按当日明细复算＝<b>D0 当天的全部二板</b>
@@ -269,8 +257,138 @@
       </div>
     </el-card>
 
+    <!-- ---------- 复盘池 ---------- -->
+    <!-- 朝后看：上一批候选的验证结果。与上面的候选池互补——那张表在最新一天永远没有 T+1 可显示
+         （验证日还没到），真有内容的日子要往回翻日期才看得到，而那不是晚上复盘的姿势。
+
+         列宽预算：固定 38+60+68+86+70+68+72+66 = 528，弹性列只有名称 min-width 120，
+         最小宽 648；1280 屏可用 990，余 342，各档分辨率都不出横向滚动条。
+         实测（同上面的量法）：容器 990 → 九列 38/462/60/68/86/70/68/72/66，零裁切、无横向滚动；
+         容器压到最小宽 648 → 各列回到声明值，scrollWidth == clientWidth，仍零裁切
+         （真实内容里最宽的是「高控庄票」与「+10.01%」，都在地板之内）。
+
+         ⚠ 只有名称一个弹性列，容器富余会被 el-table **全塞给它**——1280 下就是 462px。
+         这正是上面候选池注释里「名称被撑到 300~500px、内容只有一小截」那件事，
+         只是这里没有第二列分担。嫌它空就加一个弹性列去分（或给 .tbl 单独封顶），
+         别去压名称的 min-width：那只会让长名字折行，富余还是没处去。
+
+         这里刻意不放题材 / 得分 / 封单强度：复盘要回答的是「昨天那批今天怎么样了」，
+         选题理由属于候选日那天，重列一遍只会把九列挤回十二列，又把宽度预算吃光。
+         同理不放节点标——它不是复盘池的列，后端也没给这批行挂 nodeTags。 -->
+    <el-card class="blk" shadow="never">
+      <template #header>
+        <div class="blk-head">
+          <span>复盘池</span>
+          <span class="blk-sub" v-if="reviewPool">
+            候选日 <b>{{ reviewPool.tradeDate }}</b>
+            <template v-if="reviewPool.t1Date"> · 验证日 {{ reviewPool.t1Date }}</template>
+            · {{ reviewPool.candidateCount }} 只，已验证 {{ reviewPool.verifiedCount }}
+          </span>
+        </div>
+      </template>
+
+      <div v-if="!reviewPool" class="empty">
+        这是该策略第一批候选，还没有可复盘的前一交易日
+      </div>
+
+      <template v-else>
+        <div class="tbl">
+          <el-table :data="reviewPool.candidates" row-key="code" size="small" stripe style="width: 100%">
+            <el-table-column prop="rankNo" label="#" width="38" align="center" />
+            <el-table-column label="名称" min-width="120">
+              <template #default="{ row }">
+                <el-tooltip placement="top" :show-after="150">
+                  <template #content>
+                    <div>代码 {{ row.code }}</div>
+                  </template>
+                  <span class="nm-text" @click="goTianti(row, reviewPool.tradeDate)">{{ row.name }}</span>
+                </el-tooltip>
+              </template>
+            </el-table-column>
+            <el-table-column label="连板" prop="board" width="60" align="center" sortable>
+              <template #default="{ row }">
+                <span class="board">{{ row.board }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="建议仓位" width="68" align="right" header-align="right">
+              <template #default="{ row }">
+                <span class="num pos" :title="posTip(row)">{{ posText(row.suggestPosition) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="警示" width="86">
+              <template #default="{ row }">
+                <span v-if="row.alertFlag || row.riskFlag" class="alerts">
+                  <el-tag v-if="row.alertFlag" size="small" type="danger" effect="dark"
+                    :title="alertTip(row.alertFlag)">{{ alertText(row.alertFlag) }}</el-tag>
+                  <el-tag v-if="row.riskFlag" size="small" :type="riskType(row.riskFlag)" effect="dark"
+                    :title="riskTip(row.riskFlag)">{{ riskText(row.riskFlag) }}</el-tag>
+                </span>
+                <span v-else class="mut">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="T+1 跳空" width="70" align="right" header-align="right">
+              <template #default="{ row }">
+                <span v-if="t1Of(row) && t1Of(row).gapPct != null" :class="['num', cls(t1Of(row).gapPct)]">
+                  {{ pct(t1Of(row).gapPct) }}
+                </span>
+                <span v-else class="mut">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="打板收益" width="68" align="right" header-align="right">
+              <template #default="{ row }">
+                <span v-if="t1Of(row) && t1Of(row).t1ChangePct != null" :class="['num', cls(t1Of(row).t1ChangePct)]">
+                  {{ pct(t1Of(row).t1ChangePct) }}
+                </span>
+                <span v-else class="mut">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="接盘收益" width="72" align="right" header-align="right">
+              <template #default="{ row }">
+                <span v-if="bPct(row) != null" :class="['num', cls(bPct(row))]">
+                  <b>{{ pct(bPct(row)) }}</b>
+                </span>
+                <span v-else class="mut">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="结果" width="66" align="center">
+              <template #default="{ row }">
+                <span v-if="!t1Of(row)" class="mut">待验证</span>
+                <el-tag v-else-if="t1Of(row).promoted === 1" size="small" type="danger" effect="dark">晋级</el-tag>
+                <el-tag v-else size="small" type="success" effect="dark">未连板</el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+
+        <!-- 两个收益公式、晋级判据（D+1 仍封涨停且连板数正好多一板）、建议仓位读落库值的说明。
+             列名与数字本身照旧给所有人——「打板收益 +3.2%」是结果，怎么算出来的才是规则。 -->
+        <p class="fn" v-if="$canRule">
+          两个收益口径并排给，是因为本策略的真实买点在 <b>D 日涨停板上</b>：
+          <b>打板收益</b>＝<code>close(D+1) / close(D) − 1</code>，排得到队时你实际拿到的；
+          <b>接盘收益</b>＝<code>close(D+1) / open(D+1) − 1</code>，排不到队、次日开盘再接的备选口径，
+          由打板收益与 <b>T+1 跳空</b>推出来，不回上游取价。
+          <b>结果</b>看的是<b>晋级</b>——D+1 仍封涨停<b>且</b>连板数正好比 D 日多一板——而不是赚亏，
+          所以会出现「打板收益为正、结果却是未连板」：高开回落那种，钱可能赚了，板没接上。
+          <b>建议仓位</b>读的是这一行<b>当前落库</b>的值；历史重跑之后它会跟着变，
+          不再是你当晚看到的那个数，表头的候选日就是用来对齐这件事的。
+        </p>
+
+        <div v-if="!reviewPool.verifiedCount" class="empty">
+          <template v-if="!reviewPool.t1Date">
+            {{ reviewPool.tradeDate }} 的次日还没产生，等它收盘才有得验
+          </template>
+          <template v-else>
+            {{ reviewPool.t1Date }} 的日线还没回源，T+1 未补写
+          </template>
+        </div>
+      </template>
+    </el-card>
+
     <!-- ---------- 漏斗 ---------- -->
-    <el-card v-if="funnel.length" class="blk" shadow="never">
+    <!-- 键名里嵌着活的 min_board_count（引擎写的是 "连板≥" + cfg.getMinBoardCount()），
+         原样印出来就是把可调阈值印出来。后端对非超管也已经不给 funnel 这个键，
+         这里再闸一道：前端自己站得住，不依赖接口裁剪。 -->
+    <el-card v-if="$canRule && funnel.length" class="blk" shadow="never">
       <template #header><span>筛选漏斗</span></template>
       <div class="funnel">
         <div v-for="(f, i) in funnel" :key="f.key" class="funnel-step">
@@ -303,12 +421,12 @@
           <div class="kpi">
             <div class="k-lab">打板收益（T 日封板买入）</div>
             <div class="k-val" :class="cls(review.overall.avgChangeA)">{{ pctOr(review.overall.avgChangeA) }}</div>
-            <div class="k-fn">本策略真实口径，前提是当天排到了队</div>
+            <div class="k-fn" v-if="$canRule">本策略真实口径，前提是当天排到了队</div>
           </div>
           <div class="kpi">
             <div class="k-lab">接盘收益（D+1 开盘买）</div>
             <div class="k-val" :class="cls(review.overall.avgChangeB)">{{ pctOr(review.overall.avgChangeB) }}</div>
-            <div class="k-fn">备选打法：放弃打板、次日开盘再接</div>
+            <div class="k-fn" v-if="$canRule">备选打法：放弃打板、次日开盘再接</div>
           </div>
           <div class="kpi">
             <div class="k-lab">胜率（打板 / 接盘）</div>
@@ -345,7 +463,7 @@
             </tr>
           </tbody>
         </table>
-        <p class="fn">
+        <p class="fn" v-if="$canRule">
           跳空越低越「买得到」，而接盘口径的收益对跳空高度极其敏感。注意「一字/高开」那一档：
           它在打板口径下最好看，在接盘口径下却是负的——溢价在隔夜一次吃完了。
           这正是打板与追高的分野。
@@ -354,7 +472,7 @@
         <table class="bk bk2">
           <thead>
             <tr>
-              <th>封单强度（封单额 ÷ 成交额）</th><th>样本</th><th>晋级率</th>
+              <th>封单强度{{ $canRule ? '（封单额 ÷ 成交额）' : '' }}</th><th>样本</th><th>晋级率</th>
               <th>打板收益</th><th>打板胜率</th><th>接盘收益</th><th>接盘胜率</th>
             </tr>
           </thead>
@@ -370,7 +488,7 @@
             </tr>
           </tbody>
         </table>
-        <p class="fn">
+        <p class="fn" v-if="$canRule">
           这张表就是「封单锁死不再剔除、反而置顶」的依据本身：以 <b>T 日涨停价</b>（本策略买点）买入时，
           平均收益与胜率沿封单强度<b>严格单调递增</b>；换成 <b>D+1 开盘价</b>买则单调递减。
           所以封单强度只在「打板」口径下是正向因子——「买不进」这件事，只对「等 D+1 再接」成立。
@@ -394,6 +512,7 @@ import { ElMessage } from 'element-plus'
 import { waveriderApi } from '../api/modules'
 import { useTradingCalendar } from '../utils/tradingCalendar'
 import { useUserStore } from '../stores/user'
+import { canSeeRules } from '../utils/ruleVisibility'
 
 const { cellClass, disabledDate, loadTradingDays } = useTradingCalendar()
 const router = useRouter()
@@ -403,7 +522,8 @@ const strategies = ref([])
 const strategyId = ref(null)
 const date = ref(null)
 const candidates = ref([])
-const t1Rows = ref([])
+/** 上一候选日 + 它的 T+1 验证结果；null = 这就是该策略第一批候选，没有可复盘的前一日。 */
+const reviewPool = ref(null)
 const emptyReason = ref('')
 const warnText = ref('')
 const funnel = ref([])
@@ -412,8 +532,6 @@ const running = ref(false)
 const runMeta = ref(null)
 /** 当前策略的生效配置。得分规则的说明要引用真实权重，不能写死。 */
 const cfg = ref(null)
-
-const hasT1 = computed(() => t1Rows.value.length > 0)
 
 /**
  * 「来自节点追踪」的标记：后端读侧把命中的 t_node_event 挂在 row.nodeTags 上（瞬态，不落库）。
@@ -427,8 +545,13 @@ const nodeTagCount = computed(
   () => candidates.value.filter((c) => c.nodeTags && c.nodeTags.length).length
 )
 
-function goTianti(row) {
-  router.push({ path: '/tianti', query: { date: date.value, code: row.code } })
+/**
+ * 跳「连板天梯」看这只票的上下文。{@code on} 是<b>这一行所属的交易日</b>，必须显式传：
+ * 复盘池那些行属于更早的候选日，跟着页面当前的 date 走会跳到错的那一天，
+ * 而跳错和跳对在页面上长得一样，只能靠传参避免。
+ */
+function goTianti(row, on) {
+  router.push({ path: '/tianti', query: { date: on || date.value, code: row.code } })
 }
 
 /**
@@ -478,6 +601,9 @@ function alertText(flag) {
  * 判据与「连板生态」页完全同一份（后端共用一个 isDuanDao），这里只做说明，不重算。
  */
 function alertTip(flag) {
+  // 整条都是阈值字面量（首封时刻／炸板数／流通市值／封单额／封成比／换手），
+  // 标签本身照旧渲染，只把 :title 置空
+  if (!canSeeRules()) return ''
   if (flag === 'DUANDAO') {
     return '今日与昨日连续锁死（首封≤09:30:30 且 0 炸板）＋流通≤35亿＋(封单≥10亿 或 封成比≥3)＋换手<5%；'
       + '判据与「连板生态」页一致。它大概率排不到队，只能集合竞价挂涨停价。'
@@ -525,8 +651,16 @@ const totalPosition = computed(() => {
   return (sum * 100).toFixed(1)
 })
 
+/**
+ * 复盘池那四列的取数口：验证行按 code 对齐候选行。
+ *
+ * <p>注意这里的 {@code row} 是<b>上一候选日</b>的行，不是页面当前选的那一天——
+ * 候选池只朝前看（明天买什么），验证结果只可能来自更早的那一批。
+ */
+const rvT1 = computed(() => (reviewPool.value && reviewPool.value.t1) || [])
+
 function t1Of(row) {
-  return t1Rows.value.find((t) => t.code === row.code)
+  return rvT1.value.find((t) => t.code === row.code)
 }
 
 /** 可执行收益 = close(T+1)/open(T+1) − 1，由次日涨幅与跳空推出来，不回上游取价。 */
@@ -624,7 +758,9 @@ function posTip(row) {
     return t == null && s == null ? '' : '当日无情绪温度记录，仓位置空（不按 0 处理）'
   }
   if (t == null || s == null) return ''
-  return '当日温度 ' + Number(t).toFixed(1) + '° → 仓位系数 ' + Number(s).toFixed(2)
+  // 温度是结果，它映射到的仓位系数是规则 → 后半段只给看规则的人
+  const head = '当日温度 ' + Number(t).toFixed(1) + '°'
+  return canSeeRules() ? head + ' → 仓位系数 ' + Number(s).toFixed(2) : head
 }
 
 /** 四项的名称与色。与「得分构成」悬浮里从左到右的顺序一致：高度 → 身位 → 节点 → 早封。 */
@@ -757,6 +893,8 @@ function riskType(flag) {
 }
 
 function riskTip(flag) {
+  // 「按两倍扣分，建议仓位折半」是规则；标签的红/琥珀分档由 riskType 决定，照旧给所有人
+  if (!canSeeRules()) return ''
   return riskTop(flag)
     ? '最高风险档（与一字断魂刀同级）：按两倍扣分，建议仓位折半'
     : '风险项：建议仓位折半'
@@ -834,9 +972,18 @@ async function loadStrategies() {
   }
 }
 
-/** 配置只喂给「得分」列的说明悬浮，拉不到就把 tooltip 空着，绝不该拦住候选表出来。 */
+/**
+ * 配置只喂给「得分」列的说明悬浮，拉不到就把 tooltip 空着，绝不该拦住候选表出来。
+ *
+ * <p>后端那道 {@code requireSuperAdmin} 之后，非超管发这个请求会换回一条业务异常；
+ * try/catch 吞得掉异常，吞不掉 api/index.js 拦截器弹的那条红。所以直接不发——
+ * 顺带省一次往返，也不必去 api/modules.js 加 skipErrorToast。
+ */
 async function loadConfig() {
-  if (!strategyId.value) return
+  if (!strategyId.value || !canSeeRules()) {
+    cfg.value = null
+    return
+  }
   try {
     const res = await waveriderApi.strategyDetail(strategyId.value)
     cfg.value = ((res && res.data) || {}).currentConfig || null
@@ -851,7 +998,7 @@ async function loadCandidates() {
     const res = await waveriderApi.candidates(strategyId.value, date.value)
     const d = (res && res.data) || {}
     candidates.value = d.candidates || []
-    t1Rows.value = d.t1 || []
+    reviewPool.value = d.reviewPool || null
     emptyReason.value = d.emptyReason || ''
     funnel.value = toFunnel(d.funnel)
     date.value = d.tradeDate || date.value
@@ -861,7 +1008,8 @@ async function loadCandidates() {
     }
   } catch (e) {
     candidates.value = []
-    t1Rows.value = []
+    // 一起清掉：留着上一批的验证结果、候选池却是空的，看起来像真数据而不是加载失败
+    reviewPool.value = null
   }
 }
 
