@@ -1,9 +1,12 @@
 <template>
   <div class="indicator-cards">
     <div class="card" v-for="c in cards" :key="c.key">
+      <!-- 整块浮层只对超管开：卡面的分数/温度/档位名照旧给所有人，hover 出来的子分与 raw 明细收进超管。
+           用 :disabled 不用 v-if——tooltip 包着卡体，v-if 会把整张卡一起换掉，而卡的点击跳转（goDim）人人要留。 -->
       <el-tooltip
         placement="bottom"
         :show-after="150"
+        :disabled="!$canRule"
         popper-class="card-tip"
       >
         <template #content>
