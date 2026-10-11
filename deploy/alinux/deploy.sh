@@ -249,11 +249,17 @@ server_deploy_frontend() {
 
   ( cd "$TMP_DIR" && tar -czf dist.tgz -C web . )
   upload "$TMP_DIR/dist.tgz" "/tmp/dist.tgz"
+  # 解包后必须自己把权限归一遍：tar 带上来的是**构建机当时的 umask**，本机一旦是 077，
+  # dist 就落成目录 0700／文件 0600，而 nginx 是以 nginx 用户读静态文件的，整站直接 403
+  # （2026-10-11 发版踩过，⑥ 步只报「前端首页未就绪，最后 HTTP=403」，看着像 nginx 坏了）。
   remote_exec "mkdir -p $REMOTE_WEB &&
                cd $REMOTE_WEB &&
                rm -rf * &&
                tar -xzf /tmp/dist.tgz &&
                find . -name '._*' -delete &&
+               chown -R root:root . &&
+               find . -type d -exec chmod 755 {} + &&
+               find . -type f -exec chmod 644 {} + &&
                echo WEB_UNPACKED"
 
   upload "$CONFIG_DIR/emotion-web.conf" "/tmp/emotion-web.conf"

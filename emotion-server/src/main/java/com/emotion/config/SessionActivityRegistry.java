@@ -4,6 +4,7 @@ import java.util.Date;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -39,6 +40,13 @@ public class SessionActivityRegistry {
     private final long idleMillis;
     private final ConcurrentHashMap<String, Long> lastActiveAt = new ConcurrentHashMap<>();
 
+    /**
+     * <b>{@code @Autowired} 不能省。</b>这个类还有一个给单测用的毫秒构造器，Spring 见到多个
+     * 候选构造器时不会自己挑，会退回去找默认构造器——2026-10-11 首发就是死在这里，
+     * {@code NoSuchMethodException: SessionActivityRegistry.<init>()} 直接把上下文带崩，
+     * 而单测不启动 Spring，一条都拦不住。
+     */
+    @Autowired
     public SessionActivityRegistry(@Value("${session.idle-timeout-minutes:120}") int minutes) {
         this(minutes <= 0 ? 0L : TimeUnit.MINUTES.toMillis(minutes));
     }
