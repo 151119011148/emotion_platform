@@ -2,7 +2,6 @@ package com.emotion.task;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.emotion.entity.Strategy;
-import com.emotion.mapper.MarketStockMapper;
 import com.emotion.mapper.StrategyMapper;
 import com.emotion.mapper.TradingHolidayMapper;
 import com.emotion.market.MarketDataException;
@@ -24,9 +23,11 @@ import java.util.List;
 /**
  * 每交易日 15:30 跑一遍所有启用中的策略，产出当日候选池。
  *
- * <p>执行顺序是「先补昨天的账，再算今天的票」：候选在 D+1 的表现是权重回归的唯一燃料，
- * 而它只有在 D+1 收盘后才有。把补账做成同一次运行的前置步骤，漏跑一天时下一次会自己补上，
- * 不需要人去翻「到底漏了哪天」。
+ * <p><strong>只管选股，不管补账。</strong>候选在 D+1 的表现由 {@code waveRiderT1BackfillTask}
+ * 在 20:30 回补——早先这一步是挂在本任务里当「前置步骤」的，但 15:30 上游还没发布当日日线
+ * （{@code DailyBarService} 的配置注释就写着「腾讯个股日线当天滞后」），
+ * 取不到 {@code open(D+1)} 就一行也写不进去，连续多日都是「补写 0 行」。
+ * 一行永远不写东西的代码比没有这行更坏：它让排班说明里的「漏跑一天下一次会自己补上」成了假话。
  *
  * <p>两条不会写脏数据的保证：
  * <ul>
@@ -47,20 +48,17 @@ public class WaveRiderDailyScanTask implements ManagedTask {
     private static final ZoneId CN = ZoneId.of("Asia/Shanghai");
 
     private final StrategyMapper strategyMapper;
-    private final MarketStockMapper marketStockMapper;
     private final TradingHolidayMapper tradingHolidayMapper;
     private final MarketDataService marketDataService;
     private final MarketDailyStore marketDailyStore;
     private final WaveRiderEngine engine;
 
     public WaveRiderDailyScanTask(StrategyMapper strategyMapper,
-                                  MarketStockMapper marketStockMapper,
                                   TradingHolidayMapper tradingHolidayMapper,
                                   MarketDataService marketDataService,
                                   MarketDailyStore marketDailyStore,
                                   WaveRiderEngine engine) {
         this.strategyMapper = strategyMapper;
-        this.marketStockMapper = marketStockMapper;
         this.tradingHolidayMapper = tradingHolidayMapper;
         this.marketDataService = marketDataService;
         this.marketDailyStore = marketDailyStore;
@@ -89,22 +87,11 @@ public class WaveRiderDailyScanTask implements ManagedTask {
             }
         }
 
-        LocalDate prev = marketStockMapper.prevDetailDate(today);
-        int patched = 0;
         int scanned = 0;
         int candidates = 0;
         StringBuilder detail = new StringBuilder();
 
         for (Strategy s : strategies) {
-            // ① 补写前一日候选的 D+1 表现
-            if (prev != null) {
-                try {
-                    patched += engine.backfillT1(s.getId(), prev);
-                } catch (RuntimeException e) {
-                    log.warn("策略[{}]补写 {} 的 T+1 失败：{}", s.getName(), prev, e.toString());
-                }
-            }
-            // ② 算当日候选
             try {
                 WaveRiderEngine.Outcome o = engine.run(s.getId(), today,
                         com.emotion.entity.StrategyRun.TRIGGER_SCHEDULE, false);
@@ -121,9 +108,8 @@ public class WaveRiderDailyScanTask implements ManagedTask {
             }
         }
 
-        return TaskResult.ok(String.format("%s 选股完成：%d/%d 个策略跑出 %d 只候选；补写 %s 的 T+1 共 %d 行。%s",
-                today, scanned, strategies.size(), candidates,
-                prev == null ? "-" : prev.toString(), patched, detail.toString()));
+        return TaskResult.ok(String.format("%s 选股完成：%d/%d 个策略跑出 %d 只候选。%s",
+                today, scanned, strategies.size(), candidates, detail.toString()));
     }
 
     /**
