@@ -56,45 +56,25 @@
         </div>
       </template>
 
-      <!-- 列宽预算（下面每个数都是实测，不是估的）。
-           可用宽 = 视口 − 200（el-aside）− 48（.main-content 左右 padding）
-                   − 42（el-card：1px 边框×2 + 20px body padding×2）＝ 视口 − 290。
-           实测 1440 屏只剩 1150px（容易漏掉 card 那 42px，按 1192 算会乐观 42px）。
-           固定列合计 452 + 弹性列 min-width 合计 330 = 782 是表格的最小宽度：
-             1440 → 1150（余 368）   1512 → 1222（余 440）
-             1366 → 1076（余 294）   1280 →  990（余 208）
-           四档都放得下、不再出横向滚动条。这不是把预算放松了：T+1 那四列
-           （70+68+72+66＝276px）整组搬去了下面的复盘池——它们在本表最新一天永远是空的，
-           占着宽度却什么都不说。复盘池固定 528 + 弹性 120 = 648，比本表更宽裕。
+      <!-- 列宽全部改成固定值，不用 min-width：el-table 的算法会把容器的富余宽度**全塞给弹性列**
+           （见其 table-layout 的 updateColumnsWidth：单颗弹性列＝minWidth + 全部富余），
+           1440 屏下名称会被撑到 300~622px，里面只放三四个字的票名——这就是「宽度不美观」的根因。
+           固定列没有弹性列时走另一条分支，表宽恒等于各列之和，窗口再宽也只留右侧空白，不再拉伸。
 
-           实测（浏览器里把 .tbl 钉到对应宽度后 doLayout 再量）：
-             容器 990（＝1280 屏）→ 八列 38/235/60/303/92/108/68/86，合计 990，
-                                    富余 208 按 min-width 比例 144:186 分给名称/题材，
-                                    无横向滚动、单元格零裁切
-             容器 782（最小宽）  → 各列回到声明值 38/144/60/186/92/108/68/86，
-                                    scrollWidth == clientWidth，仍零裁切
-           弹性列自身允许折行，压 min-width 只会多折一行，不会撑破表格。
-
-           单元格内边距已在下面 .tbl :deep(.el-table .cell) 里压到 6px（Element 默认 8px），
-           本表 8 列一起省 32px（复盘池 9 列省 36px，同一个 .tbl 下）——
-           这比逐列抠宽度有效，改列宽前先确认这条还在。
-           size="small" 下实测：字号 12px、排序箭头 .caret-wrapper 宽 24px、
-           el-tag--small 高 20px、左右 padding 各 7px + 1px 边框（所以 5 字标 = 60+14+2 = 76px）。
-           各列的零裁切地板（.cell 是 overflow:hidden，裁切发生在 **padding box**＝列宽，
-           不是内容盒，所以地板 = 内容宽 + 6px 左内边距，右侧那 6px 可以被内容压进去）：
-             连板 60（表头 2 字 + 箭头，已取到地板）
-             警示 82（最长单标「一字断魂刀」76 + 6；现取 86，余 4）
-                     预警与风险同时命中时是两个标，.alerts{flex-wrap:wrap} 折成两行，
-                     行高 34 → 55，不横向溢出
-             封单强度 84（表头 4 字 + 箭头；现取 92，「排队」标与百分比同现时折行）
-             得分 99（值 + 7 gap + 52 进度条；现取 108 留了余量）
-
-           表格宽度封顶：el-table 会把容器的富余宽度按 min-width 比例全塞给弹性列，
-           宽屏下「名称/题材」会被撑到 300~500px，内容却只有一小截。封顶后多出来的空间留在表右侧。 -->
+           可用宽 = 视口 − 290（el-aside 200 + .main-content padding 48 + el-card 42）。
+           本表八列 40+216+60+236+96+112+78+116 = 954，四档都不出横向滚动条：
+             1512 → 1222（余 268）  1440 → 1150（余 196）
+             1366 → 1076（余 122）  1280 →  990（余  36）
+           与下面的复盘池共用前导网格（# 40 / 名称 216 / 连板 60），两张表叠着看时前三列对齐。
+           单元格左右内边距压到 6px（见下面 .tbl :deep(.el-table .cell)），比逐列抠宽度有效。
+           各列的零裁切地板（size=small 字号 12px、排序箭头 24px、el-tag--small 每字约 12px + 16px 内边距）：
+             连板 60（表头 2 字 + 箭头，正好取到地板）  封单强度 84 → 96  得分 99 → 112
+             警示 82（最长单标「一字断魂刀」76 + 6）→ 116，两标同时命中时 .alerts 折行
+             名称/题材允许折行（.nm/.thm 都 flex-wrap），压不住就多折一行，不撑破表格。 -->
       <div class="tbl">
         <el-table :data="candidates" row-key="code" size="small" stripe :row-class-name="rowClass" style="width: 100%">
-          <el-table-column prop="rankNo" label="#" width="38" align="center" />
-          <el-table-column label="名称" min-width="144">
+          <el-table-column prop="rankNo" label="#" width="40" align="center" />
+          <el-table-column label="名称" width="216">
             <template #default="{ row }">
               <div class="nm">
                 <el-tooltip placement="top" :show-after="150">
@@ -115,7 +95,7 @@
               <span class="board">{{ row.board }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="题材" min-width="186">
+          <el-table-column label="题材" width="236">
             <template #default="{ row }">
               <span v-if="row.tdxThemes && row.tdxThemes.length" class="thm">
                 <el-tag v-for="t in topThemes(row)" :key="t.name" size="small" effect="plain"
@@ -127,7 +107,7 @@
                 title="这只票在通达信题材索引里没有记录，退回引擎分组用的行业">{{ row.topic || '—' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="封单强度" width="92" align="right" header-align="right" sortable
+          <el-table-column label="封单强度" width="96" align="right" header-align="right" sortable
             :sort-method="compareSeal">
             <template #default="{ row }">
               <span v-if="sealRatio(row) != null" class="num">{{ sealRatio(row).toFixed(2) }}%</span>
@@ -135,7 +115,7 @@
               <el-tag v-if="needQueue(row)" size="small" type="warning" effect="plain" class="qtag">排队</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="score" label="得分" width="108" align="right" header-align="right" sortable>
+          <el-table-column prop="score" label="得分" width="112" align="right" header-align="right" sortable>
             <template #header>
               <span class="th-score">
                 得分
@@ -212,12 +192,12 @@
               </el-tooltip>
             </template>
           </el-table-column>
-          <el-table-column label="建议仓位" width="68" align="right" header-align="right">
+          <el-table-column label="建议仓位" width="78" align="right" header-align="right">
             <template #default="{ row }">
               <span class="num pos" :title="posTip(row)">{{ posText(row.suggestPosition) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="警示" width="86">
+          <el-table-column label="警示" width="116">
             <template #default="{ row }">
               <span v-if="row.alertFlag || row.riskFlag" class="alerts">
                 <el-tag v-if="row.alertFlag" size="small" type="danger" effect="dark"
@@ -261,16 +241,13 @@
     <!-- 朝后看：上一批候选的验证结果。与上面的候选池互补——那张表在最新一天永远没有 T+1 可显示
          （验证日还没到），真有内容的日子要往回翻日期才看得到，而那不是晚上复盘的姿势。
 
-         列宽预算：固定 38+60+68+86+70+68+72+66 = 528，弹性列只有名称 min-width 120，
-         最小宽 648；1280 屏可用 990，余 342，各档分辨率都不出横向滚动条。
-         实测（同上面的量法）：容器 990 → 九列 38/462/60/68/86/70/68/72/66，零裁切、无横向滚动；
-         容器压到最小宽 648 → 各列回到声明值，scrollWidth == clientWidth，仍零裁切
-         （真实内容里最宽的是「高控庄票」与「+10.01%」，都在地板之内）。
+         列宽：九列全固定 40+216+60+78+116+92+92+92+88 = 874，没有弹性列，容器再宽也只留右侧空白，
+         不会把某一列撑开（原因见上面候选池那段注释里的 el-table 算法）。
+         前导三列 #/名称/连板 与候选池逐字同宽，两张表上下叠着看是对齐的。
+         三列百分比（跳空 / 打板 / 接盘）各给 92，比「+10.01%」的实际占位富余一截——
+         这是有意的：它们是最需要横向扫读的三列，挤在一起看不清。
 
-         ⚠ 只有名称一个弹性列，容器富余会被 el-table **全塞给它**——1280 下就是 462px。
-         这正是上面候选池注释里「名称被撑到 300~500px、内容只有一小截」那件事，
-         只是这里没有第二列分担。嫌它空就加一个弹性列去分（或给 .tbl 单独封顶），
-         别去压名称的 min-width：那只会让长名字折行，富余还是没处去。
+         实测（1280 屏、量法同上面候选池）：本表 874 全部落在容器 975 内，零裁切、无横向滚动。
 
          这里刻意不放题材 / 得分 / 封单强度：复盘要回答的是「昨天那批今天怎么样了」，
          选题理由属于候选日那天，重列一遍只会把九列挤回十二列，又把宽度预算吃光。
@@ -294,8 +271,8 @@
       <template v-else>
         <div class="tbl">
           <el-table :data="reviewPool.candidates" row-key="code" size="small" stripe style="width: 100%">
-            <el-table-column prop="rankNo" label="#" width="38" align="center" />
-            <el-table-column label="名称" min-width="120">
+            <el-table-column prop="rankNo" label="#" width="40" align="center" />
+            <el-table-column label="名称" width="216">
               <template #default="{ row }">
                 <el-tooltip placement="top" :show-after="150">
                   <template #content>
@@ -310,12 +287,12 @@
                 <span class="board">{{ row.board }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="建议仓位" width="68" align="right" header-align="right">
+            <el-table-column label="建议仓位" width="78" align="right" header-align="right">
               <template #default="{ row }">
                 <span class="num pos" :title="posTip(row)">{{ posText(row.suggestPosition) }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="警示" width="86">
+            <el-table-column label="警示" width="116">
               <template #default="{ row }">
                 <span v-if="row.alertFlag || row.riskFlag" class="alerts">
                   <el-tag v-if="row.alertFlag" size="small" type="danger" effect="dark"
@@ -326,7 +303,7 @@
                 <span v-else class="mut">—</span>
               </template>
             </el-table-column>
-            <el-table-column label="T+1 跳空" width="70" align="right" header-align="right">
+            <el-table-column label="T+1 跳空" width="92" align="right" header-align="right">
               <template #default="{ row }">
                 <span v-if="t1Of(row) && t1Of(row).gapPct != null" :class="['num', cls(t1Of(row).gapPct)]">
                   {{ pct(t1Of(row).gapPct) }}
@@ -334,7 +311,7 @@
                 <span v-else class="mut">—</span>
               </template>
             </el-table-column>
-            <el-table-column label="打板收益" width="68" align="right" header-align="right">
+            <el-table-column label="打板收益" width="92" align="right" header-align="right">
               <template #default="{ row }">
                 <span v-if="t1Of(row) && t1Of(row).t1ChangePct != null" :class="['num', cls(t1Of(row).t1ChangePct)]">
                   {{ pct(t1Of(row).t1ChangePct) }}
@@ -342,7 +319,7 @@
                 <span v-else class="mut">—</span>
               </template>
             </el-table-column>
-            <el-table-column label="接盘收益" width="72" align="right" header-align="right">
+            <el-table-column label="接盘收益" width="92" align="right" header-align="right">
               <template #default="{ row }">
                 <span v-if="bPct(row) != null" :class="['num', cls(bPct(row))]">
                   <b>{{ pct(bPct(row)) }}</b>
@@ -350,7 +327,7 @@
                 <span v-else class="mut">—</span>
               </template>
             </el-table-column>
-            <el-table-column label="结果" width="66" align="center">
+            <el-table-column label="结果" width="88" align="center">
               <template #default="{ row }">
                 <span v-if="!t1Of(row)" class="mut">待验证</span>
                 <el-tag v-else-if="t1Of(row).promoted === 1" size="small" type="danger" effect="dark">晋级</el-tag>
@@ -1138,15 +1115,10 @@ onMounted(async () => {
   margin-bottom: 14px;
 }
 
-/* 候选池表格的封顶宽度：随着窗口变宽只会让右侧留白变多，不会再把列撑开。
-   需要更宽/更窄只改这一处。 */
-.tbl {
-  max-width: 1400px;
-}
-/* 单元格左右内边距 8px → 6px：12 列一起省 4px/列＝48px，比逐列抠宽度有效得多。
+/* 单元格左右内边距 8px → 6px：每列省 4px，两张表一起算比逐列抠宽度有效得多。
    选择器写到三层（.tbl + .el-table + .cell）是为了在权重上稳压 Element 的
    `.el-table--small .cell{padding:0 8px}`（两层）——同权重时胜负取决于样式注入顺序，
-   那种赢法不稳。只作用于本页候选池表格，不动全站表格观感。 */
+   那种赢法不稳。只作用于本页这两张表，不动全站表格观感。 */
 .tbl :deep(.el-table .cell) {
   padding: 0 6px;
 }
