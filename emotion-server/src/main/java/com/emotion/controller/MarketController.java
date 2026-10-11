@@ -25,6 +25,7 @@ import com.emotion.service.MarketDataService;
 import com.emotion.service.ScoreContextService;
 import com.emotion.service.SurveillanceService;
 import com.emotion.service.StockDictService;
+import com.emotion.util.AuthContext;
 import com.emotion.vo.ApiResponse;
 import com.emotion.vo.MarketBreadthVO;
 import com.emotion.vo.MarketIndexesVO;
@@ -128,9 +129,16 @@ public class MarketController {
         return ApiResponse.ok(marketDataService.stocks(parse(date)));
     }
 
-    /** 一日"昨日涨停池今日溢价"的逐档与三组结果。 */
+    /**
+     * 一日"昨日涨停池今日溢价"的逐档与三组结果。
+     *
+     * <p>超管专属：逐档带 {@code binNote}/{@code weight}/{@code midLine}，档位边界与权重一眼全给。
+     * 前端 {@code api/modules.js} 定义了这个 helper 但零调用方，溢价的结果在复盘页与大盘页另有出处，
+     * 收这条不会让任何一页少东西。
+     */
     @GetMapping("/premium-tiers")
     public ApiResponse<PremiumTiersVO> premiumTiers(@RequestParam(required = false) String date) {
+        AuthContext.requireSuperAdmin("查看溢价档位口径");
         return ApiResponse.ok(marketDataService.premiumTiers(parse(date)));
     }
 
@@ -139,9 +147,14 @@ public class MarketController {
      *
      * <p>只交公开读数，八列 {@code manual_*} 一概不回——人工值从表单走 {@code /api/records}，
      * 响应里带一份就有第二份真值，也就给了"拉一次行情把手改洗成自动值"的机会。
+     *
+     * <p>超管专属：每个子项都带自己的算式，{@code sealedNote} 还直接印出
+     * {@code 家数封板率 39÷(39+48)=44.8% → 0 分} 这种"读数＋公式＋档分"一整句。
+     * 同样零前端调用方（helper 定义了没人调），收这条不动任何一页。
      */
     @GetMapping("/score-context")
     public ApiResponse<ScoreContextVO> scoreContext(@RequestParam(required = false) String date) {
+        AuthContext.requireSuperAdmin("查看子项算式");
         return ApiResponse.ok(scoreContextService.scoreContextVO(parse(date)));
     }
 

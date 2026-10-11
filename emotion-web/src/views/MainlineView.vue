@@ -27,8 +27,12 @@
         class="confirm-bar" :title="vo.mainlineSignal"
         style="margin-top: -6px" />
 
+      <!-- 这条不能整块闸掉：它是在提醒当日数字不可信。但「催化剂硬度取的是默认值」
+           与那句 /api/themes 登记指引是规则与运维口径，普通用户只留可信度那半句 -->
       <el-alert v-if="vo.mainThemeMatched === false" type="warning" :closable="false" show-icon
-        title="题材行与日内核心行业没有对上：催化剂硬度取的是默认值，可信度打折（登记入口已下线，可用 /api/themes 接口登记该行业题材修正）"
+        :title="$canRule
+          ? '题材行与日内核心行业没有对上：催化剂硬度取的是默认值，可信度打折（登记入口已下线，可用 /api/themes 接口登记该行业题材修正）'
+          : '题材行与日内核心行业没有对上，本页数字可信度打折'"
         style="margin: 16px 0" />
 
       <!-- 生命周期轨道 -->
@@ -48,7 +52,11 @@
             <div v-if="i < (vo.lifecycle?.length || 0) - 1" class="stage-line"></div>
           </template>
         </div>
-        <p class="stage-note">{{ STAGE_NOTE[vo.lifecycleStage] || '当日无日内核心，生命周期不可判' }}</p>
+        <!-- STAGE_NOTE 五条都自带触发阈值（持续性 ≥2/≥3/≥5 天、全市场 H≥7、腰斩），只给超管。
+             阶段名本身在上面那枚 el-tag 里，两种角色都看得到——带名是结论不是规则。
+             但「不可判」那句是数据状态不是判据，谁都得看见。 -->
+        <p v-if="$canRule" class="stage-note">{{ STAGE_NOTE[vo.lifecycleStage] || '当日无日内核心，生命周期不可判' }}</p>
+        <p v-else-if="!vo.lifecycleStage" class="stage-note">当日无日内核心，生命周期不可判</p>
       </section>
 
       <!-- 五要素 -->
@@ -66,12 +74,12 @@
           <div class="elem">
             <span class="elem-label">涨停聚集度</span>
             <span class="elem-value">{{ pctText(vo.ztGatherPct) }}</span>
-            <span class="elem-sub">自动 · 权重 25%</span>
+            <span class="elem-sub">自动{{ $canRule ? ' · 权重 25%' : '' }}</span>
           </div>
           <div class="elem">
             <span class="elem-label">高度聚集度</span>
             <span class="elem-value">{{ pctText(vo.heightGatherPct) }}</span>
-            <span class="elem-sub">自动 · 权重 25%</span>
+            <span class="elem-sub">自动{{ $canRule ? ' · 权重 25%' : '' }}</span>
           </div>
           <div class="elem">
             <span class="elem-label">成交额聚集度</span>
@@ -85,12 +93,12 @@
                 text-color="#fbbf24" style="--el-rate-icon-margin: 1px" />
               <span v-else class="missing">未评</span>
             </span>
-            <span class="elem-sub">题材登记 · 权重 15%</span>
+            <span class="elem-sub">题材登记{{ $canRule ? ' · 权重 15%' : '' }}</span>
           </div>
           <div class="elem">
             <span class="elem-label">持续性</span>
             <span class="elem-value">{{ vo.persistenceDays != null ? vo.persistenceDays + ' 天' : '—' }}</span>
-            <span class="elem-sub">连续热度 · 权重 15%（≥5家/日）</span>
+            <span class="elem-sub">连续热度{{ $canRule ? ' · 权重 15%（≥5家/日）' : '' }}</span>
           </div>
         </div>
       </section>
@@ -99,7 +107,9 @@
       <section class="block" v-loading="loading">
         <div class="block-head">
           <h3>龙头分工</h3>
-          <span class="scale">总龙头 50% · 中军 20% · 跟风 15% · 卡位 10% · 反包 5%</span>
+          <!-- 一行就是整条角色权重公式（50/20/15/10/5），只给超管。
+               下面每个成员的角色标签照旧——那是结论不是规则 -->
+          <span v-if="$canRule" class="scale">总龙头 50% · 中军 20% · 跟风 15% · 卡位 10% · 反包 5%</span>
         </div>
 
         <div class="dragon-card" v-if="vo.dragon">
@@ -119,13 +129,14 @@
               自涨停回撤 -{{ Number(vo.dragon.pullbackPct).toFixed(2) }}%
             </span>
           </div>
-          <p v-if="vo.dragon.reason" class="dragon-reason">判定依据：{{ vo.dragon.reason }}</p>
+          <!-- 角色标签、板数、晋级/在位/断板都是结论，留；reason 是引擎写的判据人话，只给超管 -->
+          <p v-if="$canRule && vo.dragon.reason" class="dragon-reason">判定依据：{{ vo.dragon.reason }}</p>
         </div>
         <el-alert v-else type="info" :closable="false" show-icon title="当日无总龙头（全市场没有连板股），阵眼按缺判" style="margin-bottom: 14px" />
 
         <div class="member-groups">
           <div class="member-group">
-            <h4>中军 <span class="sub">日内核心内其余连板 ≥2</span></h4>
+            <h4>中军 <span v-if="$canRule" class="sub">日内核心内其余连板 ≥2</span></h4>
             <el-empty v-if="!vo.zhongJun?.length" description="无" :image-size="40" />
             <el-table v-else :data="vo.zhongJun" size="small">
               <el-table-column prop="code" label="代码" width="90" />
@@ -171,7 +182,7 @@
       <!-- 雷达区（候选池，当日有涨停的行业，不打 D2 分）→ 板块表 + 题材表 -->
       <section class="block" v-loading="loading">
         <div class="block-head">
-          <h3>雷达区 · 日内核心 <span class="sub">候选池扫描，连续≥3天晋级主线</span></h3>
+          <h3>雷达区 · 日内核心 <span v-if="$canRule" class="sub">候选池扫描，连续≥3天晋级主线</span></h3>
         </div>
 
         <h4 class="radar-sub">板块表 <span class="sub">全量行业 · {{ vo.radar?.length || 0 }} 个 · 只显示前 5</span></h4>
@@ -287,6 +298,7 @@ import { useRoute } from 'vue-router'
 import { prdApi, recordApi } from '../api/modules'
 import { signed } from '../utils/scores'
 import { useTradingCalendar } from '../utils/tradingCalendar'
+import { canSeeRules } from '../utils/ruleVisibility'
 import { useUserStore } from '../stores/user'
 import DimScoreBlock from '../components/DimScoreBlock.vue'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
@@ -324,13 +336,24 @@ function rankIndex(i) {
   return i + 1
 }
 
-/** 主线收集状态标题（区分人工标记 / 自动晋级 / 未晋级）。 */
+/**
+ * 主线收集状态标题（区分人工标记 / 自动晋级 / 未晋级）。
+ *
+ * 晋级与否、哪个行业、连续几天都是结果，两种角色都给；
+ * 但「排进板块前五」与「未满连续 3 个交易日」是晋级判据本身，只给超管。
+ */
 function mainlineTitle() {
   const v = vo.value
+  const days = v?.persistenceDays ?? 0
+  const rule = canSeeRules()
   if (v?.mainlineConfirmed) {
-    return `「${v.mainIndustry}」已连续 ${v.persistenceDays ?? 0} 个交易日排进板块前五，已晋级为主线`
+    return rule
+      ? `「${v.mainIndustry}」已连续 ${days} 个交易日排进板块前五，已晋级为主线`
+      : `「${v.mainIndustry}」已连续 ${days} 个交易日，已晋级为主线`
   }
-  return `「${v.mainIndustry}」今日最热但排进前五未满连续 3 个交易日（当前 ${v.persistenceDays ?? 0} 天），暂为日内核心，未晋级主线`
+  return rule
+    ? `「${v.mainIndustry}」今日最热但排进前五未满连续 3 个交易日（当前 ${days} 天），暂为日内核心，未晋级主线`
+    : `「${v.mainIndustry}」今日最热（当前 ${days} 天），暂为日内核心，未晋级主线`
 }
 
 /** 该雷达行是否是当前人工标记的主线（显示「取消升级」）。 */

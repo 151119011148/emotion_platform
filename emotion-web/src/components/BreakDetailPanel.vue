@@ -41,11 +41,13 @@
           首 {{ dash(a.sameIndustryFirst) }} ／ 二 {{ dash(a.sameIndustrySecond) }}
           ／ 3+ {{ dash(a.sameIndustryThirdPlus) }}｜合计 {{ dash(a.total) }} 只
         </span>
+        <!-- 「线 2 只」是立住那条判据的门槛，收进超管；立住/没立住/判不了这个结论留 -->
         <span class="cell-sub">
-          梯队{{ a.ladderOk === true ? '立住' : a.ladderOk === false ? '没立住' : '判不了' }}（线 2 只）
+          梯队{{ a.ladderOk === true ? '立住' : a.ladderOk === false ? '没立住' : '判不了'
+          }}<template v-if="$canRule">（线 2 只）</template>
           · 当天首板 {{ dash(a.firstBoardTotal) }} 只散在 {{ dash(a.firstBoardIndustries) }} 个行业
         </span>
-        <span class="cell-foot">只展示：不进闸门、不改权重</span>
+        <span class="cell-foot" v-if="$canRule">只展示：不进闸门、不改权重</span>
       </div>
 
       <div class="cell">
@@ -62,7 +64,7 @@
             ｜封单 {{ moneyText(b.sealAmount) }}</template><template v-if="b.oneWordKilling">
             ｜<b class="bad">一字缩量断魂刀</b></template>
         </span>
-        <span class="cell-foot">烂板与缩量他没有数值口径，这里只列数</span>
+        <span class="cell-foot" v-if="$canRule">烂板与缩量他没有数值口径，这里只列数</span>
       </div>
 
       <div class="cell">
@@ -72,8 +74,10 @@
           · 涨停 {{ dash(g.limitUpCount) }} 家
         </span>
         <span class="cell-value" v-else>—</span>
-        <span class="cell-sub">阶段：{{ g && g.stage ? g.stage : '未复盘' }}（判据 &gt;50% / &lt;0 / 退潮）</span>
-        <ul class="warn" v-if="d.gateWarnings && d.gateWarnings.length">
+        <!-- 三个读数与阶段名是结果；括号里那三条是判据门槛，警告条整条是阈值原文 -->
+        <span class="cell-sub">阶段：{{ g && g.stage ? g.stage : '未复盘'
+          }}<template v-if="$canRule">（判据 &gt;50% / &lt;0 / 退潮）</template></span>
+        <ul class="warn" v-if="$canRule && d.gateWarnings && d.gateWarnings.length">
           <li v-for="(w, i) in d.gateWarnings" :key="'g' + i">{{ w }}</li>
         </ul>
       </div>
@@ -85,7 +89,7 @@
           <template v-if="o.nextDate">｜{{ o.nextDate }} {{ o.nextBoard != null ? o.nextBoard + '板' : '' }}</template>
         </span>
         <span class="cell-value" v-else>这天已经是结论本身</span>
-        <span class="cell-sub" v-if="o && o.reason">{{ o.reason }}</span>
+        <span class="cell-sub" v-if="$canRule && o && o.reason">{{ o.reason }}</span>
       </div>
     </div>
 
@@ -99,7 +103,7 @@
       </el-tag>
     </div>
 
-    <p class="impact" v-if="d && d.scoreImpact">
+    <p class="impact" v-if="$canRule && d && d.scoreImpact">
       <span class="impact-lead">立成节点会改写的分</span>{{ d.scoreImpact }}
     </p>
     <p class="receipt" v-if="receipt">{{ receipt }}</p>

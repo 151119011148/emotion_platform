@@ -18,56 +18,63 @@
         </span>
       </div>
       <div v-show="scoreOpen">
-      <el-empty v-if="!firstDim" :description="'当日读数未取到，首板生态未评（不计入分母）'" :image-size="60" />
+      <el-empty v-if="!firstDim" :image-size="60"
+        :description="$canRule ? '当日读数未取到，首板生态未评（不计入分母）' : '当日读数未取到，首板生态未评'" />
       <template v-else>
-        <ol class="formula">
+        <!-- 三条公式原文：子项构成与权重、叶子阶梯＋加权平均、大盘背离的两个修正量 -->
+        <ol class="formula" v-if="$canRule">
           <li>全部子项只看 <b>T 日当天</b>新首板：数量、封板率、炸板率、封单质量（均封单 0.6 + 一字占比 0.4）、题材聚集度。</li>
           <li>叶子读数命中阈值阶梯 → 0-100 分；结构子分＝Σ(叶权 × 叶分) ÷ Σ已评叶权，未评剔出分母不按 0 计。</li>
           <li>大盘背离（大盘分&lt;40 / 强制退潮 / 跌停≥20 家）时：首板数量 ×0.85、首板封板率 −10，修正留痕在下表。</li>
         </ol>
-        <table class="score-table">
+        <!-- 八列 → 四列（项目 / 今日读数 / 全局背景 / 得分）。
+             权重、命中档（阈值→档分）、修正系数、加权贡献是规则，整列不渲染。
+             ⚠ 每个 <th> 都必须和下面两种行里对应的 <td> 用同一个谓词成对闸——
+             手写 <table> 列数不齐会渲染成锯齿，CSS 救不回来。 -->
+        <table class="score-table" :class="{ lite: !$canRule }">
           <thead>
             <tr>
               <th class="col-name">项目</th>
-              <th class="col-w">权重</th>
+              <th v-if="$canRule" class="col-w">权重</th>
               <th class="col-raw">今日读数</th>
               <th class="col-bg">全局背景</th>
-              <th class="col-band">读数 / 命中档（阈值 → 档分）</th>
-              <th class="col-fix">修正系数</th>
+              <th v-if="$canRule" class="col-band">读数 / 命中档（阈值 → 档分）</th>
+              <th v-if="$canRule" class="col-fix">修正系数</th>
               <th class="col-score">得分</th>
-              <th class="col-contrib">加权贡献</th>
+              <th v-if="$canRule" class="col-contrib">加权贡献</th>
             </tr>
           </thead>
           <tbody>
             <template v-for="row in scoreRows" :key="row.key">
               <tr v-if="row.kind === 'group'" class="group-row">
                 <td class="cell-name">{{ row.label }}</td>
-                <td>×{{ fmtWeight(row.weight) }}</td>
+                <td v-if="$canRule">×{{ fmtWeight(row.weight) }}</td>
                 <td>—</td>
                 <td class="bg-cell">{{ row.bg || '—' }}</td>
-                <td class="band-cell">{{ row.note || '各叶加权合成' }}</td>
-                <td class="fix-cell">{{ row.adjustment || '—' }}</td>
+                <td v-if="$canRule" class="band-cell">{{ row.note || '各叶加权合成' }}</td>
+                <td v-if="$canRule" class="fix-cell">{{ row.adjustment || '—' }}</td>
                 <td><span :class="bandClass(row.score)">{{ scoreText(row.score) }}</span></td>
-                <td class="contrib">{{ contribText(row.weight, row.score) }}</td>
+                <td v-if="$canRule" class="contrib">{{ contribText(row.weight, row.score) }}</td>
               </tr>
               <tr v-else class="leaf-row" :class="{ solo: row.kind === 'solo' }">
                 <td class="cell-name"><span class="indent" v-if="row.kind === 'leaf'">└</span>{{ row.label }}</td>
-                <td>×{{ fmtWeight(row.weight) }}</td>
+                <td v-if="$canRule">×{{ fmtWeight(row.weight) }}</td>
                 <td class="raw-cell">{{ rawText(row.sourceKey, row.raw) }}</td>
                 <td class="bg-cell">{{ row.bg || '—' }}</td>
-                <td class="band-cell">
+                <!-- bandHit 形如 "1.15 [1,1.3] → 60"：一个串同时给出读数、算符、两个阈值和档分 -->
+                <td v-if="$canRule" class="band-cell">
                   <span v-if="row.bandHit">{{ row.bandHit }}</span>
                   <span v-else-if="row.note">{{ row.note }}</span>
                   <span v-else class="missing">—</span>
                 </td>
-                <td class="fix-cell">{{ row.adjustment || '—' }}</td>
+                <td v-if="$canRule" class="fix-cell">{{ row.adjustment || '—' }}</td>
                 <td><span :class="bandClass(row.score)">{{ scoreText(row.score) }}</span></td>
-                <td class="contrib">{{ row.kind === 'solo' ? contribText(row.weight, row.score) : '' }}</td>
+                <td v-if="$canRule" class="contrib">{{ row.kind === 'solo' ? contribText(row.weight, row.score) : '' }}</td>
               </tr>
             </template>
           </tbody>
         </table>
-        <p class="score-foot" v-if="firstDim.note">
+        <p class="score-foot" v-if="$canRule && firstDim.note">
           <b class="whistle-note">{{ firstDim.note }}</b>
         </p>
       </template>
@@ -91,7 +98,7 @@
       <div class="stat">
         <span class="stat-label">首板封板率</span>
         <span class="stat-value">{{ pctText(summary?.sealedRate) }}</span>
-        <span class="stat-sub">封住 ÷（封住 + 首板炸板）</span>
+        <span v-if="$canRule" class="stat-sub">封住 ÷（封住 + 首板炸板）</span>
       </div>
       <div class="stat">
         <span class="stat-label">一字首板</span>
@@ -114,10 +121,13 @@
     <section class="block signal-block">
       <div class="block-head">
         <h3>试错-兑现背离</h3>
-        <span class="sub">首板生态(T日试错) − 连板生态(T-1→T兑现)</span>
+        <span v-if="$canRule" class="sub">首板生态(T日试错) − 连板生态(T-1→T兑现)</span>
       </div>
+      <!-- 标签原文后端按角色抹掉了，这里只给超管插值；在前端按阈值重算一个
+           等于把 30/15/−15 三条线又写回浏览器。灯色与背离度读数是状态和结果，都留。 -->
       <div v-if="ecologyDivergence != null" class="divergence-banner" :class="divergenceLevel">
-        🧭 {{ scoring.detail?.ecologyDivergenceLabel }}
+        <template v-if="$canRule">🧭 {{ scoring.detail?.ecologyDivergenceLabel }}</template>
+        <template v-else>🧭</template>
         <span class="divergence-num">背离度 {{ signedNum(ecologyDivergence) }}</span>
       </div>
       <p v-else class="signal-empty">两维都出分后计算背离度……</p>
@@ -153,8 +163,11 @@
         <span class="list-count bad-text">{{ bombedRows.length }} 只</span>
       </div>
       <div v-show="bombedOpen" class="list-body">
+        <!-- 这条不能整块闸掉：它是「本表为什么是空的」的唯一解释。
+             但原文里嵌着口径（哪些炸板算「首板尝试」），普通用户只留数据状态那半句 -->
         <el-alert v-if="!prevReady" type="warning" :closable="false" show-icon
-          title="昨日明细未回补，无法判定哪些炸板属于「首板尝试」，本表暂不可算" style="margin: 8px 0" />
+          :title="$canRule ? '昨日明细未回补，无法判定哪些炸板属于「首板尝试」，本表暂不可算' : '昨日明细未回补，本表暂不可算'"
+          style="margin: 8px 0" />
         <div v-else-if="!bombedRows.length" class="list-empty">当日没有首板炸板（或昨日明细未回补）</div>
         <div v-else class="chips">
           <div v-for="r in bombedRows" :key="r.code" class="chip chip-fail">
@@ -177,6 +190,7 @@ import { useRoute } from 'vue-router'
 import { prdApi, recordApi } from '../api/modules'
 import { signed, fiveDimBandClassOf } from '../utils/scores'
 import { useTradingCalendar } from '../utils/tradingCalendar'
+import { canSeeRules } from '../utils/ruleVisibility'
 import { useScoringStore } from '../stores/scoring'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
 import DimIntroTip from '../components/DimIntroTip.vue'
@@ -234,11 +248,15 @@ const scoreRows = computed(() => {
   return rows
 })
 
+/**
+ * 全局背景列：前两条是读数（当日涨停 / 全局跌停家数），谁都能看；
+ * 第三条是题材聚集这一叶的统计口径，按角色截掉，格子会回落到 '—'。
+ */
 function bgText(subKey) {
   const m = metrics.value
   if (subKey === 'first_count') return m.limit_up_count != null ? `当日涨停 ${m.limit_up_count} 家` : '—'
   if (subKey === 'first_sealed' || subKey === 'first_bomb') return m.limit_down_count != null ? `全局跌停 ${m.limit_down_count} 家` : '—'
-  if (subKey === 'first_theme') return '只统计 T 日新首板行业分布'
+  if (subKey === 'first_theme') return canSeeRules() ? '只统计 T 日新首板行业分布' : ''
   return ''
 }
 
@@ -380,6 +398,12 @@ watch(date, load)
 .col-fix { width: 16%; }
 .col-score { width: 64px; text-align: right; }
 .col-contrib { width: 72px; }
+/* 上面那套预算是照八列写的。普通用户只剩四列（项目/今日读数/全局背景/得分），
+   table-layout:auto 会把腾出来的宽度乱分——项目列涨爆、全局背景被挤成竖条。
+   不能删原规则（超管还在用），只在 .lite 下重给一份，与连板生态页取同一组数。 */
+.score-table.lite .col-name { width: 34%; }
+.score-table.lite .col-raw { width: 96px; }
+.score-table.lite .col-bg { width: 40%; }
 .score-table td.col-score { text-align: right; }
 .group-row td { background: rgba(251,191,36,.05); font-weight: 600; color: #e1e8ed; }
 .leaf-row .cell-name { color: #a8b7c4; font-weight: 400; }

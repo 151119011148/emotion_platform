@@ -17,13 +17,16 @@
     <div class="direction-info" v-if="stage">
       方向: <span :class="directionClass">{{ direction || '横盘' }}</span>
     </div>
-    <div class="basis-info" v-if="basis">
+    <!-- 下面三行是「这个带是怎么定出来的」：来路含四条分位切点与 ±3 方向判据，
+         强制退潮原因含命中的那条阈值，结构信号是引擎内部的判据旗标名。
+         五段 stages-bar 与方向照旧给所有人——带名和方向是结论，不是规则。 -->
+    <div class="basis-info" v-if="$canRule && basis">
       来路: <span class="basis">{{ basis }}</span>
     </div>
-    <div class="forced-info" v-if="forcedReason">
+    <div class="forced-info" v-if="$canRule && forcedReason">
       强制退潮原因：{{ forcedReason }}
     </div>
-    <div class="signal-info" v-if="signals.length">
+    <div class="signal-info" v-if="$canRule && signals.length">
       结构信号 {{ signals.length }} 项：{{ signals.join('、') }}
     </div>
   </div>

@@ -33,6 +33,7 @@ import AxisZoomBar from './AxisZoomBar.vue'
 import { useCurveZoom, DEFAULT_SPAN, MIN_SPAN } from '../utils/curveZoom'
 import { fiveDimBandOf } from '../utils/scores'
 import { STAGE_COLORS, NO_STAGE_COLOR } from '../utils/stages'
+import { canSeeRules } from '../utils/ruleVisibility'
 
 /**
  * 单维分走势（五维模型 0-100 直加权）。
@@ -76,7 +77,8 @@ const BANDS = [
 /**
  * 自适应纵轴：与首页温度曲线 yRange 同一套规则 —— 数据落点上下各留 4 分空白，
  * 且 40/60 两条带下界强制留在视野内（min(vMin,38)/max(vMax,62) 兜底），
- * 放大波动不能丢位置参照，40/60/85 阈值线也才有得画。
+ * 放大波动不能丢位置参照。这条兜底对谁都生效，不随规则可见性变——
+ * 变了会让同一条曲线在两种角色下量程不同，逐点着色看着就不一样了。
  * 传进来的是可见窗口切片，所以按 + 是真放大（纵轴跟着摊开），不是只压横轴。
  */
 function axisRange(rows) {
@@ -96,6 +98,10 @@ function axisRange(rows) {
 function buildOption() {
   const all = props.rows || []
   if (!all.length) return {}
+  // 规则可见性只取一次：它驱动下面四层（背景色带、阈值线、渐变锚点、tooltip 分母），
+  // 逐层各调一次 store 反而看不出这是一件事。角色中途翻转由下面 watch 的 canSeeRules
+  // 依赖触发重画（setOption 是 notMerge，图层会真的消失）。
+  const canRule = canSeeRules()
   // 按 ±/≪≫ 的窗口切片：轴类目、系列数据、tooltip 与点击换算的下标一律走同一份可见数组
   const rows = zoom.visible(all)
   const dates = rows.map((r) => r.date)
@@ -113,12 +119,15 @@ function buildOption() {
   // 只画与可见纵轴重叠的带（自适应缩放后越界的带不铺，避免一大片无意义底色）。
   // 不渲染带名：markArea 数据项一旦带 name 就会被 ECharts 渲染成带内堆叠文字（实测四带名
   // 挤成一团乱文）。因此这里不传 name，并在 markArea 上显式 label.show=false 双保险。
-  const bands = BANDS
-    .filter((b) => b.max > range.min && b.min < range.max)
-    .map((b) => [
-      { yAxis: Math.max(b.min, range.min), itemStyle: { color: b.fill } },
-      { yAxis: Math.min(b.max, range.max), itemStyle: { color: b.fill } }
-    ])
+  // 带子的上下边就是 85/60/40 本身，一条 1px 硬边拿鼠标就能量出来 → 不看规则的人整层不生成。
+  const bands = canRule
+    ? BANDS
+        .filter((b) => b.max > range.min && b.min < range.max)
+        .map((b) => [
+          { yAxis: Math.max(b.min, range.min), itemStyle: { color: b.fill } },
+          { yAxis: Math.min(b.max, range.max), itemStyle: { color: b.fill } }
+        ])
+    : []
 
   // 带下界虚线：只在可见范围内画（自适应缩放后 40/60/85 可能落在轴外，画了也看不见）；
   // 标签与首页温度曲线同款："跨过这条线就进入哪个带"
@@ -127,13 +136,15 @@ function buildOption() {
     { v: 60, label: '发酵 60', color: '#d97706' },
     { v: 85, label: '高潮 85', color: '#dc2626' }
   ]
-  const thrLines = THRESHOLDS
-    .filter((t) => t.v > range.min && t.v < range.max)
-    .map((t) => ({
-      yAxis: t.v,
-      label: { formatter: t.label, color: t.color, position: 'insideEndTop', fontSize: 10 },
-      lineStyle: { color: '#2d3748', type: 'dashed', width: 1 }
-    }))
+  const thrLines = canRule
+    ? THRESHOLDS
+        .filter((t) => t.v > range.min && t.v < range.max)
+        .map((t) => ({
+          yAxis: t.v,
+          label: { formatter: t.label, color: t.color, position: 'insideEndTop', fontSize: 10 },
+          lineStyle: { color: '#2d3748', type: 'dashed', width: 1 }
+        }))
+    : []
 
   // 最新一条已评分的横线：一眼看出当前分落在哪；样式对齐首页"当前温度"金线。
   // 取全量最后一天而不是窗口最后一天：缩放看历史时"最新"仍然指当下。
@@ -159,17 +170,24 @@ function buildOption() {
 
   // 渐变按"分数越高越暖"铺：把 0/40/60/85/100 锚点映射到像素 offset
   //（纵轴自适应，offset 写死会与真实分位错位；与首页温度曲线同一套冷→暖语义、同一套色值）
+  // 不看规则的人换成首尾两停的平滑坡：中间那三个锚点是 85/60/40，色相在那儿突变，
+  // 屏幕上就是一条能量出来的边界线，跟 markArea 的硬边等价——藏了带子留着渐变等于白藏。
   const span = range.max - range.min || 1
   const off = (v) => Math.max(0, Math.min(1, (range.max - v) / span))
-  const areaStops = [
-    { offset: off(100), color: 'rgba(245,34,45,0.32)' },   // 顶部=高分 热红
-    { offset: off(85),  color: 'rgba(250,173,20,0.24)' },  // 发酵 暖橙
-    { offset: off(60),  color: 'rgba(250,173,20,0.13)' },  // 混沌上沿 淡橙
-    { offset: off(40),  color: 'rgba(148,163,184,0.06)' }, // 混沌下沿 中性
-    { offset: off(0),   color: 'rgba(24,144,255,0.04)' }   // 底部=低分 冷蓝
-  ]
-    .sort((a, b) => a.offset - b.offset)
-    .filter((s, i, arr) => i === 0 || Math.abs(s.offset - arr[i - 1].offset) > 0.001)
+  const areaStops = canRule
+    ? [
+        { offset: off(100), color: 'rgba(245,34,45,0.32)' },   // 顶部=高分 热红
+        { offset: off(85),  color: 'rgba(250,173,20,0.24)' },  // 发酵 暖橙
+        { offset: off(60),  color: 'rgba(250,173,20,0.13)' },  // 混沌上沿 淡橙
+        { offset: off(40),  color: 'rgba(148,163,184,0.06)' }, // 混沌下沿 中性
+        { offset: off(0),   color: 'rgba(24,144,255,0.04)' }   // 底部=低分 冷蓝
+      ]
+        .sort((a, b) => a.offset - b.offset)
+        .filter((s, i, arr) => i === 0 || Math.abs(s.offset - arr[i - 1].offset) > 0.001)
+    : [
+        { offset: 0, color: 'rgba(245,34,45,0.32)' },
+        { offset: 1, color: 'rgba(24,144,255,0.04)' }
+      ]
 
   return {
     tooltip: {
@@ -190,7 +208,8 @@ function buildOption() {
         } else {
           const v = Number(r.score)
           const band = fiveDimBandOf(v)
-          lines.push(`得分: <b>${v.toFixed(1)} / 100</b>`)
+          // 分母是满分口径（属于公式），分数和带名是结果 → 只按角色摘掉分母那一个 token
+          lines.push(`得分: <b>${v.toFixed(1)}${canRule ? ' / 100' : ''}</b>`)
           if (band) lines.push(`带位: <b>${band}</b>`)
         }
         if (bar && bar.value != null) lines.push(`日变化: <b>${bar.value > 0 ? '+' : ''}${bar.value}</b>`)
@@ -341,7 +360,8 @@ const onResize = () => chart?.resize()
 // 用 flush:'post'：props.rows 从空数组变成有数据的那一次，canvas 是"这一帧渲染才挂上的"，
 // 默认的 pre-flush 会在 DOM 更新前就跑到 → chartRef.value 还是 null，整条曲线永远不会 init。
 // post-flush 保证 ref 已绑上真实节点，echarts.init 才拿得到容器尺寸。
-watch(() => [props.rows, props.selected], renderChart, { deep: true, flush: 'post' })
+// canSeeRules 也在依赖里：角色是 loadMe() 之后才定的，晚于首次绘制，不带上就永远停在旧那一版图层。
+watch([() => props.rows, () => props.selected, canSeeRules], renderChart, { deep: true, flush: 'post' })
 // 窗口状态可能在同组另一条曲线的按钮上被改，所以重画挂在状态上，不挂在本图的点击上
 watch(() => [zoom.state.back, zoom.state.span], renderChart, { flush: 'post' })
 onMounted(() => {

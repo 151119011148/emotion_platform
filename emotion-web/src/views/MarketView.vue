@@ -18,19 +18,24 @@
         </span>
       </div>
       <div v-show="scoreOpen">
-      <el-empty v-if="!marketDim" description="当日读数未取到，第 1 维未评（不计入分母）" :image-size="60" />
+      <el-empty v-if="!marketDim" :image-size="60"
+        :description="$canRule ? '当日读数未取到，第 1 维未评（不计入分母）' : '当日读数未取到，第 1 维未评'" />
+      <!-- 得分列必须写 min-width 而不是 width：「读数 / 命中档」是这张表唯一的弹性列，
+           它按角色闸掉之后，剩下的列若全是定宽，el-table 会在右侧留一条空白槽。
+           命中档在的时候两种写法行为完全一样。 -->
       <el-table v-else :data="marketDim.children || []">
         <el-table-column prop="label" label="子项" width="120" />
-        <el-table-column label="权重" width="80">
+        <el-table-column v-if="$canRule" label="权重" width="80">
           <template #default="{ row }">×{{ row.weight }}</template>
         </el-table-column>
-        <el-table-column label="得分" width="90" align="right">
+        <el-table-column label="得分" min-width="90" align="right">
           <template #default="{ row }">
             <span v-if="row.score == null" class="missing">未评</span>
             <span v-else :class="bandClass(row.score)">{{ Number(row.score).toFixed(0) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="读数 / 命中档" min-width="260">
+        <!-- bandHit 形如 "1.15 [1,1.3] → 60"：一个串同时给出读数、算符、两个阈值和档分 -->
+        <el-table-column v-if="$canRule" label="读数 / 命中档" min-width="260">
           <template #default="{ row }">
             <span class="band-hit">{{ row.bandHit || strategyText(row) || '—' }}</span>
           </template>
@@ -43,8 +48,12 @@
     <div v-if="forcedEbb" class="ebb-banner">
       <span class="ebb-ico">⛔</span>
       <div class="ebb-text">
-        <b>强制退潮已触发</b>（无视大盘维 / 总分，周期阶段按「退潮(强制)」应对）
-        <span class="ebb-reason">{{ forcedEbbReason || '详见五维结构信号' }}</span>
+        <b>强制退潮已触发</b>
+        <!-- 触发原因是判据，「无视总分」那句是应对口径，都只给超管；灯本身是状态，留 -->
+        <template v-if="$canRule">
+          （无视大盘维 / 总分，周期阶段按「退潮(强制)」应对）
+          <span class="ebb-reason">{{ forcedEbbReason || '详见五维结构信号' }}</span>
+        </template>
       </div>
     </div>
 
@@ -77,9 +86,11 @@
         <span class="stat-sub">复盘导入口径</span>
       </div>
       <div class="stat">
-        <span class="stat-label">量比（成交额 / 20 日均）</span>
+        <span class="stat-label">量比{{ $canRule ? '（成交额 / 20 日均）' : '' }}</span>
         <span class="stat-value">{{ ratioText(metrics.turnover_ratio) }}</span>
-        <span class="stat-sub">{{ bandText('turnover') }}</span>
+        <!-- bandText 读的是 bandHit / note，后端对普通用户抹成 null，
+             它的 `|| '量能档未评'` 兜底会在这张明明出了分的卡上印一句假话 -->
+        <span v-if="$canRule" class="stat-sub">{{ bandText('turnover') }}</span>
       </div>
       <div class="stat">
         <span class="stat-label">上涨 / 下跌家数</span>
@@ -110,6 +121,7 @@ import { marketApi, recordApi } from '../api/modules'
 import { useScoringStore } from '../stores/scoring'
 import { signed, fiveDimBandClassOf } from '../utils/scores'
 import { useTradingCalendar } from '../utils/tradingCalendar'
+import { canSeeRules } from '../utils/ruleVisibility'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
 import DimIntroTip from '../components/DimIntroTip.vue'
 
@@ -164,13 +176,21 @@ function ratioText(v) {
   return v == null ? '—' : Number(v).toFixed(2)
 }
 
+/**
+ * 两个都只喂「读数 / 命中档」那一列。bandHit 形如 "1.15 [1,1.3] → 60"，
+ * note 是引擎写好的判据人话——都是规则。它们的兜底串更危险：字段被后端抹成 null 之后，
+ * bandText 会落到 '量能档未评'，在一张明明出了分的卡上印一句假话。
+ * 所以按角色直接返回空串，让调用方无从印起。
+ */
 function bandText(key) {
+  if (!canSeeRules()) return ''
   const sub = marketDim.value?.children?.find((c) => c.key === key)
   return sub?.bandHit || sub?.note || '量能档未评'
 }
 
 function strategyText(row) {
   // STRATEGY 节点没有 bandHit，由引擎在 note 里写好「读数 → 档位/系数 → 结果」的人话串（v2.1 起指数/量能/涨跌停都有）
+  if (!canSeeRules()) return ''
   if (row.scoringKind === 'STRATEGY') return row.note || '策略算法（指数连续函数 / 量能价量配合 / 涨跌停组合）'
   return ''
 }

@@ -7,19 +7,24 @@
       </span>
     </div>
     <div v-show="open">
-    <el-empty v-if="!dim" :description="`当日读数未取到，${title}未评（不计入分母）`" :image-size="60" />
+    <el-empty v-if="!dim" :image-size="60"
+      :description="$canRule ? `当日读数未取到，${title}未评（不计入分母）` : `当日读数未取到，${title}未评`" />
+    <!-- 得分列必须写 min-width 而不是 width：「读数 / 命中档」是这张表唯一的弹性列，
+         它按角色闸掉之后，剩下的列若全是定宽，el-table 会在右侧留一条空白槽。
+         命中档在的时候两种写法行为完全一样。 -->
     <el-table v-else :data="dim.children || []" size="small">
       <el-table-column prop="label" label="子项" width="120" />
-      <el-table-column label="权重" width="80">
+      <el-table-column v-if="$canRule" label="权重" width="80">
         <template #default="{ row }">×{{ row.weight }}</template>
       </el-table-column>
-      <el-table-column label="得分" width="90" align="right">
+      <el-table-column label="得分" min-width="90" align="right">
         <template #default="{ row }">
           <span v-if="row.score == null" class="missing">未评</span>
           <span v-else :class="bandClass(row.score)">{{ Number(row.score).toFixed(0) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="读数 / 命中档" min-width="260">
+      <!-- bandHit 形如 "1.15 [1,1.3] → 60"：一个串同时给出读数、算符、两个阈值和档分 -->
+      <el-table-column v-if="$canRule" label="读数 / 命中档" min-width="260">
         <template #default="{ row }">
           <span class="band-hit">{{ row.bandHit || (row.scoringKind === 'STRATEGY' ? '策略算法计算' : '—') }}</span>
         </template>

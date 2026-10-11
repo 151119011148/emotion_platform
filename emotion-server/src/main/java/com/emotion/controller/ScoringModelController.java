@@ -1,5 +1,6 @@
 package com.emotion.controller;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.slf4j.Logger;
@@ -21,14 +22,16 @@ import com.emotion.entity.ScoringSub;
 import com.emotion.service.ScoringModelService;
 import com.emotion.service.ScoringModelStore;
 import com.emotion.util.AuthContext;
+import com.emotion.util.RuleMask;
 import com.emotion.vo.ApiResponse;
 import com.emotion.vo.ScoringModelVO;
 
 /**
  * 打分配置（模型 / 维度 / 规则）的 CRUD 与生效模型读取。
  *
- * <p>{@code /effective} 是前端卡片取维度与权重的读端点（当前生效模型，装不到则 source=BUILTIN），
- * 对所有登录用户开放；{@code /models}/{@code /dims}/{@code /subs}/{@code /rules} 是管理页的增删改查，
+ * <p>{@code /effective} 是前端卡片取维度名与维序的读端点（当前生效模型，装不到则 source=BUILTIN），
+ * 对所有登录用户开放，但<b>权重与规则阶梯按角色抹</b>（见 {@link RuleMask}）；
+ * {@code /models}/{@code /dims}/{@code /subs}/{@code /rules} 是管理页的增删改查，
  * 只有超级管理员可调（判据见 {@link AuthContext#isSuperAdmin()}）——一套模型改完全站生效，
  * 普通用户的页面只读，不该有把它换掉的口。
  *
@@ -48,10 +51,43 @@ public class ScoringModelController {
         this.store = store;
     }
 
-    /** 当前生效模型的维度/权重/规则视图，供前端卡片渲染。永远 200：读不到就 source=BUILTIN。 */
+    /**
+     * 当前生效模型的维度视图，供前端卡片渲染。永远 200：读不到就 source=BUILTIN，
+     * 而且这条对每个登录用户都开（{@code Layout.vue} 挂载时就调），所以是<b>抹不是闸</b>。
+     *
+     * <p>抹掉：{@code rules}（完整档位阶梯＋每条判据的人话原文，<b>这是本轮唯一一处 bundle 里没有、
+     * 抹了才真有收益的信息</b>）、{@code subs}、{@code model}、{@code weightSum}、{@code effectiveMaxScore}，
+     * 以及逐维的 {@code weight}/{@code ruleEngine}/{@code note}/{@code recordColumn}/{@code sortNo}。
+     *
+     * <p><b>必须留 {@code source} 与非空的 {@code dims[].{dimKey,dimNo,label}}</b>：前端
+     * {@code stores/scoring.js} 认 DB 的判据是 {@code source=='DB' && dims.length>0}，
+     * 少一样整个 store 静默退回 bundle 常量，DB 驱动的维度会全消失——那不是"少一行字"，是页面塌一半。
+     * 逐维抹完 {@code weight} 后前端 {@code Number(null)==0}，而它唯一的兜底消费点
+     * （{@code IndicatorCards} 的 {@code ?? meta.weight}）已在同一轮闸掉，不会把常量印出来。
+     *
+     * <p><b>按角色判，不能按 body 类型判</b>：同一个 {@link ScoringModelVO} 也被超管专属的
+     * {@code GET /scoring/models/{id}} 返回，那边一个字都不能少（管理页要回填编辑表单）。
+     */
     @GetMapping("/effective")
     public ApiResponse<ScoringModelVO> effective() {
-        return ApiResponse.ok(store.effective());
+        ScoringModelVO vo = store.effective();
+        RuleMask.unlessSuperAdmin(vo, v -> {
+            v.setModel(null);
+            v.setSubs(new ArrayList<>());
+            v.setRules(new ArrayList<>());
+            v.setWeightSum(null);
+            v.setEffectiveMaxScore(null);
+            if (v.getDims() != null) {
+                for (ScoringDim dim : v.getDims()) {
+                    dim.setWeight(null);
+                    dim.setRuleEngine(null);
+                    dim.setNote(null);
+                    dim.setRecordColumn(null);
+                    dim.setSortNo(null);
+                }
+            }
+        });
+        return ApiResponse.ok(vo);
     }
 
     @GetMapping("/models")

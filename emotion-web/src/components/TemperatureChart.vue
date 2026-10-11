@@ -22,6 +22,7 @@ import AxisZoomBar from './AxisZoomBar.vue'
 import { useCurveZoom, MIN_SPAN } from '../utils/curveZoom'
 import { STAGE_COLORS, NO_STAGE_COLOR, bandRanges, bandOfPoint } from '../utils/stages'
 import { useTemperatureBands } from '../utils/temperatureBands'
+import { canSeeRules } from '../utils/ruleVisibility'
 
 const { cuts } = useTemperatureBands()
 
@@ -92,6 +93,9 @@ function buildOption() {
   const { yMin, yMax } = yRange(temperatures)
   // 四条分位线：冰点上界 / 退潮上界 / 混沌上界 / 沸点下界
   const [ice, ebb, ferment, climax] = cuts.value
+  // 规则可见性只在 buildOption 里取一次：它驱动的图层有四处，逐处调 store 反而看不出这是一件事。
+  // 角色中途翻转由下面 watch 的 canSeeRules 依赖触发重画（setOption 是 notMerge，图层会真的消失）。
+  const canRule = canSeeRules()
 
   // 日变化：今日-昨日温度差；前后任一为空=该日无柱。正=升温(暖橙) 负=降温(冷蓝)
   // 先按全量算再切片，否则缩放后最左那天的柱子会因为邻居被切掉而凭空消失
@@ -111,27 +115,53 @@ function buildOption() {
     沸点: 'rgba(245,34,45,0.09)'
   }
   const ranges = bandRanges()
-  const bands = ranges.map((b) => ({
-    label: b.name,
-    start: Math.max(b.min, yMin),
-    end: Math.min(b.max, yMax),
-    color: BAND_FILL[b.name]
-  })).filter((b) => b.end - b.start > 0.5)
+  // 阈值背景带：边界是当前分位线，随动态量程裁剪，超界的带自然消失。
+  // 普通用户不铺——色带的 1px 硬边就是阈值，在屏幕上直接量得出来。
+  const bands = canRule
+    ? ranges.map((b) => ({
+        label: b.name,
+        start: Math.max(b.min, yMin),
+        end: Math.min(b.max, yMax),
+        color: BAND_FILL[b.name]
+      })).filter((b) => b.end - b.start > 0.5)
+    : []
 
-  // 面积渐变：低处冷蓝 → 高处暖红（温度语义，不是股价的红涨绿跌），
-  // 渐变档位锚在分位线的实际像素位置，动态量程下不会错位
-  const areaStops = [
-    { offset: 0, color: 'rgba(245,34,45,0.32)' },
-    ...[
-      [climax, 'rgba(250,173,20,0.24)'],
-      [ferment, 'rgba(250,173,20,0.13)'],
-      [ebb, 'rgba(148,163,184,0.06)'],
-      [ice, 'rgba(30,64,175,0.10)']
-    ]
-      .filter(([v]) => v > yMin && v < yMax)
-      .map(([v, c]) => ({ offset: valueToOffset(v, yMin, yMax), color: c })),
-    { offset: 1, color: 'rgba(24,144,255,0.04)' }
-  ].sort((a, b) => a.offset - b.offset)
+  // 面积渐变：低处冷蓝 → 高处暖红（温度语义，不是股价的红涨绿跌）。
+  // 超管那版把渐变档位锚在分位线的实际像素位置，动态量程下不会错位；
+  // 普通用户退回两段直线渐变——多色档位停在切点上，色相突变本身就是一条能量出来的边界线，
+  // 和 markArea 的硬边等价，藏了带子却留着渐变等于白藏。
+  const areaStops = canRule
+    ? [
+        { offset: 0, color: 'rgba(245,34,45,0.32)' },
+        ...[
+          [climax, 'rgba(250,173,20,0.24)'],
+          [ferment, 'rgba(250,173,20,0.13)'],
+          [ebb, 'rgba(148,163,184,0.06)'],
+          [ice, 'rgba(30,64,175,0.10)']
+        ]
+          .filter(([v]) => v > yMin && v < yMax)
+          .map(([v, c]) => ({ offset: valueToOffset(v, yMin, yMax), color: c })),
+        { offset: 1, color: 'rgba(24,144,255,0.04)' }
+      ].sort((a, b) => a.offset - b.offset)
+    : [
+        { offset: 0, color: 'rgba(245,34,45,0.32)' },
+        { offset: 1, color: 'rgba(24,144,255,0.04)' }
+      ]
+
+  // 四条分位线：跨过哪条就进入哪个带。边界由 utils/temperatureBands 现算，
+  // 不是写死的 40/60/85——所以标签带上实际数值。普通用户不画：线的位置和标签就是阈值本身。
+  const cutLines = canRule
+    ? [
+        [ebb, '混沌', '#0891b2'],
+        [ferment, '发酵', '#d97706'],
+        [climax, '沸点', '#dc2626'],
+        [ice, '冰点', '#1e40af']
+      ].filter(([v]) => v > yMin && v < yMax)
+        .map(([v, name, color]) => ({
+          yAxis: v,
+          label: { formatter: `${name} ${v}`, color, position: 'insideEndTop', fontSize: 10 }
+        }))
+    : []
 
   // 当前值 = 最后一个有读数的点，画一条金色横线。取全量而不是窗口：缩放看历史时"当前"仍指当下
   let current = null
@@ -176,9 +206,12 @@ function buildOption() {
           `阶段: ${stageText}`
         ]
         if (bar && bar.value != null) lines.push(`日变化: <b>${bar.value > 0 ? '+' : ''}${bar.value}</b>`)
-        if (!stages[i] && dims && dims[i] != null) lines.push(`仅 ${dims[i]} 维参与打分，不出阶段`)
-        else if (stages[i] && dims && dims[i] != null && dims[i] < 5)
-          lines.push(`仅 ${dims[i]}/5 维参与打分（缺维已剔除，读数偏窄）`)
+        // 「几维参与打分、缺维已剔除」是打分口径不是当天读数，普通用户不给
+        if (canRule) {
+          if (!stages[i] && dims && dims[i] != null) lines.push(`仅 ${dims[i]} 维参与打分，不出阶段`)
+          else if (stages[i] && dims && dims[i] != null && dims[i] < 5)
+            lines.push(`仅 ${dims[i]}/5 维参与打分（缺维已剔除，读数偏窄）`)
+        }
         if (summaries && summaries[i]) lines.push(`<span style="color:#8899a6">${summaries[i]}</span>`)
         return lines.join('<br/>')
       }
@@ -277,18 +310,7 @@ function buildOption() {
           symbol: 'none',
           lineStyle: { type: 'dashed', color: '#2d3748' },
           data: [
-            // 四条分位线：跨过哪条就进入哪个带。边界由 utils/temperatureBands 现算，
-            // 不是写死的 40/60/85——所以标签带上实际数值。
-            ...[
-              [ebb, '混沌', '#0891b2'],
-              [ferment, '发酵', '#d97706'],
-              [climax, '沸点', '#dc2626'],
-              [ice, '冰点', '#1e40af']
-            ].filter(([v]) => v > yMin && v < yMax)
-              .map(([v, name, color]) => ({
-                yAxis: v,
-                label: { formatter: `${name} ${v}`, color, position: 'insideEndTop', fontSize: 10 }
-              })),
+            ...cutLines,
             ...(activeIdx >= 0
               ? [{
                   // 点击曲线点后：金色竖线标出仪表盘当前看的是哪一天
@@ -331,8 +353,10 @@ function renderChart() {
 
 const onResize = () => chart?.resize()
 
-// cuts 是异步算的：首帧先按兜底分位画，取数回来那一下必须重画一次
-watch([() => props.data, () => props.activeDate, cuts], renderChart, { deep: true })
+// cuts 是异步算的：首帧先按兜底分位画，取数回来那一下必须重画一次。
+// canSeeRules 也要进依赖：role 由 stores/user.loadMe() 异步覆写，晚于首次绘制，
+// 不 watch 它，管理员降级某账号后受害者这一屏会一直挂着阈值线。
+watch([() => props.data, () => props.activeDate, cuts, canSeeRules], renderChart, { deep: true })
 onMounted(() => {
   renderChart()
   window.addEventListener('resize', onResize)

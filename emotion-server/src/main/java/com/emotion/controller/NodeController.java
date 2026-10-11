@@ -5,6 +5,7 @@ import com.emotion.entity.NodeEvent;
 import com.emotion.service.NodeBreakService;
 import com.emotion.service.NodeService;
 import com.emotion.service.NodeSuggestService;
+import com.emotion.util.RuleMask;
 import com.emotion.vo.ApiResponse;
 import com.emotion.vo.BreakNodeCreateVO;
 import com.emotion.vo.NodeSuggestVO;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -92,10 +94,31 @@ public class NodeController {
     }
 
     /**
-     * 复算一遍：建议是什么、哪几条读数、缺哪一样，全部摊开。只读，不写库。 */
+     * 复算一遍：建议是什么、哪几条读数、缺哪一样，全部摊开。只读，不写库。
+     *
+     * <p>这条对每个登录用户都开（复算弹窗是有意给所有人看的），所以是<b>抹不是闸</b>：
+     * 结论留、依据按角色给。抹完 {@code ready}/{@code suggestedStatus}/{@code candidatePool}/
+     * {@code repairStatus}/{@code conclusionReason} 与晋级名单都还在，只是"为什么"看不见了。
+     * 采纳本身是写口，超管专属，指纹在服务端 {@code adopt} 里重算，抹响应动不到它。
+     */
     @GetMapping("/{id}/suggest")
     public ApiResponse<NodeSuggestVO> suggest(@PathVariable Long id) {
-        return ApiResponse.ok(nodeSuggestService.suggest(id));
+        NodeSuggestVO vo = nodeSuggestService.suggest(id);
+        RuleMask.unlessSuperAdmin(vo, v -> {
+            v.setReason(null);
+            v.setSystemType(null);
+            v.setHeavyBasis(null);
+            v.setAnchor(null);
+            v.setMissing(new ArrayList<>());
+            v.setWarnings(new ArrayList<>());
+            v.setFilter(new ArrayList<>());
+            NodeSuggestVO.Promotion p = v.getPromotion();
+            if (p != null) {
+                p.setThreshold(null);
+                p.setBasis(null);
+            }
+        });
+        return ApiResponse.ok(vo);
     }
 
     /** 采纳：服务端重算并逐字段比对，一致才把八个字段连状态来路一起写进去。 */

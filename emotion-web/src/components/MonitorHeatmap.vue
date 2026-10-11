@@ -77,21 +77,27 @@
       </table>
     </div>
 
-    <!-- 状态脚注：每行为什么定这个状态 -->
-    <div v-if="rows.length" class="mm-why-head">状态依据 <span class="sub">与上表同一顺序，逐只给依据</span></div>
+    <!-- 状态脚注：每行为什么定这个状态。
+         why 是后端逐只写的判据原文，只给超管；但 status 标签（持续向上/拐头/跌破）与
+         🔥绕异动 整页只有这一处出，它们是结论，两种角色都得留。
+         依据抽走之后标题不能再叫「状态依据」，否则是在承诺一块不存在的内容。 -->
+    <div v-if="rows.length" class="mm-why-head">
+      {{ $canRule ? '状态依据' : '监管状态' }}
+      <span v-if="$canRule" class="sub">与上表同一顺序，逐只给依据</span>
+    </div>
     <ul v-if="rows.length" class="mm-why">
       <li v-for="row in rows" :key="row.code + row.annDate + 'w'">
         <!-- 先给票名：脚注与上面的表按顺序对应，但十几只票时靠顺序去猜是哪只太费劲 -->
         <span class="why-name">{{ row.name }}</span>
         <el-tag :type="toneTag(row.statusTone)" size="small" effect="dark">{{ row.status }}</el-tag>
         <span v-if="row.avoid" class="avoid-tag">🔥 绕异动</span>
-        <span class="why-text">{{ row.why }}</span>
+        <span v-if="$canRule" class="why-text">{{ row.why }}</span>
       </li>
     </ul>
 
     <!-- ≤5 只时的累计涨幅曲线：所有线共用一套纵轴并画出 0 轴，跨股票才可比 -->
     <div v-if="chartSeries.length" class="mm-chart">
-      <h4>累计涨幅对比 <span class="sub">持续向上=监管被无视 · 拐头=监管生效 · 跌破 0 轴=核按钮</span></h4>
+      <h4>累计涨幅对比 <span v-if="$canRule" class="sub">持续向上=监管被无视 · 拐头=监管生效 · 跌破 0 轴=核按钮</span></h4>
       <div class="mm-chart-body">
         <div class="mm-scale">
           <span :style="{ top: yOf(chartScale.max) + '%' }">{{ signedPct(chartScale.max) }}</span>

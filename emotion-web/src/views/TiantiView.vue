@@ -18,25 +18,31 @@
         </span>
       </div>
       <div v-show="scoreOpen">
-      <el-empty v-if="!boardDim" :description="'当日读数未取到，连板生态未评（不计入分母）'" :image-size="60" />
+      <el-empty v-if="!boardDim" :image-size="60"
+        :description="$canRule ? '当日读数未取到，连板生态未评（不计入分母）' : '当日读数未取到，连板生态未评'" />
       <template v-else>
-        <ol class="formula">
+        <!-- 四条公式原文：叶子阶梯、子分加权平均、四个口径修正系数、表尾三个闸门 -->
+        <ol class="formula" v-if="$canRule">
           <li>叶子得分（三层晋级率 / 溢价 / 大面家数、家数封板率、回封率、空间板 H）：今日读数命中阈值阶梯 → 0-100 分；按当日 H 本日不存在的层标 <b>N/A</b>（如 H&lt;5 时无高位 5板+ 层），不进分母，与"有此层但没采到数据（未评）"区分。</li>
           <li>结构子分＝Σ(层权重 × 层得分) ÷ Σ已评层权重；未评/N/A 叶子剔出分母，不按 0 计。</li>
           <li>口径修正：中位晋级昨日基数&lt;5 家→该叶 ×0.8；H&lt;5 空间未打开→晋级结构 ×0.8；大盘背离（大盘分&lt;40 或红盘率&lt;20%）→溢价结构 ×0.8；全局跌停≥20/≥10/≥5 家→大面结构 −35/−20/−8。</li>
           <li>维分＝Σ(子项权重 × 修正后子项分) ÷ Σ已评子项权重，再过表尾三个闸门（中位吹哨 ×0.8、大盘背离 ×0.85、龙头错位 ×0.9，可连乘）。</li>
         </ol>
-        <table class="score-table">
+        <!-- 八列 → 四列（项目 / 今日读数 / 全局背景 / 得分）。
+             权重、命中档（阈值→档分）、修正系数、加权贡献是规则，整列不渲染。
+             ⚠ 每个 <th> 都必须和下面三种行里对应的 <td> 用同一个谓词成对闸——
+             手写 <table> 列数不齐会渲染成锯齿，CSS 救不回来。 -->
+        <table class="score-table" :class="{ lite: !$canRule }">
           <thead>
             <tr>
               <th class="col-name">项目</th>
-              <th class="col-w">权重</th>
+              <th v-if="$canRule" class="col-w">权重</th>
               <th class="col-raw">今日读数</th>
               <th class="col-bg">全局背景</th>
-              <th class="col-band">读数 / 命中档（阈值 → 档分）</th>
-              <th class="col-fix">修正系数</th>
+              <th v-if="$canRule" class="col-band">读数 / 命中档（阈值 → 档分）</th>
+              <th v-if="$canRule" class="col-fix">修正系数</th>
               <th class="col-score">得分</th>
-              <th class="col-contrib">加权贡献</th>
+              <th v-if="$canRule" class="col-contrib">加权贡献</th>
             </tr>
           </thead>
           <tbody>
@@ -49,40 +55,42 @@
               </tr>
               <tr v-else-if="row.kind === 'group'" class="group-row">
                 <td class="cell-name">{{ row.label }}</td>
-                <td>×{{ fmtWeight(row.weight) }}</td>
+                <td v-if="$canRule">×{{ fmtWeight(row.weight) }}</td>
                 <td>—</td>
                 <td class="bg-cell">{{ row.bg || '—' }}</td>
-                <td class="band-cell">{{ row.note || '各层加权合成' }}</td>
-                <td class="fix-cell">{{ row.adjustment || '—' }}</td>
+                <td v-if="$canRule" class="band-cell">{{ row.note || '各层加权合成' }}</td>
+                <td v-if="$canRule" class="fix-cell">{{ row.adjustment || '—' }}</td>
                 <td><span :class="bandClass(row.score)">{{ scoreText(row.score) }}</span></td>
-                <td class="contrib">{{ contribText(row.weight, row.score) }}</td>
+                <td v-if="$canRule" class="contrib">{{ contribText(row.weight, row.score) }}</td>
               </tr>
               <tr v-else class="leaf-row" :class="{ solo: row.kind === 'solo', na: row.applicable === false }">
                 <td class="cell-name"><span class="indent" v-if="row.kind === 'leaf'">└</span>{{ row.label }}</td>
-                <td>×{{ fmtWeight(row.weight) }}</td>
+                <td v-if="$canRule">×{{ fmtWeight(row.weight) }}</td>
                 <td class="raw-cell">
                   <span v-if="row.applicable === false" class="na-tag">N/A</span>
                   <template v-else>{{ rawText(row.sourceKey, row.raw) }}</template>
                 </td>
                 <td class="bg-cell">{{ row.bg || '—' }}</td>
-                <td class="band-cell">
+                <!-- bandHit 形如 "1.15 [1,1.3] → 60"：一个串同时给出读数、算符、两个阈值和档分 -->
+                <td v-if="$canRule" class="band-cell">
                   <span v-if="row.applicable === false" class="na-text">本日无此层（按 H={{ metrics.max_height ?? '—' }}）</span>
                   <span v-else-if="row.bandHit">{{ row.bandHit }}</span>
                   <span v-else-if="row.note">{{ row.note }}</span>
                   <span v-else class="missing">—</span>
                 </td>
-                <td class="fix-cell">{{ row.adjustment || '—' }}</td>
+                <td v-if="$canRule" class="fix-cell">{{ row.adjustment || '—' }}</td>
                 <td>
                   <span v-if="row.applicable === false" class="na-tag">N/A</span>
                   <span v-else :class="bandClass(row.score)">{{ scoreText(row.score) }}</span>
                 </td>
-                <td class="contrib">{{ row.kind === 'solo' ? contribText(row.weight, row.score) : '' }}</td>
+                <td v-if="$canRule" class="contrib">{{ row.kind === 'solo' ? contribText(row.weight, row.score) : '' }}</td>
               </tr>
             </template>
           </tbody>
         </table>
-        <!-- 维分闸门：未触发也列出，触发的高亮并给出证据 -->
-        <table v-if="boardDim.gates?.length" class="gate-table">
+        <!-- 维分闸门：未触发也列出，触发的高亮并给出证据。
+             整张表就是阈值与系数（gateCondition 全是字面量），后端已把 gates 置空，这里再显式闸一次 -->
+        <table v-if="$canRule && boardDim.gates?.length" class="gate-table">
           <thead>
             <tr><th>维分闸门</th><th>触发条件</th><th>系数</th><th>状态 / 证据</th></tr>
           </thead>
@@ -100,12 +108,14 @@
             </tr>
           </tbody>
         </table>
-        <p class="score-foot">
+        <p v-if="$canRule" class="score-foot">
           维分＝Σ(子项权重 × 修正后子项分) ÷ Σ已评子项权重，再过上方闸门
           <template v-if="boardDim.note">；<b class="whistle-note">{{ boardDim.note }}</b></template>
         </p>
         <p class="high-handoff">
-          高位(5板+)只计"接力效率"低权重；其<b>抱团结构、异动监管、绕异动抱团、断板反包</b>详见
+          <template v-if="$canRule">高位(5板+)只计"接力效率"低权重；其</template>
+          <template v-else>高位(5板+)的</template>
+          <b>抱团结构、异动监管、绕异动抱团、断板反包</b>详见
           <router-link :to="`/higheco?date=${date}`" class="high-jump">高位生态 →</router-link>
         </p>
       </template>
@@ -149,7 +159,9 @@
     <section class="block" v-loading="loading">
       <div class="block-head">
         <h3>连板天梯</h3>
-        <span class="sub">高/中/低三张卡（分层口径同打分引擎）；卡内从高板到低板虚线分隔；空层=断档；灰色半透明=昨日该板个股今日晋级失败（含 1进2 的 2 板层）</span>
+        <!-- 「分层口径同打分引擎」与整条卡内图例都是规则侧说明。普通用户不靠它也能读：
+             每只晋级失败个股自己带一枚 FAIL_LABEL 标签（仍封停/炸板/跌停/未触板），解码是重复的 -->
+        <span v-if="$canRule" class="sub">高/中/低三张卡（分层口径同打分引擎）；卡内从高板到低板虚线分隔；空层=断档；灰色半透明=昨日该板个股今日晋级失败（含 1进2 的 2 板层）</span>
         <div class="leader-pill" :class="{ set: !!leader.code }">
           <span class="leader-label">总龙头</span>
           <template v-if="leader.code">
@@ -203,11 +215,11 @@
                   {{ r.sealForm }}
                 </span>
                 <el-tag v-if="r.oneWordKilling" size="small" type="danger" effect="dark" class="oneword-badge"
-                  :title="`一字断魂刀：今日+昨日连续锁死(首封≤93030且0炸板)，流通市值约 ${r.floatMv != null ? yiText(r.floatMv) : '-'}亿，换手 ${r.turnoverRate ?? '-'}%，封成比 ${r.sealRatio ?? '-'}`">
+                  :title="oneWordTip(r)">
                   一字断魂刀
                 </el-tag>
                 <el-tag v-if="r.highControl" size="small" type="danger" effect="dark" class="oneword-badge"
-                  :title="`高控庄票：连板≥2 且 换手<5% 且 一字锁死(首封≤93030且0炸板)，首板日流通市值 ${r.firstBoardFloatMv != null ? yiText(r.firstBoardFloatMv) : '-'}亿`">
+                  :title="highControlTip(r)">
                   高控庄票
                 </el-tag>
                 <span v-if="r.breakCount != null && r.breakCount > 0" class="chip-reseal"
@@ -265,22 +277,29 @@
     <section class="block signal-block">
       <div class="block-head">
         <h3>连板结构信号</h3>
-        <span class="sub">与五维打分引擎同一份判定（score-detail 现算）</span>
+        <span v-if="$canRule" class="sub">与五维打分引擎同一份判定（score-detail 现算）</span>
       </div>
 
-      <!-- 试错(T日首板)-兑现(T-1→T连板)背离：首板分−连板分 -->
+      <!-- 试错(T日首板)-兑现(T-1→T连板)背离：首板分−连板分。
+           标签原文后端按角色抹掉了（它连着「接力链将断裂」那半句机制解释），
+           所以这里只给超管插值——在前端按阈值重算一个等于把 30/15/−15 三条线又写回浏览器。
+           灯色（divergenceLevel）与背离度读数是状态和结果，两种角色都留。 -->
       <div v-if="ecologyDivergence != null" class="divergence-banner" :class="divergenceLevel">
-        🧭 {{ scoring.detail.ecologyDivergenceLabel }}
+        <template v-if="$canRule">🧭 {{ scoring.detail.ecologyDivergenceLabel }}</template>
+        <template v-else>🧭</template>
         <span class="divergence-num">试错-兑现背离度 {{ signedNum(ecologyDivergence) }}</span>
       </div>
 
-      <div v-if="whistle" class="whistle-banner">
+      <!-- 整句都是阈值（<15% / ≥3家）与系数（×0.8）；它的驱动位 signalFlags 后端也已抹掉，
+           这里显式闸一次，免得哪天放开了字段这盏灯带着判据一起亮回来 -->
+      <div v-if="$canRule && whistle" class="whistle-banner">
         <span class="whistle-dot"></span>
         🔴 中位吹哨：中位晋级率&lt;15% 或 中位大面≥3家，<b>连板生态本维 ×0.8</b>
       </div>
 
+      <!-- 强制退潮是状态，留；触发原因与「无视总分」那句应对口径是判据，只给超管 -->
       <div v-if="forcedEbb" class="ebb-banner">
-        ⛔ 强制退潮已触发：{{ forcedEbbReason || '见打分明细' }}（无视总分，按退潮应对）
+        ⛔ 强制退潮已触发<template v-if="$canRule">：{{ forcedEbbReason || '见打分明细' }}（无视总分，按退潮应对）</template>
       </div>
 
       <!-- 客观三读数透明条：只陈列引擎读数与吹哨线，不做颜色结论（结论只看上面的灯） -->
@@ -288,17 +307,17 @@
         <div class="readout">
           <span class="readout-label">中位晋级率 JR_中</span>
           <span class="readout-value">{{ pctText(midMetrics.jr_mid) }}</span>
-          <span class="readout-rule">吹哨线 &lt; 15%</span>
+          <span v-if="$canRule" class="readout-rule">吹哨线 &lt; 15%</span>
         </div>
         <div class="readout">
           <span class="readout-label">中位溢价 Prem_中</span>
           <span class="readout-value" :class="numClass(midMetrics.prem_mid)">{{ signedNum(midMetrics.prem_mid) }}%</span>
-          <span class="readout-rule">负=亏钱效应（不单触发吹哨）</span>
+          <span v-if="$canRule" class="readout-rule">负=亏钱效应（不单触发吹哨）</span>
         </div>
         <div class="readout">
           <span class="readout-label">中位大面 Big_中</span>
           <span class="readout-value">{{ midMetrics.big_mid == null ? '未评' : midMetrics.big_mid + ' 家' }}</span>
-          <span class="readout-rule">吹哨需 ≥ 3</span>
+          <span v-if="$canRule" class="readout-rule">吹哨需 ≥ 3</span>
         </div>
       </div>
       <p v-if="!detailReady" class="signal-empty">结构信号计算中（需当日及前一交易日涨停池）……</p>
@@ -312,6 +331,7 @@ import { useRoute } from 'vue-router'
 import { prdApi, leaderApi, recordApi } from '../api/modules'
 import { signed, fiveDimBandClassOf } from '../utils/scores'
 import { useTradingCalendar } from '../utils/tradingCalendar'
+import { canSeeRules } from '../utils/ruleVisibility'
 import { useScoringStore } from '../stores/scoring'
 import { useUserStore } from '../stores/user'
 import BreakDetailPanel from '../components/BreakDetailPanel.vue'
@@ -423,7 +443,9 @@ const dayPoint = computed(() => breakAt(date.value).row)
 const lineSubText = computed(() => {
   const p = dayPoint.value
   if (!p) return '曲线未覆盖该日'
-  return `追平 ${p.ceiling} 板线（定线票 ${p.lineStock ? p.lineStock.name : '—'}），另一只票追平、次日续板才算破壁`
+  // 「追平 N 板线（定线票 X）」是结果＋来源账，谁都能看；后半句是破壁判据本身，只给超管
+  const head = `追平 ${p.ceiling} 板线（定线票 ${p.lineStock ? p.lineStock.name : '—'}）`
+  return canSeeRules() ? `${head}，另一只票追平、次日续板才算破壁` : head
 })
 
 /** 卡上的「旧龙高度」：断板旧龙自己的板高 H；没有旧龙在计时时，站得住的那条破壁线就是参照 */
@@ -593,14 +615,20 @@ const divergenceLevel = computed(() => {
   return 'balanced'
 })
 
-/** 每行对应的全局背景读数（全市场语境，防止只在连板小圈子里自评）。 */
+/**
+ * 每行对应的全局背景读数（全市场语境，防止只在连板小圈子里自评）。
+ *
+ * 读数对所有人可见，但两处尾注是判据本身：「（<5 小样本）」点出了触发 ×0.8 的基数线，
+ * 「（≥20/≥10/≥5 外溢-35/-20/-8）」直接给出整条扣分阶梯——按角色截掉尾注、留读数。
+ */
 function bgText(subKey, sourceKey) {
   const m = metrics.value
+  const rule = canSeeRules()
   if (subKey === 'promo' && !sourceKey) {
     return m.max_height != null ? `最高板 H=${m.max_height}` : '—'
   }
   if (sourceKey === 'jr_mid') {
-    return m.jr_mid_base != null ? `昨基数 ${m.jr_mid_base} 家（<5 小样本）` : '—'
+    return m.jr_mid_base != null ? `昨基数 ${m.jr_mid_base} 家${rule ? '（<5 小样本）' : ''}` : '—'
   }
   if (subKey === 'premium' && !sourceKey) {
     const parts = []
@@ -609,7 +637,8 @@ function bgText(subKey, sourceKey) {
     return parts.length ? parts.join(' / ') : '—'
   }
   if (subKey === 'bigloss' && !sourceKey) {
-    return m.limit_down_count != null ? `全局跌停 ${m.limit_down_count} 家（≥20/≥10/≥5 外溢-35/-20/-8）` : '—'
+    return m.limit_down_count != null
+      ? `全局跌停 ${m.limit_down_count} 家${rule ? '（≥20/≥10/≥5 外溢-35/-20/-8）' : ''}` : '—'
   }
   if (subKey === 'broken_quality' && !sourceKey) {
     return m.limit_up_count != null ? `当日涨停 ${m.limit_up_count} 家` : '—'
@@ -659,7 +688,10 @@ const scoreRows = computed(() => {
         raw: sub.raw, bandHit: sub.bandHit, note: sub.note, score: sub.score, sourceKey: sub.sourceKey,
         applicable: sub.applicable, adjustment: sub.adjustment, bg: bgText(sub.key, sub.sourceKey) })
     }
-    if (sub.adjustment) {
+    // 修正行只有规则没有结果：它的全部内容是「⇡ X结构修正：×0.8」，修正系数列已按角色闸掉，
+    // 剩下的就是一句裸判据；而且它那条模板分支写死 colspan="5" ＋ 两个未闸的格子，
+    // 放出去会在四列表头下渲染成六个格子（手写 <table> 列数不齐就是锯齿）。
+    if (sub.adjustment && canSeeRules()) {
       rows.push({ kind: 'adjust', key: 'a-' + sub.key, text: `${sub.label}修正：${sub.adjustment}`,
         fix: sub.adjustment.match(/×\s*[\d.]+|−\s*\d+|-?\d+(?=\s*$)/)?.[0] || '', after: sub.score })
     }
@@ -753,6 +785,20 @@ function roleChipClass(role) {
 }
 function failTitle(f) {
   return `昨日 ${f.prevBoard} 板，今日${FAIL_LABEL[f.todayStatus] || '未触板'}`
+}
+
+/**
+ * 两颗风险标签的悬浮文案：标签本身是结论，谁都能看；文案里是判据原文
+ * （首封≤93030且0炸板、换手<5%、连板≥2），只给超管。普通用户返回空串，
+ * 走的是仓库里已有的 `:title="cond ? '…' : ''"` 那套（DimRawBlock / HighEcoView）。
+ */
+function oneWordTip(r) {
+  if (!canSeeRules()) return ''
+  return `一字断魂刀：今日+昨日连续锁死(首封≤93030且0炸板)，流通市值约 ${r.floatMv != null ? yiText(r.floatMv) : '-'}亿，换手 ${r.turnoverRate ?? '-'}%，封成比 ${r.sealRatio ?? '-'}`
+}
+function highControlTip(r) {
+  if (!canSeeRules()) return ''
+  return `高控庄票：连板≥2 且 换手<5% 且 一字锁死(首封≤93030且0炸板)，首板日流通市值 ${r.firstBoardFloatMv != null ? yiText(r.firstBoardFloatMv) : '-'}亿`
 }
 
 /** 补 T00:00:00 按本地时区解析，否则 new Date('2026-09-04') 走 UTC 会少一天。 */
@@ -880,6 +926,12 @@ watch(date, load)
 .col-fix { width: 18%; }
 .col-score { width: 64px; text-align: right; }
 .col-contrib { width: 72px; }
+/* 上面那套预算是照八列写的。普通用户只剩四列（项目/今日读数/全局背景/得分），
+   table-layout:auto 会把腾出来的宽度乱分——项目列涨爆、全局背景被挤成竖条。
+   不能删原规则（超管还在用），只在 .lite 下重给一份。 */
+.score-table.lite .col-name { width: 34%; }
+.score-table.lite .col-raw { width: 96px; }
+.score-table.lite .col-bg { width: 40%; }
 .score-table td.col-score { text-align: right; }
 .group-row td { background: rgba(251,191,36,.05); font-weight: 600; color: #e1e8ed; }
 .leaf-row .cell-name { color: #a8b7c4; font-weight: 400; }

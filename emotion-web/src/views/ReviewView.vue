@@ -2,7 +2,7 @@
   <div class="review-page">
     <!-- ============ 顶栏：日期 + 一键拉取 + 导出 + 就绪状态 ============ -->
     <div class="page-header">
-      <h2>每日复盘<el-tooltip placement="top" effect="dark">
+      <h2>每日复盘<el-tooltip v-if="$canRule" placement="top" effect="dark">
           <template #content>
             <div style="max-width: 340px; line-height: 1.6;">
               按下「一键拉取行情」后按序执行：<br>
@@ -92,12 +92,16 @@
           <el-tag v-if="score.forcedEbb === 1" size="small" type="danger" effect="dark">强制退潮</el-tag>
           <span v-if="score.scoredDims != null" class="muted">已评 {{ score.scoredDims }}/5 维</span>
         </div>
-        <p v-if="score.signalFlags" class="signal-line">{{ score.signalFlags }}</p>
-        <p v-if="score.forcedEbbReason" class="ebb-reason">⛔ {{ score.forcedEbbReason }}</p>
+        <!-- 强制退潮那颗 tag 是状态，留；这两行是判据原文与信号解释，收进超管 -->
+        <p v-if="$canRule && score.signalFlags" class="signal-line">{{ score.signalFlags }}</p>
+        <p v-if="$canRule && score.forcedEbbReason" class="ebb-reason">⛔ {{ score.forcedEbbReason }}</p>
       </template>
       <div v-else class="empty-note">
-        该日还没有复盘记录：先「一键拉取行情」落库原始数据，评分在下方「保存复盘」后自动计算
-        （职责分离——拉取只落原始数据，不洗人工维评分）。
+        <template v-if="$canRule">
+          该日还没有复盘记录：先「一键拉取行情」落库原始数据，评分在下方「保存复盘」后自动计算
+          （职责分离——拉取只落原始数据，不洗人工维评分）。
+        </template>
+        <template v-else>该日还没有复盘记录。</template>
       </div>
     </section>
 
@@ -273,7 +277,7 @@
       <template v-if="d5high">
         <div class="d5-subtitle">阵眼
           <span v-if="d5high.anchor && d5high.anchor.configured">（在位 {{ (d5high.anchor.items || []).length }} 个）</span>
-          <span v-else>（未配置 → 当子项剔出分母）</span>
+          <span v-else>（未配置<template v-if="$canRule"> → 当子项剔出分母</template>）</span>
         </div>
         <div v-if="(d5high.anchor && d5high.anchor.items || []).length" class="anchor-grid">
           <div v-for="it in d5high.anchor.items" :key="it.id" class="anchor-card">

@@ -2,6 +2,7 @@ package com.emotion.controller;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -19,6 +20,7 @@ import com.emotion.service.MainlineService;
 import com.emotion.service.PrdMetricsService;
 import com.emotion.service.ShoubanService;
 import com.emotion.service.TiantiService;
+import com.emotion.util.RuleMask;
 import com.emotion.vo.ApiResponse;
 import com.emotion.vo.BreakDetailVO;
 import com.emotion.vo.MainlineVO;
@@ -72,10 +74,25 @@ public class PrdController {
         return ApiResponse.ok(tiantiService.heightRange(parse(start), parse(end), ladder));
     }
 
-    /** 破壁详情：曲线上 ☆（试探）/★（破壁成功）那天的助攻、盘口、情绪闸门与次日结算。 */
+    /**
+     * 破壁详情：曲线上 ☆（试探）/★（破壁成功）那天的助攻、盘口、情绪闸门与次日结算。
+     *
+     * <p>抹不闸：读数、线的来路、助攻家数与「续板成功/未续板」这个结论都是结果，谁都能看；
+     * 收进超管的是三处判据原文——{@code gateWarnings}（形如 {@code 炸板率 62% > 50%}）、
+     * {@code scoreImpact}（立成节点会改写多少分）、{@code outcome.reason}（为什么算成功）。
+     */
     @GetMapping("/tianti/break-detail")
     public ApiResponse<BreakDetailVO> breakDetail(@RequestParam(required = false) String date) {
-        return ApiResponse.ok(breakDetailService.vo(parse(date)));
+        BreakDetailVO vo = breakDetailService.vo(parse(date));
+        RuleMask.unlessSuperAdmin(vo, v -> {
+            v.setGateWarnings(new ArrayList<>());
+            v.setScoreImpact(null);
+            BreakDetailVO.Outcome o = v.getOutcome();
+            if (o != null) {
+                o.setReason(null);
+            }
+        });
+        return ApiResponse.ok(vo);
     }
 
     /** 首板池：封住/炸板两表 + 1 进 2 晋级统计（PRD P3）。 */

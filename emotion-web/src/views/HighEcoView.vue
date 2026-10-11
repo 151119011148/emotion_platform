@@ -18,7 +18,8 @@
       <el-tag v-if="vo.level" :type="levelTag(vo.level)" effect="dark" size="large">{{ vo.level }}</el-tag>
       <div class="score-meta">
         <span>当日最高连板 H = {{ vo.h }} 板</span>
-        <span v-if="vo.coalition" class="thin">高位阈值 ≥ {{ vo.coalition.highThreshold }} 板</span>
+        <!-- 高位阈值是「哪些票算高位」那条线，整个 ② 区块的家数都按它切，只给超管 -->
+        <span v-if="$canRule && vo.coalition" class="thin">高位阈值 ≥ {{ vo.coalition.highThreshold }} 板</span>
       </div>
     </section>
 
@@ -28,19 +29,21 @@
     <el-empty v-if="!loading && !vo" description="当日无高位生态数据：明细未回补，或取数链路异常" />
 
     <template v-if="vo">
-      <el-alert v-if="vo.notes?.length" type="warning" :closable="false" show-icon class="notes-bar"
+      <!-- notes 是引擎的未评口径清单，后端已按角色抹掉，这里再显式闸一次 -->
+      <el-alert v-if="$canRule && vo.notes?.length" type="warning" :closable="false" show-icon class="notes-bar"
         :title="'未评口径提醒：' + vo.notes.join('；')" />
 
-      <!-- 强制风控红条：引擎 force flag 触发（死亡结构/监管龙头断板）时的顶级告警 -->
+      <!-- 强制风控红条：引擎 force flag 触发（死亡结构/监管龙头断板）时的顶级告警。
+           灯与封顶后的总分是结果，留；reason 是判据原文，只给超管 -->
       <el-alert v-if="vo.forceRisk?.triggered" type="error" :closable="false" show-icon class="force-bar">
         <template #title><strong>强制风控</strong> · D5 总分 {{ vo.forceRisk.capScore == null ? '—' : vo.forceRisk.capScore }}（封顶）</template>
-        <p class="force-body">{{ vo.forceRisk.reason }}</p>
+        <p v-if="$canRule" class="force-body">{{ vo.forceRisk.reason }}</p>
       </el-alert>
 
       <!-- ① 阵眼个体（点） -->
       <section class="block" v-loading="loading">
         <div class="block-head">
-          <h3>① 阵眼个体 <span class="sub">点 · 人工配置 · 权重 35%</span></h3>
+          <h3>① 阵眼个体 <span class="sub">点 · 人工配置{{ $canRule ? ' · 权重 35%' : '' }}</span></h3>
           <div class="head-right">
             <span v-if="vo.anchor?.score != null" class="sub-score">得分 {{ vo.anchor.score }}</span>
             <el-button v-if="userStore.isSuperAdmin" type="primary" size="small" @click="openAnchorAdd">+ 新增阵眼</el-button>
@@ -78,14 +81,17 @@
               监管 {{ kindLabel(a.lifecycle.monitor) }}
             </span>
           </div>
-          <div class="anchor-scores">
+          <!-- 整行就是权重公式（40/25/20/15 → 合成分）＋四个分项分，后端已把分项分抹掉，
+               不闸会渲染成「— — — — → 72」。阵眼的合成分在区块头「得分 X」里已经有了，整行藏掉不丢结果 -->
+          <div v-if="$canRule" class="anchor-scores">
             <span>行为 {{ nz(a.actionScore) }}</span>
             <span>高度 {{ nz(a.heightScore) }}</span>
             <span>封板 {{ nz(a.sealScore) }}</span>
             <span>主线一致 {{ nz(a.consistScore) }}</span>
             <span class="score-total">40/25/20/15 → {{ a.score == null ? '未评' : a.score }}</span>
           </div>
-          <p v-if="a.consistWarn" class="anchor-warn">⚠️ {{ a.consistWarn }}（一致性 60）</p>
+          <!-- 「（一致性 60）」是写死在模板里的分项分，后端抹字段抹不到它 -->
+          <p v-if="a.consistWarn" class="anchor-warn">⚠️ {{ a.consistWarn }}{{ $canRule ? '（一致性 60）' : '' }}</p>
           <div class="anchor-ops" v-if="userStore.isSuperAdmin">
             <el-button link type="primary" size="small" @click="openAnchorEdit(a)">编辑</el-button>
             <el-button link type="danger" size="small" @click="removeAnchor(a)">删除</el-button>
@@ -96,17 +102,19 @@
       <!-- ② 抱团与资金（面） -->
       <section class="block" v-if="vo.coalition" v-loading="loading">
         <div class="block-head">
-          <h3>② 抱团与资金 <span class="sub">面 · 结构 60% + 强度 40% · 权重 30%</span></h3>
+          <h3>② 抱团与资金 <span class="sub">面{{ $canRule ? ' · 结构 60% + 强度 40% · 权重 30%' : '' }}</span></h3>
           <div class="head-right">
             <span v-if="vo.coalition.score != null" class="sub-score">得分 {{ vo.coalition.score }}</span>
             <el-tag v-if="vo.coalition.adjust" type="danger" size="small" effect="dark" class="guard-tag">{{ vo.coalition.adjust }}</el-tag>
           </div>
         </div>
+        <!-- 四个档位名与家数都是结果，留；括号里那条板数线才是规则
+             （高位那条还是活的 highThreshold，中/低/空间是写死的 3-4/2/==H） -->
         <div class="stat-grid">
-          <div class="stat"><span class="stat-label">高位(≥{{ vo.coalition.highThreshold }}板)</span><span class="stat-value">{{ vo.coalition.highCount }}</span></div>
-          <div class="stat"><span class="stat-label">中位(3-4板)</span><span class="stat-value">{{ vo.coalition.midCount }}</span></div>
-          <div class="stat"><span class="stat-label">低位(2板)</span><span class="stat-value">{{ vo.coalition.lowCount }}</span></div>
-          <div class="stat"><span class="stat-label">空间板(==H)</span><span class="stat-value">{{ vo.coalition.topCount }}</span></div>
+          <div class="stat"><span class="stat-label">高位{{ $canRule ? `(≥${vo.coalition.highThreshold}板)` : '' }}</span><span class="stat-value">{{ vo.coalition.highCount }}</span></div>
+          <div class="stat"><span class="stat-label">中位{{ $canRule ? '(3-4板)' : '' }}</span><span class="stat-value">{{ vo.coalition.midCount }}</span></div>
+          <div class="stat"><span class="stat-label">低位{{ $canRule ? '(2板)' : '' }}</span><span class="stat-value">{{ vo.coalition.lowCount }}</span></div>
+          <div class="stat"><span class="stat-label">空间板{{ $canRule ? '(==H)' : '' }}</span><span class="stat-value">{{ vo.coalition.topCount }}</span></div>
           <div class="stat"><span class="stat-label">梯队</span><span class="stat-value" :class="vo.coalition.hasGap ? 'down' : 'up'">{{ vo.coalition.hasGap ? '断层' : '无断层' }}</span></div>
           <div class="stat"><span class="stat-label">高位封单占比</span><span class="stat-value">{{ vo.coalition.highSealRatio == null ? '—' : pct(vo.coalition.highSealRatio) }}</span></div>
           <div class="stat"><span class="stat-label">高位溢价</span><span class="stat-value" :class="pctClass(vo.coalition.highPrem)">{{ vo.coalition.highPrem == null ? '—' : signed(vo.coalition.highPrem) + '%' }}</span></div>
@@ -130,7 +138,8 @@
             <span class="tier-num">{{ vo.coalition.lowCount }}</span>
           </div>
         </div>
-        <div v-if="vo.coalition.structureScore != null || vo.coalition.strengthScore != null" class="anchor-scores">
+        <!-- 与阵眼卡同理：整行是「结构/强度 + 60/40 → 合成分」，合成分区块头已经有了 -->
+        <div v-if="$canRule && (vo.coalition.structureScore != null || vo.coalition.strengthScore != null)" class="anchor-scores">
           <span>结构 {{ nz(vo.coalition.structureScore) }}</span>
           <span>强度 {{ nz(vo.coalition.strengthScore) }}</span>
           <span class="score-total">60/40 → {{ vo.coalition.score == null ? '未评' : vo.coalition.score }}</span>
@@ -140,12 +149,12 @@
       <!-- ③ 监管压制 + ④ 监管反馈（力 + 市场反应） -->
       <section class="block" v-if="vo.pressure || vo.feedback" v-loading="loading">
         <div class="block-head">
-          <h3>③ 监管压制 + ④ 监管反馈 <span class="sub">力 · 20% + 15%</span></h3>
+          <h3>③ 监管压制 + ④ 监管反馈 <span class="sub">力{{ $canRule ? ' · 20% + 15%' : '' }}</span></h3>
         </div>
         <div class="two-col">
           <div class="half-block">
             <div class="half-head">
-              <h4>③ 监管压制 <span class="sub">家数40 / 高位占比35 / 扩散25</span></h4>
+              <h4>③ 监管压制 <span v-if="$canRule" class="sub">家数40 / 高位占比35 / 扩散25</span></h4>
               <div class="head-right">
                 <span v-if="vo.pressure?.score != null" class="sub-score">得分 {{ vo.pressure.score }}</span>
                 <el-tag v-if="vo.pressure?.adjust" type="danger" size="small" effect="dark" class="guard-tag">{{ vo.pressure.adjust }}</el-tag>
@@ -192,7 +201,7 @@
           <div v-show="monitorOpen">
             <div class="sp-toolbar">
               <el-checkbox v-if="vo.coalition?.highThreshold != null" v-model="monitorHighOnly" size="small">
-                只看高位（≥{{ vo.coalition.highThreshold }} 板）
+                只看高位{{ $canRule ? `（≥${vo.coalition.highThreshold} 板）` : '' }}
               </el-checkbox>
               <span class="sub">当前列出 {{ monitorRows.length }} / {{ monitored.length }} 家</span>
             </div>
@@ -236,14 +245,16 @@
       <!-- 监管池 · 全生命周期轨迹 -->
       <section class="block">
         <div class="block-head">
-          <h3>监管池 · 全生命周期 <span class="sub">D+1→出监管颜色编码轨迹；进监管次日最见监管无效/生效</span></h3>
+          <!-- 这句是热力图的颜色编码说明，图例本身已在 MonitorHeatmap 里按角色闸掉，
+               留着它等于从后门把同一份解释放回来 -->
+          <h3>监管池 · 全生命周期 <span v-if="$canRule" class="sub">D+1→出监管颜色编码轨迹；进监管次日最见监管无效/生效</span></h3>
         </div>
         <MonitorHeatmap :date="date" />
       </section>
 
       <!-- 交叉信号 -->
       <section class="block">
-        <div class="block-head"><h3>交叉信号 <span class="sub">不计入分数，直接触发风控标签与操作指令</span></h3></div>
+        <div class="block-head"><h3>交叉信号 <span v-if="$canRule" class="sub">不计入分数，直接触发风控标签与操作指令</span></h3></div>
         <el-empty v-if="!vo.signals?.length" description="今日无交叉信号" :image-size="60" />
         <ul v-else class="rotation-list">
           <li v-for="(s, i) in vo.signals" :key="i">
@@ -253,8 +264,10 @@
         </ul>
       </section>
 
-      <!-- 子项明细（⑤），默认折叠 -->
-      <section class="block score-block" :class="{ 'score-collapsed': !detailOpen }">
+      <!-- 子项明细（⑤），默认折叠。整块的存在意义就是那四个权重（35/30/20/15）与归一口径，
+           分项分后端也已抹掉——不整块闸会剩一个印四遍「未评」的空壳。
+           四个维分在各自区块头的「得分 X」里都还在。 -->
+      <section v-if="$canRule" class="block score-block" :class="{ 'score-collapsed': !detailOpen }">
         <div class="block-head score-head" @click="detailOpen = !detailOpen">
           <h3>子项明细 <span class="fold-tag">{{ detailOpen ? '收起 ▲' : '展开 ▼' }}</span></h3>
           <span class="sub">权重 35/30/20/15，未评子项剔除后按已评权重归一</span>

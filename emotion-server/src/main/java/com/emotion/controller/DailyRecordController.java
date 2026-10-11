@@ -11,7 +11,9 @@ import com.emotion.service.CycleService;
 import com.emotion.service.ReviewExportService;
 import com.emotion.service.ReviewImportService;
 import com.emotion.service.ReviewLedgerService;
+import com.emotion.util.AuthContext;
 import com.emotion.util.CycleStageMachine;
+import com.emotion.util.RuleMask;
 import com.emotion.util.TemperatureCalculator;
 import com.emotion.vo.ApiResponse;
 import com.emotion.vo.ScoreDetailVO;
@@ -110,8 +112,14 @@ public class DailyRecordController {
         return ApiResponse.ok(dailyRecordService.getLatest(days));
     }
 
+    /**
+     * 操作建议：阶段 → 基调／仓位／动作／警示的映射，就是策略本身，只对超管开放。
+     * 缺维那一支的文案还直接把 {@code MIN_DIMS_FOR_STAGE} 这个阈值印了出来。
+     * 前端 Dashboard 对普通用户根本不发这个请求（见 {@code loadAdvice}），所以这里抛业务异常不会弹红条。
+     */
     @GetMapping("/advice")
     public ApiResponse<StageAdviceVO> getAdvice() {
+        AuthContext.requireSuperAdmin("查看操作建议");
         DailyRecord today = dailyRecordService.getToday();
         if (today == null || isBlank(today.getStage())) {
             // 当日没复盘时回落到最近一条，和仪表盘头部卡片保持同一口径
@@ -194,10 +202,23 @@ public class DailyRecordController {
     /**
      * Stage 9 只读端点：某天 5 维完整 eval 树 + 结构信号 + 原始读数快照。走引擎现算、不落库；
      * 改一 sub 权重或一 ladder 阈值 → 刷新即反映。Dashboard 卡片 tooltip 唯一数据源。
+     *
+     * <p>普通用户拿到的是抹掉规则的那一版：分数、读数、维名、适用性、总分、metrics 都在，
+     * 权重／命中档／修正系数／判据原文／闸门／结构信号不在。
+     * 抹在 controller 而不是 service——{@code scoreDetail} 也被 recalc 等非 HTTP 路径间接依赖，
+     * 那些线程上没有 SecurityContext，判据会静默变成"一律抹"。
      */
     @GetMapping("/score-detail")
     public ApiResponse<ScoreDetailVO> scoreDetail(@RequestParam String date) {
-        return ApiResponse.ok(dailyRecordService.scoreDetail(parse(date)));
+        ScoreDetailVO vo = dailyRecordService.scoreDetail(parse(date));
+        RuleMask.stripEvalTree(vo.getDims());
+        return ApiResponse.ok(RuleMask.unlessSuperAdmin(vo, v -> {
+            v.setModelKey(null);
+            v.setSignalFlags(new ArrayList<>());
+            v.setForcedEbbReason(null);
+            v.setEcologyDivergenceLabel(null);
+            v.setNotes(new ArrayList<>());
+        }));
     }
 
     /**

@@ -83,20 +83,24 @@
     <!-- 五维生态卡：曲线下方整排排布（维度序 1..5：大盘/日内核心/连板/首板/高位） -->
     <IndicatorCards :record="headRecord" />
 
-    <div class="bottom-row">
+    <div class="bottom-row" :class="{ solo: !$canRule }">
       <StageLocator :stage="currentStage" :direction="headRecord?.stageDirection" :record="headRecord" />
-      <StageAdvice :advice="advice" :record="headRecord" />
+      <!-- 操作建议整块是「阶段 → 基调/仓位/动作/警示」的映射，就是策略本身，只对超管显示。
+           闸在这里而不是组件根元素：StageAdvice 内部还有一条 v-else 的「暂无数据，请先录入今日指标」，
+           只闸 v-if 那一支会让普通用户读到一句假的空状态（2651291 就是这颗配对之外的分支漏了）。 -->
+      <StageAdvice v-if="$canRule" :advice="advice" :record="headRecord" />
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { recordApi } from '../api/modules'
 import { useScoringStore } from '../stores/scoring'
 import { stageColorOf, seqOnly, bandOfRecord } from '../utils/stages'
 import { useTemperatureBands } from '../utils/temperatureBands'
+import { canSeeRules } from '../utils/ruleVisibility'
 import TemperatureChart from '../components/TemperatureChart.vue'
 import IndicatorCards from '../components/IndicatorCards.vue'
 import StageLocator from '../components/StageLocator.vue'
@@ -232,11 +236,20 @@ async function loadDay() {
 }
 
 async function loadAdvice() {
+  // 操作建议整块只对超管渲染（见模板），普通用户连请求都不发：省一次往返，
+  // 也免得后端那道 requireSuperAdmin 换回一条业务异常——try/catch 吞得掉异常，
+  // 吞不掉 api/index.js 拦截器弹的那条红。
+  if (!canSeeRules()) return
   try {
     const res = await recordApi.getAdvice()
     advice.value = res.data
   } catch (e) { /* ignore */ }
 }
+
+/* 角色可能在挂载之后才翻转：子组件的 onMounted 早于 Layout 的 loadMe()，
+   刚被提升的超管那一刻读到的还是 localStorage 里的 USER，上面那次 loadAdvice 直接跳过了。
+   不补这一趟，StageAdvice 渲染出来就是那句假的「暂无数据，请先录入今日指标」。 */
+watch(canSeeRules, (on) => { if (on && !advice.value) loadAdvice() })
 
 /* 外溢①：🔔 待裁决持仓——最近未执行决策列表（最多 5 条），早上第一眼看到 */
 const pendingList = ref([])
@@ -456,6 +469,11 @@ onMounted(() => {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 20px;
   margin-top: 20px;
+}
+
+/* 操作建议对普通用户整块不渲染，网格跟着收成单列，否则右半边是一条空槽 */
+.bottom-row.solo {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .up { color: #ef4444; }

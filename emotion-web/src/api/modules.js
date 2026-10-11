@@ -282,7 +282,9 @@ export const anchorsApi = {
 /**
  * 打分配置（模型 / 维度 / 计算规则）。后端三张表平台全局共享、不绑用户。
  *
- * <p>{@code effective} 是当前生效模型的维度/权重视图，卡片与复盘页的维序、权重、名称都从这里来；
+ * <p>{@code effective} 是当前生效模型的维度视图：维序与维度名对每个登录用户都给，
+ * 权重与规则阶梯由服务端 {@code RuleMask} 按角色抹掉（非超管拿到 null / 空数组），
+ * 所以卡片上的权重只有超管读得到——utils/scores 里的常量是兜底，不是第二真源。
  * 加了 skipErrorToast——后端读不到配置时前端要静默退回 utils/scores 的本地兜底，而不是每次加载弹红条。
  */
 export const scoringApi = {

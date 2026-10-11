@@ -14,7 +14,10 @@
         <el-tag v-if="s.repairStatusLabel" size="small" :type="repairType(s.repairStatus)" effect="plain">
           续板 {{ s.repairStatusLabel }}
         </el-tag>
-        <el-tag v-if="!s.ready" type="info" size="small">判据不齐，不能采纳</el-tag>
+        <!-- 「不齐」这个状态是结论，留；"判据"两个字是规则口径，而"不能采纳"对没有采纳按钮的人是噪音 -->
+        <el-tag v-if="!s.ready" type="info" size="small">
+          {{ $canRule ? '判据不齐，不能采纳' : '数据不齐' }}
+        </el-tag>
         <span class="same" v-if="sameAsStored">与库里那条一字不差</span>
       </template>
       <span class="spacer"></span>
@@ -25,16 +28,17 @@
       </el-button>
     </div>
 
-    <p class="reason" v-if="s">{{ s.reason }}</p>
+    <!-- 建议/类型/候选/续板四个标签是结论，留；下面这三段是"为什么给这个结论"，按角色给 -->
+    <p class="reason" v-if="$canRule && s">{{ s.reason }}</p>
 
-    <ul class="list missing" v-if="s && s.missing.length">
+    <ul class="list missing" v-if="$canRule && s && s.missing && s.missing.length">
       <li v-for="(m, i) in s.missing" :key="'m' + i">{{ m }}</li>
     </ul>
-    <ul class="list warn" v-if="s && s.warnings.length">
+    <ul class="list warn" v-if="$canRule && s && s.warnings && s.warnings.length">
       <li v-for="(w, i) in s.warnings" :key="'w' + i">{{ w }}</li>
     </ul>
 
-    <p class="anchor" v-if="s && s.anchor && s.anchor.name">
+    <p class="anchor" v-if="$canRule && s && s.anchor && s.anchor.name">
       锚定龙头：你写的「{{ s.anchor.input || '—' }}」→ 匹配到
       {{ s.anchor.name }}（{{ s.anchor.code }}）{{ s.anchor.industry ? ' · ' + s.anchor.industry : '' }}，
       最后一次涨停 {{ s.anchor.lastLimitDate || '—' }}
@@ -43,9 +47,10 @@
     </p>
 
     <template v-if="s && s.promotion">
-      <p class="basis" v-if="s.heavyBasis">放量依据：{{ s.heavyBasis }}</p>
-      <p class="basis">{{ s.promotion.basis }}</p>
-      <p class="basis">判据：{{ s.promotion.threshold }}</p>
+      <!-- 三段依据是晋级判据的原文与阈值；下面那张逐只表是已经发生的结果，两拨人分开 -->
+      <p class="basis" v-if="$canRule && s.heavyBasis">放量依据：{{ s.heavyBasis }}</p>
+      <p class="basis" v-if="$canRule">{{ s.promotion.basis }}</p>
+      <p class="basis" v-if="$canRule">判据：{{ s.promotion.threshold }}</p>
       <el-table v-if="s.promotion.items && s.promotion.items.length" :data="s.promotion.items"
         size="small" max-height="260" class="cands">
         <el-table-column prop="name" label="名称" width="110" />
@@ -67,7 +72,9 @@
       </el-table>
     </template>
 
-    <el-collapse v-if="s && s.filter && s.filter.length" class="fold">
+    <!-- 这张折叠表逐格印的是判据原文＋阈值＋取数口径（如「跌停家数（<10 通过）」）；
+         过与不过的结论节点列表那一行已经给了所有人，这里整块收进超管 -->
+    <el-collapse v-if="$canRule && s && s.filter && s.filter.length" class="fold">
       <el-collapse-item :title="`前置过滤器（平台复算） ${filterSummary}`" name="filter">
         <div class="filter" v-for="f in s.filter" :key="f.key">
           <span class="f-label" :class="passClass(f.pass)">{{ f.label }}</span>
@@ -80,7 +87,7 @@
     <p class="note" v-if="s && s.nodeStock">
       节点票 {{ s.nodeStock }}{{ s.nodeStockMaxBoard ? `（最高 ${s.nodeStockMaxBoard} 板）` : '' }}
     </p>
-    <p class="hint">
+    <p class="hint" v-if="$canRule">
       采纳只写这一条节点自己算出来的那几格——高低切是状态与晋级那一组，破壁两行是状态与续板判定那一组，
       两边都不动你填的备注；点了「有效/失效」之后这条会从「当前追踪」进「历史节点」。
     </p>

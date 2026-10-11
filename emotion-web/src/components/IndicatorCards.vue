@@ -10,7 +10,7 @@
           <div class="tip">
             <div class="tip-head">
               <span class="tip-title">第 {{ c.dimNo }} 维 · {{ c.label }}</span>
-              <span class="tip-weight">×{{ fmt(c.weight) }}</span>
+              <span v-if="$canRule" class="tip-weight">×{{ fmt(c.weight) }}</span>
             </div>
             <div class="tip-score" :class="c.bandClass">
               {{ c.score == null ? '未评（不计入加权）' : c.scoreText + ' 分 · ' + c.bandName }}
@@ -22,7 +22,7 @@
               <div v-for="(s, i) in c.subs" :key="i" class="tip-row">
                 <div class="tip-row-main">
                   <span class="tip-sub-label">{{ s.label }}</span>
-                  <span class="tip-sub-weight">×{{ fmt(s.weight) }}</span>
+                  <span v-if="$canRule" class="tip-sub-weight">×{{ fmt(s.weight) }}</span>
                   <span class="tip-sub-score" :class="{ unscored: s.score == null }">
                     {{ s.score == null ? '未评' : fmt(s.score) }}
                   </span>
@@ -54,7 +54,7 @@
         <div class="card-inner hoverable" role="button" :aria-label="`查看${c.label}详情`" @click="goDim(c.key)">
           <div class="card-head">
             <span class="card-label">{{ c.dimNo }} · {{ c.label }}</span>
-            <span class="card-weight">×{{ fmt(c.weight) }}</span>
+            <span v-if="$canRule" class="card-weight">×{{ fmt(c.weight) }}</span>
           </div>
           <div class="card-value" :class="{ unscored: c.score == null }">
             {{ c.score == null ? '未评' : fmt(c.score) }}
@@ -75,6 +75,7 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { fiveDimBandOf, fiveDimBandClassOf } from '../utils/scores'
 import { useScoringStore } from '../stores/scoring'
+import { canSeeRules } from '../utils/ruleVisibility'
 
 const props = defineProps({
   /** 当日 t_daily_record（含 score_market/score_theme_main/…、forced_ebb、signal_flags） */
@@ -127,11 +128,11 @@ function fmt(v) {
   return (Math.round(n * 100) / 100).toString()
 }
 
-/** 一 sub 的 tooltip 行：叶 → raw + 命中档；复合 → 层清单。 */
-function flattenSub(s) {
+/** 一 sub 的 tooltip 行：叶 → raw + 命中档；复合 → 层清单。canRule=false 时只留读数与分数。 */
+function flattenSub(s, canRule) {
   const row = {
     label: s.label || s.key,
-    weight: s.weight,
+    weight: canRule ? s.weight : null,
     score: s.score,
     detail: '',
     layers: []
@@ -143,16 +144,19 @@ function flattenSub(s) {
       label: k.label || k.key,
       score: k.score,
       raw: k.raw,
-      bandHit: k.bandHit
+      // bandHit 形如 "1.15 [1,1.3] → 60"：一个串同时给出算符、两个阈值和档分
+      bandHit: canRule ? k.bandHit : null
     }))
-    if (s.scoringKind === 'WEIGHTED_SUM') row.detail = '加权子分（非四层）'
+    if (canRule && s.scoringKind === 'WEIGHTED_SUM') row.detail = '加权子分（非四层）'
   } else {
-    // 叶：BAND_LADDER / MANUAL / STRATEGY
+    // 叶：BAND_LADDER / MANUAL / STRATEGY。raw 是读数（结果，留），其余是口径（规则）
     const parts = []
     if (s.raw != null) parts.push(`raw=${fmt(s.raw)}`)
-    if (s.bandHit) parts.push(s.bandHit)
-    if (s.scoringKind === 'STRATEGY') parts.push('策略计算')
-    if (s.scoringKind === 'MANUAL' && s.score == null) parts.push('人工未评')
+    if (canRule) {
+      if (s.bandHit) parts.push(s.bandHit)
+      if (s.scoringKind === 'STRATEGY') parts.push('策略计算')
+      if (s.scoringKind === 'MANUAL' && s.score == null) parts.push('人工未评')
+    }
     row.detail = parts.join(' · ')
   }
   return row
@@ -160,6 +164,7 @@ function flattenSub(s) {
 
 const cards = computed(() => {
   const r = props.record
+  const canRule = canSeeRules()
   const dims = scoring.detail?.dims
   const dimMap = {}
   if (Array.isArray(dims)) for (const d of dims) dimMap[d.key] = d
@@ -173,21 +178,24 @@ const cards = computed(() => {
       : (r ? r[FIVE_TO_RECORD[key]] : null)
     const band = fiveDimBandOf(rawScore)
     const subs = evalNode && Array.isArray(evalNode.children)
-      ? evalNode.children.map(flattenSub) : []
+      ? evalNode.children.map((s) => flattenSub(s, canRule)) : []
     // 只把和这一维相关的 note 挂上（简化：全量挂，反正 tooltip 空间够）
     return {
       key,
       dimNo: evalNode?.dimNo ?? meta.dimNo ?? meta.dim,
       label: evalNode?.label ?? meta.label ?? key,
-      weight: evalNode?.weight ?? meta.weight,
+      // 兜底也必须闸：后端把 NodeEval.weight 抹成 null 之后，?? meta.weight 正好落进
+      // bundle 里 utils/scores.js 的常量，等于把权重从客户端镜像印出来。
+      weight: canRule ? (evalNode?.weight ?? meta.weight) : null,
       score: rawScore,
       scoreText: rawScore == null ? '未评' : fmt(rawScore),
       bandName: band || '—',
       bandClass: fiveDimBandClassOf(rawScore),
       barWidth: rawScore == null ? '0%' : `${Math.max(0, Math.min(100, Number(rawScore)))}%`,
-      note: evalNode?.note || (fromRecord ? 'score-detail 未取到，显示的是落库的维分' : ''),
+      // 引擎的判据 note 按角色给；「显示的是落库的维分」是数据新鲜度提醒，谁都要看到
+      note: (canRule ? evalNode?.note : '') || (fromRecord ? 'score-detail 未取到，显示的是落库的维分' : ''),
       subs,
-      notes: globalNotes,
+      notes: canRule ? globalNotes : [],
       fromRecord: !!fromRecord,
       hasEval: !!evalNode,
       forcedEbb: forced

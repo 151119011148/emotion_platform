@@ -1,5 +1,10 @@
 <template>
-  <span class="dim-tip" role="button" tabindex="0" aria-label="维度说明">
+  <!-- 两个 prop 全是判据原文（各调用点传的都是字面量：权重、档位构成、板型定义），
+       没有一处混着结果，所以整颗闸掉。闸在根上而不是只闸文字：
+       留着一个点开是空的 ? 看着像坏掉的装饰。
+       在这一处 v-if 就盖住了 Market / Tianti / Shouban / HighEco 四个调用点，
+       比逐点改省事，也不会漏掉以后新增的第五个页面。 -->
+  <span v-if="$canRule" class="dim-tip" role="button" tabindex="0" aria-label="维度说明">
     ?
     <span class="dim-tip-text">
       <b v-if="title" class="dim-tip-title">{{ title }}</b>
