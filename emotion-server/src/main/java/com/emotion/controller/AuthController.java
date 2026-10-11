@@ -51,6 +51,21 @@ public class AuthController {
         return ApiResponse.ok(null);
     }
 
+    /**
+     * 心跳：只回答「这个会话还活着吗」，正文没有内容。
+     *
+     * <p>前端外壳每 60 秒打一次，让被顶下线的标签页自己弹回登录页，而不是等下一次点击才发现。
+     * 判活（版本号 + 空闲窗口）全部在 {@code JwtAuthFilter} 里做完，会话一旦死掉就根本进不到
+     * 这个方法——filter 不建认证上下文，由 {@code SecurityConfig} 那个 401 入口直接出结论。
+     *
+     * <p>它也是唯一一条<b>不算「活动」</b>的接口（{@code SessionActivityRegistry.PING_URI}）：
+     * 心跳若能刷新空闲时间，空闲超时就被浏览器自己续成了摆设。
+     */
+    @GetMapping("/ping")
+    public ApiResponse<Void> ping() {
+        return ApiResponse.ok(null);
+    }
+
     private static Long userId(Authentication auth) {
         return auth == null ? null : (Long) auth.getPrincipal();
     }

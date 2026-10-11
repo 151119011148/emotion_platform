@@ -72,10 +72,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '../stores/user'
 import { useScoringStore } from '../stores/scoring'
+import { authApi } from '../api/modules'
 
 const route = useRoute()
 const router = useRouter()
@@ -84,11 +85,38 @@ const scoringStore = useScoringStore()
 
 const activeMenu = computed(() => route.path)
 
+/**
+ * 心跳间隔。被别的设备顶下线、或晾过了后端那个空闲窗口（session.idle-timeout-minutes）之后，
+ * 标签页最迟 60 秒自己弹回登录页——在此之前它要等用户下一次点击才发现，
+ * 中间那一屏看着正常的数据，读的是已经作废的旧身份。
+ */
+const PING_EVERY_MS = 60000
+let pingTimer = null
+
+function ping() {
+  // 隐藏页直接跳过：Chrome 会把后台定时器节流到约一分钟一次甚至冻住，
+  // 攒着发也没意义——切回前台时下面那个监听会立刻补一次。
+  if (document.hidden) return
+  // 失败不在这里处理：401 由 api 拦截器统一清场跳登录，这里只管把请求发出去。
+  authApi.ping().catch(() => {})
+}
+
+function onVisibility() {
+  if (!document.hidden) ping()
+}
+
 // 生效打分模型的维度/权重：进外壳就拉一次，供仪表盘卡片与复盘页用（读不到则退回本地兜底常量）。
 // 顺带刷一次身份：角色被改过或被管理员强制下线时，不用来到下一页才发现菜单不对。
 onMounted(() => {
   scoringStore.load()
   userStore.loadMe().catch(() => {})
+  pingTimer = setInterval(ping, PING_EVERY_MS)
+  document.addEventListener('visibilitychange', onVisibility)
+})
+
+onUnmounted(() => {
+  clearInterval(pingTimer)
+  document.removeEventListener('visibilitychange', onVisibility)
 })
 
 async function handleLogout() {

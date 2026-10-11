@@ -36,6 +36,15 @@ export const authApi = {
   // 进外壳时拉一次：角色被改过、被强制下线，不用等下次登录才生效。
   // 取不到时页面保持登录态（token 还在），由其它请求的 401 来决定要不要踢出去
   me: () => api.get('/auth/me', { skipErrorToast: true }),
+  /**
+   * 心跳：外壳每 60 秒打一次，只问「这个会话还是不是当前那一次登录」。
+   *
+   * 正文没有内容，判活（令牌版本号 + 空闲窗口）全在后端 filter 里做完，会话死了就回 401。
+   * skipErrorToast 是为了网络抖一下不每 60 秒弹一条红条；**刻意不带 skipAuthRedirect**——
+   * 收到 401 就是要清 token 跳回登录页，这正是这条心跳存在的意义：
+   * 被别的设备顶下线之后不用等下一次点击才知道。
+   */
+  ping: () => api.get('/auth/ping', { skipErrorToast: true }),
   // 退出：让后端把令牌版本号 +1，这个 token 当场作废。
   // skipAuthRedirect：这一步返回 401 属于正常（token 本就要作废），不该被说成掉线
   logout: () => api.post('/auth/logout', null, { skipErrorToast: true, skipAuthRedirect: true })

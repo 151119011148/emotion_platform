@@ -1,21 +1,28 @@
 package com.emotion.config;
 
 import com.emotion.config.JwtAuthFilter;
+import com.emotion.vo.ApiResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
 import java.util.Arrays;
 
 @Configuration
@@ -52,8 +59,40 @@ public class SecurityConfig {
                 .antMatchers("/api/auth/**").authenticated()
                 .anyRequest().authenticated()
             .and()
+            // 未登录的统一出口。不配这一条时 Spring Security 默认用 Http403ForbiddenEntryPoint，
+            // 实测生产上「无 token」和「坏 token」都是 403 空响应体——与 V43 注释里
+            // 「旧 token 要在这里拿到 401」不符，前端只能把 401/403 当同一件事处理。
+            // 名实相符之后，前端才可以只把 401 当掉线，把 403 留给越权与 CORS。
+            .exceptionHandling().authenticationEntryPoint(new Json401EntryPoint())
+            .and()
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
+    }
+
+    /**
+     * 401 + 一个说得出原因的信封。形状与 {@link ApiResponse} 保持一致——序列化用的就是那个类，
+     * 免得哪天字段改了这里还手写着一份过期的。
+     */
+    static class Json401EntryPoint implements AuthenticationEntryPoint {
+
+        private static final String BODY;
+
+        static {
+            try {
+                BODY = new ObjectMapper()
+                        .writeValueAsString(ApiResponse.error(401, "登录已失效，请重新登录"));
+            } catch (Exception e) {
+                throw new IllegalStateException("401 信封序列化不出来", e);
+            }
+        }
+
+        @Override
+        public void commence(HttpServletRequest request, HttpServletResponse response,
+                             AuthenticationException authException) throws IOException {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.setContentType("application/json;charset=UTF-8");
+            response.getWriter().write(BODY);
+        }
     }
 
     @Bean

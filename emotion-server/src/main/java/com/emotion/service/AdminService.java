@@ -105,7 +105,10 @@ public class AdminService {
         if (passwordChanged) {
             user.setPassword(passwordEncoder.encode(req.getPassword()));
         }
-
+        // 版本号不许由这条全字段更新来回写：方法开头 selectById 读出的那份快照可能已经被
+        // 并发登录 +1 过，写回去等于把别人刚签发的新 token 判成有效——被踢的人又活了。
+        // 版本号只有 SingleSessionService.issue 一条出路（库里原子自增），MyBatis-Plus 跳过 null 字段。
+        user.setTokenVersion(null);
         userMapper.updateById(user);
         // 改完立刻踢下线：让他重新登录拿新角色/新密码，别让旧 token 继续用旧身份。
         if (roleChanged || passwordChanged) {
@@ -126,8 +129,11 @@ public class AdminService {
             throw new BizException("至少要保留一个超级管理员");
         }
         userMapper.deleteById(id);
-        // 账号都没了，版本号缓存留着只是让同名 id 复用时捡到旧值
-        singleSession.issue(id);
+        // 不再调 singleSession.issue(id)：行都没了，自增影响 0 行、读回 null，什么也做不了。
+        // 现在删行本身就是失效判据——版本号一律回库读，账号查不到就按 -1 处理，
+        // 该号已签发的 token 下一个请求就是 401。
+        // （以前这句 issue 是拿来清缓存的，但它早退在 selectById 为 null 那一行，
+        //   缓存里那条旧版本号原样留着，被删的人反而能继续鉴权到 token 自然过期。）
     }
 
     /** 强制下线：版本号 +1，对方下一个请求就是 401。账号本身不动。 */

@@ -25,6 +25,14 @@ api.interceptors.request.use(config => {
   return config
 })
 
+/**
+ * 一次「掉线清场」的闩。
+ *
+ * 一个页面开屏就是十几个请求，被顶下线时它们会同时收到 401——不设闩就是叠十几条红条、
+ * 十几趟 router.push。1.5 秒内只认第一次，后面的 401 静默失败（各页面的 catch 自己收尾）。
+ */
+let bouncedAt = 0
+
 api.interceptors.response.use(
   response => {
     const res = response.data
@@ -43,12 +51,19 @@ api.interceptors.response.use(
     return res
   },
   error => {
-    if (error.response?.status === 401 || error.response?.status === 403) {
-      // skipAuthRedirect：退出登录自己发的那个请求。它本来就是把 token 作废的，
-      // 若返回 401（token 其实早就失效了）再走一遍重定向+红条，等于把一次正常退出说成掉线。
-      if (!error.config?.skipAuthRedirect) {
-        // 单点登录：账号在别处登录（或被管理员强制下线）时也会走到这里——
-        // 旧 token 版本号对不上，后端一律按未登录回 401。
+    const status = error.response?.status
+    // 只认 401：那是后端唯一的「未登录」出口（SecurityConfig.Json401EntryPoint）——
+    // 未登录、被别的设备顶下线、空闲超时都走它。
+    // 403 只代表越权与 CORS，不该顺手清 token；业务越权本来走 BizException
+    // （HTTP 200 + code=400），压根到不了这个分支。
+    if (status === 401 && !error.config?.skipAuthRedirect) {
+      const now = Date.now()
+      if (now - bouncedAt > 1500) {
+        bouncedAt = now
+        // 单点登录：账号在别处登录（或被管理员强制下线、或晾过空闲窗口）时也会走到这里——
+        // 令牌版本号或活动时间对不上，后端一律按未登录回 401。
+        // skipAuthRedirect 留给退出登录自己发的那个请求：它本来就是来作废 token 的，
+        // 回 401 属于正常，不该被说成掉线。
         localStorage.removeItem('token')
         localStorage.removeItem('username')
         localStorage.removeItem('nickname')

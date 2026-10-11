@@ -69,6 +69,14 @@ jwt:
   secret: ${JWT_SECRET:}
   expiration: 86400000
 
+session:
+  # 空闲超时（分钟）：一个会话连续这么久没有真人发起的请求就作废，下一次请求（含 60 秒心跳）
+  # 就是 401，弹回登录页。填 0 或负数＝整条关掉，退回上面那个平 24 小时。
+  # 嫌紧/嫌松就改这一个数字重新发版，不用动代码。
+  # 键必须写在这份已提交的文件里：服务器上那份 application-local.yml 每次发版都按
+  # deploy/alinux/config/application-local.yml.template 重新生成，写在那边会被抹掉。
+  idle-timeout-minutes: 120
+
 # 行情源。全部走 http 明文：本机 JDK 8u201 的 cacerts 早于 Let's Encrypt 根证书普及，
 # https 会在信任链上随机翻车，而这些接口 http/https 返回的字节完全一致。
 market:
