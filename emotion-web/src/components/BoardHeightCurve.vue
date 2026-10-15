@@ -65,8 +65,9 @@ const props = defineProps({
   zoomGroup: { type: String, default: '' },
   /**
    * 节点页专用：每只票一条逐日板高轨迹（●龙头票 / ◆节点票），由 utils/nodeTracks 算好。
-   * [{id, status, d0Date, anchor:{name,code,max,data,keyIdx,endIdx}, stock:{…}}]，
+   * [{id, status, d0Date, anchor:{name,code,max,data,keyIdx,startIdx,endIdx}, stock:{…}}]，
    * data 与**全量** rows 同长同序、不在梯那天是 null；下标也按全量算，组件按当前窗口自己切。
+   * 画的时候只取 {@code startIdx..endIdx} 这一段（关键日所在的那次连板），段外置 null。
    */
   nodeTracks: { type: Array, default: () => [] },
   /** 只看这一个节点的两条线（其余淡到读不出形状）；null = 全部一起看 */
@@ -270,7 +271,10 @@ function buildTracks(all, rows, i0, yMin, yMax) {
       const wantLabel = !dim && (hot || (focus == null && role === 'stock'))
       const data = []
       for (let k = 0; k < n; k++) {
-        const v = tr.data[i0 + k]
+        const gi = i0 + k
+        // 只画关键日所在的<b>那一段</b>：同一只票几周后二次上梯（龙版传媒 09-07 打完 6 板、
+        // 10-12 又以 2 板回来）不归这个节点，段外一律 null，connectNulls:false 就把它断掉。
+        const v = gi < tr.startIdx || gi > tr.endIdx ? null : tr.data[gi]
         if (v == null) { data.push(null); continue }
         const isKey = k === keyI
         const isEnd = broken && k === endI

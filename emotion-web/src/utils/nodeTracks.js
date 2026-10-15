@@ -6,6 +6,8 @@
  *
  * <p>一只票在窗口里可能有<b>两段行情</b>（金健米业 08-18→08-20 打到 4 板，09-18 又以 2 板回来），
  * 所以断板那天不能取「最后一次在梯」，得取关键日所在那一段连板的末尾。
+ * 同理，段首也不能取「第一次在梯」——{@code startIdx}／{@code endIdx} 圈出的就是关键日
+ * 所在<b>那一段</b>，组件只画这一段；那只票几周后二次上梯的孤点不归这个节点。
  *
  * <p>一天都不在梯就是<b>没有这条轨迹</b>，不拿 D0 或今天硬凑位置：
  * 线上的点说的是「这只票那天真站在这个高度上」，凑出来的点比缺点更坏。
@@ -64,6 +66,20 @@ function runEndIdx(data, from) {
 }
 
 /**
+ * 关键日所在那段连板的开头：往前只要低一板就仍是同一段（与 {@link runEndIdx} 对称）。
+ *
+ * <p>要它是因为<b>一只票在窗口里可能有好几段行情</b>：龙版传媒 09-01→09-07 打完 6 板，
+ * 10-12 又以 2 板回来；金健米业 08-18→08-20 打完 4 板，09-18 又以 2 板回来。
+ * 只按「这只票哪天在梯上」出点，老节点的轨迹就会在几周后长出一段跟它没有视觉关系的孤点。
+ * {@code startIdx..endIdx} 圈出的才是这个节点该画的那一段。
+ */
+function runStartIdx(data, from) {
+  let i = from
+  while (i - 1 >= 0 && data[i - 1] === data[i] - 1) i--
+  return i
+}
+
+/**
  * 全部节点 → 曲线的 nodeTracks。下标一律按**全量** rows 算，组件再按当前窗口切片。
  * @param rows height-range 映射后的日行，按日期升序，每行带 ladder:[{board,code,name}]
  */
@@ -78,7 +94,12 @@ export function buildNodeTracks(nodes, rows) {
         : stockKeyIdx(data, max, rows, n.d0Date)
       const keyIdx = byRule != null ? byRule : peakIdx(data)
       if (keyIdx == null) return null
-      return { name, code, max, data, keyIdx, endIdx: runEndIdx(data, keyIdx) }
+      return {
+        name, code, max, data, keyIdx,
+        // 这个节点该画的那一段：段首..段尾。段外的在梯日（这只票后来的二次启动）不归这个节点
+        startIdx: runStartIdx(data, keyIdx),
+        endIdx: runEndIdx(data, keyIdx)
+      }
     }
     const a = splitStock(n.anchorStock)
     const s = splitStock(n.nodeStock)
