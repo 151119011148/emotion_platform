@@ -282,4 +282,244 @@ body {
   color: #6b7c8c;
   text-align: center;
 }
+
+/* ===== 手机窄屏（≤768px）：只抬触控命中区 =====
+   这一条是量出来的，不是猜的：把 dist 挂进同源 iframe、iframe 宽度给成 390/320
+   （真实视口，matchMedia 与布局都按那档走），用生产现读的 JSON 喂 D1 仪表盘与 D9 策略选股，
+   两页横向零溢出、图表跟着视口重画——布局本身扛得住手机。
+   剩下唯一手机独有的问题是命中区：Element 的 small 档控件高 24px（日期输入里面那根 22px），
+   鼠标点着正合适，手指在地铁里点就是误触。实测 D9 页面上 21 个可点控件里 9 个不足 32px。
+   抬到 34px 是折中：Apple HIG 的 44pt 会把页头那排按钮顶变形，34 已够拇指第一指腹。
+   --el-component-size-small 管输入框/日期/选择器那一族；按钮不吃这个变量，得单独给 min-height。
+   只写在 @media 里，宽屏一行都不生效（1440 已回归：侧边栏回来、两张表 17 列照旧、卡片不出）。 */
+@media (max-width: 768px) {
+  :root {
+    --el-component-size-small: 34px;
+  }
+
+  .el-button--small,
+  .el-select--small {
+    min-height: 34px;
+  }
+
+  /* 弹窗与提问框：宽度是写死的（D10「编辑卖出」420px、ElMessageBox 默认 420px），
+     390 视口上实测右边缘画到 420——整块顶出屏幕，右上角的关闭按钮在 419 那个位置，手指够不着。
+     改 max-width 而不是改 width：Element 把宽度挂在 .el-dialog 的行内 CSS 变量上
+     （现读 --el-dialog-width: 420px），行内变量赢过样式表里的 width，但赢不过 max-width，
+     所以这一条不用 !important，也不会打到别的属性。
+     用百分比而不是 100vw：100vw **含滚动条宽**，390 视口上 dialog 算出 366、居中后右边缘 378，
+     而可视区只有 375（余 15px 给滚动条）——右上角关闭按钮会被压在滚动条下面 3px。
+     .el-dialog 的包含块 .el-overlay-dialog 是那个 overflow:auto 的容器，100% 已扣掉滚动条，
+     实测 351 宽、左右各 12，关闭按钮整体落在 363 以内。 */
+  .el-dialog,
+  .el-message-box {
+    max-width: calc(100% - 24px);
+  }
+}
+
+/* ===== 手机档卡片流：窄屏表格的替身（全站共用一份） =====
+   这些类只在 `useNarrow()` 为真的那一路渲染（模板分叉），宽屏永远不会走到，
+   所以放在全局而不是逐页 scoped：D9 策略选股先写了一份，D4 日内核心、D10 持仓与台账
+   接着要同一套长相——三页各抄一遍迟早会走轮（改一页忘两页）。
+   类名以 `.m-` / `.mc-` 起头，全库只在这里定义，不与任何页面 scoped 类重名。
+   卡片底色 #16202e 沿用全站「嵌套块比卡片深一档」的既有档位（.blk 是 #1a2332，
+   表格展开行也是这一档），不是随手挑的数。
+   断点必须与 utils/narrowScreen.js 的 NARROW_MAX_PX 同数：模板分叉读那边、
+   媒体查询读这里，两个数不一样就会出现「卡片视图配桌面内边距」的半套状态。 */
+.m-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.m-card {
+  background: #16202e;
+  border: 1px solid #2d3748;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.mc-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.mc-rank {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #0b0f14;
+  background: #cbd5e0;
+}
+.mc-name {
+  flex: 1;
+  min-width: 0;
+}
+.mc-name .nm-text {
+  display: block;
+  font-size: 14.5px;
+  font-weight: 600;
+}
+.mc-code {
+  display: block;
+  font-style: normal;
+  font-size: 11px;
+  color: #6b7c8c;
+  letter-spacing: .02em;
+}
+.mc-board {
+  flex: none;
+  font-size: 12px;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, .12);
+  border: 1px solid rgba(251, 191, 36, .3);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.mc-score {
+  flex: none;
+  font-size: 16px;
+  font-weight: 700;
+  color: #e1e8ed;
+  min-width: 34px;
+  text-align: right;
+}
+.mc-wait {
+  flex: none;
+  font-size: 12px;
+  color: #6b7c8c;
+  padding: 2px 6px;
+  border: 1px dashed #2d3748;
+  border-radius: 4px;
+}
+.mc-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 7px;
+}
+.mc-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid #22303f;
+}
+/* 三列给「数字多、字短」的那类（持仓的成本/现价/浮动）；两列会撑成六行，卡片就散了 */
+.mc-grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.mc-cell {
+  min-width: 0;
+}
+/* 跨满整行：次日决策这种一句话的字段，塞进半列会折成三行 */
+.mc-cell.wide {
+  grid-column: 1 / -1;
+}
+.mc-cell i {
+  display: block;
+  font-style: normal;
+  font-size: 11px;
+  color: #6b7c8c;
+  margin-bottom: 2px;
+}
+.mc-cell b {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #cbd5e0;
+}
+.mc-cell b.mc-strong {
+  font-weight: 700;
+  color: #e1e8ed;
+}
+/* 「这一格确实没有数」的灰：与 .mc-strong 相反。写在 cell 之外，
+   因为 D10 的卡里 .mc-score 也要用它（空持仓的空浮动）。 */
+.mc-cell .mut,
+.m-card .mut {
+  color: #6b7c8c;
+}
+.mc-queue {
+  font-style: normal;
+  font-size: 11px;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, .12);
+  border-radius: 3px;
+  padding: 0 4px;
+  margin-left: 4px;
+}
+.mc-alerts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+.mc-foot {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #6b7c8c;
+}
+/* 行内编辑的格子：标签在上、控件占满整格宽。控件本身是 Element 的 small 档，
+   高度由上面那条窄屏命中区规则抬到 34px，这里只管摆位。 */
+.mc-edit {
+  min-width: 0;
+}
+.mc-edit > i {
+  display: block;
+  font-style: normal;
+  font-size: 11px;
+  color: #6b7c8c;
+  margin-bottom: 3px;
+}
+.mc-edit .el-input-number,
+.mc-edit .el-select,
+.mc-edit .el-input {
+  width: 100%;
+}
+/* 「一句话说清一只票」的轻行（D4 中军、D10 卖出流水那种字段少的表），
+   不值得给它一套 grid，一行三段更贴近原来表格的读法 */
+.mc-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid #22303f;
+  font-size: 13px;
+}
+.mc-line:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.mc-line .nm {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+.mc-line .cd {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 400;
+  color: #6b7c8c;
+  margin-left: 6px;
+}
+.mc-line .n {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+/* 卡片底部那排操作（D4 的「升级到主线」、D10 的「编辑卖出」）：
+   放在卡里而不是浮在右下角，是因为窄屏命中区已抬到 34px，压住数字会看不清那一格 */
+.mc-act {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid #22303f;
+}
 </style>
