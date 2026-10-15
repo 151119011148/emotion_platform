@@ -138,6 +138,16 @@
           <div class="member-group">
             <h4>中军 <span v-if="$canRule" class="sub">日内核心内其余连板 ≥2</span></h4>
             <el-empty v-if="!vo.zhongJun?.length" description="无" :image-size="40" />
+            <!-- 窄屏：这张表五列约 470px，390 屏上要靠横向滚，改成一票一行；行业在表里是一列，这里退成名字后面的灰字 -->
+            <div v-else-if="isNarrow" class="m-card">
+              <div class="mc-line" v-for="row in vo.zhongJun" :key="row.code">
+                <span class="nm">{{ row.name }}<em class="cd">{{ row.code }}{{ row.industry ? ' · ' + row.industry : '' }}</em></span>
+                <span class="n">{{ nz(row.board) }}板</span>
+                <span class="n" :class="pctClass(row.changePct)">
+                  {{ row.changePct == null ? '—' : signed(row.changePct) + '%' }}
+                </span>
+              </div>
+            </div>
             <el-table v-else :data="vo.zhongJun" size="small">
               <el-table-column prop="code" label="代码" width="90" />
               <el-table-column prop="name" label="名称" width="110" />
@@ -187,6 +197,40 @@
 
         <h4 class="radar-sub">板块表 <span class="sub">全量行业 · {{ vo.radar?.length || 0 }} 个 · 只显示前 5</span></h4>
         <el-empty v-if="!vo.radar?.length" description="当日无涨停行业" :image-size="60" />
+        <!-- 窄屏：板块表八列（含最宽那列「板块龙头」）在 390 屏上要横向滑着读，
+             改成一行业一卡，桌面的定宽表一行未动（v-else 那一路） -->
+        <div v-else-if="isNarrow" class="m-cards">
+          <div v-for="(row, i) in boardView" :key="row.industry" class="m-card">
+            <div class="mc-head">
+              <span class="mc-rank">{{ rankIndex(i) }}</span>
+              <span class="mc-name">
+                <span class="nm-text" :class="{ 'main-row': row.industry === vo.mainIndustry }">{{ row.industry }}</span>
+              </span>
+              <span class="mc-board">{{ nz(row.maxBoard) }} 板</span>
+            </div>
+            <div class="mc-tags">
+              <el-tag :type="FLAG_TYPE[row.flag] || 'info'" size="small" effect="plain">
+                {{ row.persistenceDays }} 天{{ row.flag === 'NEW' ? ' 🆕' : row.flag === 'MAIN' ? ' ⭐主线' : '' }}
+              </el-tag>
+            </div>
+            <div class="mc-grid">
+              <div class="mc-cell"><i>涨停</i><b>{{ row.zt }}</b></div>
+              <div class="mc-cell">
+                <i>聚集</i>
+                <b>{{ row.ztGatherPct != null ? Number(row.ztGatherPct).toFixed(1) + '%' : '—' }}</b>
+              </div>
+              <div class="mc-cell wide">
+                <i>板块龙头</i>
+                <b v-if="row.leader">{{ row.leader.name }}（{{ row.leader.code }} · {{ nz(row.leader.board) }}板）</b>
+                <b v-else class="mut">—</b>
+              </div>
+            </div>
+            <div class="mc-act" v-if="userStore.isSuperAdmin">
+              <el-button v-if="isCurrentManual(row)" size="small" type="danger" plain :loading="busy" @click="cancelPromote(row.industry)">取消升级</el-button>
+              <el-button v-else size="small" type="primary" plain :loading="busy" @click="promote(row.industry)">升级到主线</el-button>
+            </div>
+          </div>
+        </div>
         <el-table v-else :data="boardView" size="small" class="radar-table">
           <el-table-column type="index" label="排名" width="52" align="center" :index="rankIndex" />
           <el-table-column prop="industry" label="行业" min-width="90" show-overflow-tooltip>
@@ -231,6 +275,37 @@
         <el-alert v-if="themesData && !themeLoading" type="info" :closable="false" show-icon class="theme-notice"
           :title="`今日全市场涨停 ${nz(themesData.totalZt)} 只，已归类 ${nz(themesData.assigned)} 只，未归类 ${nz(themesData.unassigned)} 只`" />
         <el-empty v-if="themeLoading" description="题材表读取中…" :image-size="60" />
+        <!-- 窄屏：题材表十列（比板块表还多「硬度/生命周期/关联板块」三段），是最不该横滑的一张 -->
+        <div v-else-if="isNarrow && themesData?.themes?.length" class="m-cards">
+          <div v-for="(row, i) in themesView" :key="row.name" class="m-card">
+            <div class="mc-head">
+              <span class="mc-rank">{{ rankIndex(i) }}</span>
+              <span class="mc-name">
+                <span class="nm-text" :class="{ 'main-row': row.mainLine }">{{ row.name }}{{ row.mainLine ? ' ⭐主线' : '' }}</span>
+              </span>
+              <el-tag size="small" :type="STAGE_TYPE[row.status] || 'info'" effect="dark">{{ row.status }}</el-tag>
+            </div>
+            <div class="mc-grid">
+              <div class="mc-cell"><i>涨停</i><b>{{ row.ztCount }}</b></div>
+              <div class="mc-cell"><i>强度</i><b>{{ Number(row.strength).toFixed(1) }}</b></div>
+              <div class="mc-cell"><i>最高板</i><b>{{ nz(row.maxBoard || 0) }}</b></div>
+              <div class="mc-cell">
+                <i>连续</i>
+                <b :class="row.continuousDays >= 3 ? 'mc-strong' : 'mut'">{{ row.continuousDays }} 天{{ row.continuousDays >= 3 ? ' ⭐' : '' }}</b>
+              </div>
+              <div class="mc-cell">
+                <i>硬度</i>
+                <el-rate :model-value="row.hardness || 0" disabled size="small" text-color="#fbbf24" />
+              </div>
+              <div class="mc-cell wide"><i>关联板块</i><b>{{ (row.industries || []).join(' + ') || '—' }}</b></div>
+              <div class="mc-cell wide">
+                <i>题材龙头</i>
+                <b v-if="row.leader">{{ row.leader.name }}（{{ row.leader.code }} · {{ nz(row.leader.board) }}板）</b>
+                <b v-else class="mut">—</b>
+              </div>
+            </div>
+          </div>
+        </div>
         <el-table v-else-if="themesData?.themes?.length" :data="themesView" size="small" class="radar-table">
           <el-table-column type="index" label="排名" width="48" align="center" :index="rankIndex" />
           <el-table-column label="题材" min-width="90" show-overflow-tooltip>
@@ -298,6 +373,7 @@ import { useRoute } from 'vue-router'
 import { prdApi, recordApi } from '../api/modules'
 import { signed } from '../utils/scores'
 import { useTradingCalendar } from '../utils/tradingCalendar'
+import { useNarrow } from '../utils/narrowScreen'
 import { canSeeRules } from '../utils/ruleVisibility'
 import { useUserStore } from '../stores/user'
 import DimScoreBlock from '../components/DimScoreBlock.vue'
@@ -307,6 +383,9 @@ const { disabledDate, cellClass, loadTradingDays } = useTradingCalendar()
 
 const route = useRoute()
 const userStore = useUserStore()
+
+/** 手机档：三张表换成卡片流。断点与本页底部那条 @media 必须同数（见 narrowScreen.js）。 */
+const { isNarrow } = useNarrow()
 
 const ACTION_LABEL = { PROMOTE: '晋级', HOLD: '在位', BREAK: '断板', ABSENT: '缺席' }
 const ACTION_TYPE = { PROMOTE: 'success', HOLD: 'primary', BREAK: 'danger', ABSENT: 'info' }
@@ -732,5 +811,51 @@ watch(date, load)
 .missing {
   font-size: 13px;
   color: #6b7c8c;
+}
+
+/* ===== 手机档：三张表在模板里已分叉成卡片（isNarrow），这里只收非表格的骨架 =====
+   断点必须与 utils/narrowScreen.js 的 NARROW_MAX_PX 同数：模板读那边、样式读这里，
+   两个数不一样就是「卡片视图配桌面内边距」的半套状态。
+   实测过不用管的：lifecycle-track 五枚两点名（萌芽…退潮）加 flex:1 的连线在 362px
+   正文里排得下；elem-grid 的 minmax(min(180px,100%)) 在窄容器只会退成两列而不是溢出
+   （min() 是关键，写成固定 180px 才会顶破容器）；member-groups 早在 800px 就单列了。
+   所以这里只剩内边距和标题字号——把 .block 的 20 收到 14，一行代码换来左右各 12px 正文。 */
+@media (max-width: 768px) {
+  .page-header {
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .page-header h2 {
+    font-size: 18px;
+  }
+  .block {
+    padding: 14px;
+    margin-bottom: 14px;
+  }
+  .block-head {
+    gap: 6px 12px;
+    margin-bottom: 10px;
+  }
+  /* 五要素是这一页最密的一块：标签+数值+口径三行，窄屏给它单列，
+     两列时「连续热度 · 权重 15%（≥5家/日）」那行口径会被挤断行。 */
+  .elem-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .elem {
+    flex-direction: row;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 2px 10px;
+    padding: 10px 12px;
+  }
+  .elem-value {
+    font-size: 16px;
+    min-height: 0;
+  }
+  /* 单列后口径说明退到数值后面，不再单独占一行 */
+  .elem-sub {
+    flex: 1 1 100%;
+  }
 }
 </style>

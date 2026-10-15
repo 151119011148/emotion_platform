@@ -69,7 +69,77 @@
         <div class="note">现价自动取行情表 · 卖价/卖出量/状态/纪律可就地改 · 状态改「今日清仓」＝按今天真实清仓日记账（快照日早于今天时清仓行自动搬到今天）；更正历史某天请回那天的复盘页</div>
       </div>
       <div class="sec-bd">
-        <el-table :data="holdingRows" style="width: 100%" empty-text="快照日无持仓中记录">
+        <!-- 窄屏：这张表 14 列＋展开行，横向滚到底也读不完，改成一票一卡。
+             控件绑的仍是同一批 fieldOf/setField/onStatusChange/onSellQtyChange，
+             所以卡里改的格子和表格里改的格子进的是同一个 edits、同一份 POS_KEYS payload。
+             桌面的展开行（四档计划）在卡里直接摊开——卡片没有「点箭头才看得到」这一层。 -->
+        <template v-if="isNarrow">
+          <el-empty v-if="!holdingRows.length" description="快照日无持仓中记录" :image-size="60" />
+          <div v-else class="m-cards">
+            <div v-for="row in holdingRows" :key="row.id" class="m-card">
+              <div class="mc-head">
+                <span class="mc-name">
+                  <span class="nm-text">{{ row.stockName }}</span>
+                  <em class="mc-code">{{ row.stockCode }} · 买入 {{ row.tradeDate }}{{ row.industry ? ' · ' + row.industry : '' }}</em>
+                </span>
+                <span class="mc-board">{{ row.boardNum ? (row.boardNum > 1 ? row.boardNum + '板' : '首板') : '无板' }}</span>
+                <span class="mc-score" :class="pctClass(row.floatPct)">{{ fmtPct(row.floatPct) }}</span>
+              </div>
+              <div class="mc-grid three">
+                <div class="mc-cell"><i>成本</i><b>{{ row.costPrice ?? '—' }}</b></div>
+                <div class="mc-cell"><i>现价</i><b>{{ row.currentPrice ?? '—' }}</b></div>
+                <div class="mc-cell"><i>浮动额</i><b :class="pnlOf(row) ? pctClass(pnlOf(row).amount) : 'mut'">{{ pnlOf(row) ? yuan(pnlOf(row).amount) : '—' }}</b></div>
+              </div>
+              <div class="mc-grid">
+                <div class="mc-edit"><i>股数</i>
+                  <el-input-number :model-value="fieldOf(row, 'quantity')" size="small" :min="1" :step="100" :controls="false"
+                    placeholder="股数" @change="(v) => setField(row, 'quantity', v)" />
+                </div>
+                <div class="mc-edit"><i>卖出量</i>
+                  <el-input-number :model-value="fieldOf(row, 'sellQty')" size="small" :min="1" :step="100" :controls="false"
+                    :placeholder="fieldOf(row, 'status') === '今日清仓' && row.quantity ? String(row.quantity) : '减仓'"
+                    @change="(v) => onSellQtyChange(row, v)" />
+                </div>
+                <div class="mc-edit"><i>卖价（成交价）</i>
+                  <el-input-number :model-value="fieldOf(row, 'sellPrice')" size="small" :min="0" :precision="2" :controls="false"
+                    :placeholder="row.currentPrice ? String(row.currentPrice) : '成交'"
+                    @change="(v) => setField(row, 'sellPrice', v)" />
+                  <div v-if="realizedOf(view(row))" class="mini" :class="pctClass(realizedOf(view(row)).pct)">
+                    已实现 {{ fmtPct(realizedOf(view(row)).pct) }}<template v-if="realizedOf(view(row)).amount !== null"> · {{ yuan(realizedOf(view(row)).amount) }}</template>
+                  </div>
+                </div>
+                <div class="mc-edit"><i>状态</i>
+                  <el-select :model-value="fieldOf(row, 'status')" size="small" @change="(v) => onStatusChange(row, v)">
+                    <el-option label="持仓中" value="持仓中" />
+                    <el-option label="今日清仓" value="今日清仓" />
+                  </el-select>
+                </div>
+                <div class="mc-edit"><i>纪律</i>
+                  <div class="disc-cell">
+                    <span class="disc-dot" :class="discClass(fieldOf(row, 'discipline'))"></span>
+                    <el-select :model-value="fieldOf(row, 'discipline')" size="small" clearable placeholder="未填"
+                      @change="(v) => setField(row, 'discipline', v)">
+                      <el-option v-for="d in DISCIPLINES" :key="d" :label="d" :value="d" />
+                    </el-select>
+                  </div>
+                </div>
+                <div class="mc-cell"><i>今日动作</i><b>{{ fieldOf(row, 'action') || '—' }}</b></div>
+              </div>
+              <div class="mc-cell wide plan-wide" v-if="row.nextDayPlan || row.planOpen || row.planBreak || row.planLow || row.planFall">
+                <i>次日决策</i>
+                <b class="next-plan">{{ row.nextDayPlan || '—' }}</b>
+                <div class="dec-cards">
+                  <div class="dec-i"><div class="c">次日高开</div><div class="a">{{ row.planOpen || '—' }}</div></div>
+                  <div class="dec-i"><div class="c">次日炸板</div><div class="a">{{ row.planBreak || '—' }}</div></div>
+                  <div class="dec-i"><div class="c">平开/低开</div><div class="a">{{ row.planLow || '—' }}</div></div>
+                  <div class="dec-i"><div class="c">次日跌停</div><div class="a">{{ row.planFall || '—' }}</div></div>
+                </div>
+                <div class="mini" v-if="row.actualAction" style="margin-top: 6px">已执行：{{ row.actualAction }}</div>
+              </div>
+            </div>
+          </div>
+        </template>
+        <el-table v-else :data="holdingRows" style="width: 100%" empty-text="快照日无持仓中记录">
           <el-table-column type="expand">
             <template #default="{ row }">
               <div class="plan-grid">
@@ -162,7 +232,89 @@
     <div class="sec" v-if="tab === 'closed' || tab === 'all'">
       <div class="sec-hd"><h2>📋 今日清仓 / 交易流水</h2><div class="note">{{ latestDate || '—' }} · 盈亏列有成交价按已实现算，没有则退回手记浮动%</div></div>
       <div class="sec-bd">
-        <el-table :data="closedRows" style="width: 100%" empty-text="快照日无清仓记录">
+        <!-- 窄屏：同上，清仓行一卡一行。这张表比持仓表多「延迟/纪律分」两格，
+             它们和状态是联动的（onStatusChange 改回持仓中就抹掉），卡里沿用同一套回调。 -->
+        <template v-if="isNarrow">
+          <el-empty v-if="!closedRows.length" description="快照日无清仓记录" :image-size="60" />
+          <div v-else class="m-cards">
+            <div v-for="row in closedRows" :key="row.id" class="m-card">
+              <div class="mc-head">
+                <span class="mc-name">
+                  <span class="nm-text">{{ row.stockName }}</span>
+                  <em class="mc-code">{{ row.stockCode }}{{ row.industry ? ' · ' + row.industry : '' }} · {{ row.tradeDate }}</em>
+                </span>
+                <span class="mc-board">{{ row.boardNum ? (row.boardNum > 1 ? row.boardNum + '板' : '首板') : '无板' }}</span>
+                <!-- 盈亏列的口径原样搬过来：有成交价按已实现，没有退回手记浮动%，并把「退回来的」标出来 -->
+                <span class="mc-score" :class="pctClass(realizedOf(view(row)) ? realizedOf(view(row)).pct : row.floatPct)">
+                  {{ fmtPct(realizedOf(view(row)) ? realizedOf(view(row)).pct : row.floatPct) }}
+                </span>
+              </div>
+              <div class="mc-grid three">
+                <div class="mc-cell">
+                  <i>{{ realizedOf(view(row)) ? '已实现' : '浮动' }}</i>
+                  <b :class="pctClass(realizedOf(view(row)) ? realizedOf(view(row)).amount : pnlOf(row)?.amount)">
+                    {{ realizedOf(view(row))
+                      ? (realizedOf(view(row)).amount !== null ? yuan(realizedOf(view(row)).amount) : '缺卖出量')
+                      : (pnlOf(row) ? yuan(pnlOf(row).amount) : '手记 · 无成交价') }}
+                  </b>
+                </div>
+                <div class="mc-cell"><i>成本</i><b>{{ row.costPrice ?? '—' }}</b></div>
+                <div class="mc-cell"><i>收盘</i><b>{{ row.currentPrice ?? '—' }}</b></div>
+              </div>
+              <div class="mc-grid">
+                <div class="mc-edit"><i>今日动作</i>
+                  <el-input :model-value="fieldOf(row, 'action')" size="small" placeholder="今日动作"
+                    @change="(v) => setField(row, 'action', v)" />
+                </div>
+                <div class="mc-edit"><i>应做</i>
+                  <el-input :model-value="fieldOf(row, 'plannedAction')" size="small" placeholder="计划"
+                    @change="(v) => setField(row, 'plannedAction', v)" />
+                </div>
+                <div class="mc-edit"><i>股数</i>
+                  <el-input-number :model-value="fieldOf(row, 'quantity')" size="small" :min="1" :step="100" :controls="false"
+                    placeholder="股数" @change="(v) => setField(row, 'quantity', v)" />
+                </div>
+                <div class="mc-edit"><i>卖出量</i>
+                  <el-input-number :model-value="fieldOf(row, 'sellQty')" size="small" :min="1" :step="100" :controls="false"
+                    :placeholder="row.quantity ? String(row.quantity) : '减仓'"
+                    @change="(v) => onSellQtyChange(row, v)" />
+                </div>
+                <div class="mc-edit"><i>卖价（成交价）</i>
+                  <el-input-number :model-value="fieldOf(row, 'sellPrice')" size="small" :min="0" :precision="2" :controls="false"
+                    :placeholder="row.currentPrice ? String(row.currentPrice) : '成交'"
+                    @change="(v) => setField(row, 'sellPrice', v)" />
+                  <div v-if="fieldOf(row, 'sellPrice') == null && row.currentPrice" class="mini">未填 · 收盘 {{ row.currentPrice }}</div>
+                </div>
+                <div class="mc-edit"><i>状态</i>
+                  <el-select :model-value="fieldOf(row, 'status')" size="small" @change="(v) => onStatusChange(row, v)">
+                    <el-option label="持仓中" value="持仓中" />
+                    <el-option label="今日清仓" value="今日清仓" />
+                  </el-select>
+                </div>
+                <div class="mc-edit"><i>延迟（天）</i>
+                  <el-input-number :model-value="fieldOf(row, 'delayDays')" size="small" :min="0" :controls="false"
+                    :disabled="view(row).status !== '今日清仓'" :placeholder="view(row).status !== '今日清仓' ? '清仓' : ''"
+                    @change="(v) => setField(row, 'delayDays', v)" />
+                </div>
+                <div class="mc-edit"><i>纪律分</i>
+                  <el-input-number :model-value="fieldOf(row, 'disciplineScore')" size="small" :min="0" :max="100" :controls="false"
+                    :disabled="view(row).status !== '今日清仓'" :placeholder="view(row).status !== '今日清仓' ? '清仓' : ''"
+                    @change="(v) => setField(row, 'disciplineScore', v)" />
+                </div>
+                <div class="mc-edit"><i>评价</i>
+                  <div class="disc-cell">
+                    <span class="disc-dot" :class="discClass(fieldOf(row, 'discipline'))"></span>
+                    <el-select :model-value="fieldOf(row, 'discipline')" size="small" clearable placeholder="未填"
+                      @change="(v) => setField(row, 'discipline', v)">
+                      <el-option v-for="d in DISCIPLINES" :key="d" :label="d" :value="d" />
+                    </el-select>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+        <el-table v-else :data="closedRows" style="width: 100%" empty-text="快照日无清仓记录">
           <el-table-column label="名称" min-width="100">
             <template #default="{ row }"><b>{{ row.stockName }}</b></template>
           </el-table-column>
@@ -279,7 +431,58 @@
     <div class="sec">
       <div class="sec-hd"><h2>📁 标的全生命周期</h2><div class="note">标的维度 · 买入→持有→卖出→纪律评分 · 近一年</div></div>
       <div class="sec-bd">
-        <el-table :data="lifecycleRows" style="width: 100%" empty-text="台账还没有记录；在每日复盘页录入持仓后这里自动聚合">
+        <!-- 窄屏：生命周期 11 列 + 展开行。卡片把展开行那张时间轴变成页面上的一个按钮，
+             点了才摊开（timeline 一条一格，一屏放得下三四个标的的卡）；桌面的展开列原样保留。 -->
+        <template v-if="isNarrow">
+          <el-empty v-if="!lifecycleRows.length" description="台账还没有记录；在每日复盘页录入持仓后这里自动聚合" :image-size="60" />
+          <div v-else class="m-cards">
+            <div v-for="row in lifecycleRows" :key="row.stockCode" class="m-card">
+              <div class="mc-head">
+                <span class="mc-name">
+                  <span class="nm-text">{{ row.stockName }}</span>
+                  <em class="mc-code">{{ row.stockCode }}{{ row.industry ? ' · ' + row.industry : '' }}{{ row.boardNum ? ' · ' + (row.boardNum > 1 ? row.boardNum + '板' : '首板') : '' }}</em>
+                </span>
+                <span class="mc-wait">{{ row.status }}</span>
+                <span class="mc-score" :class="pctClass(row.lastFloat)">{{ fmtPct(row.lastFloat) }}</span>
+              </div>
+              <div class="mc-grid three">
+                <div class="mc-cell"><i>买入</i><b>{{ row.buyDate }}</b></div>
+                <div class="mc-cell"><i>卖出</i><b>{{ sellDateText(row) }}</b></div>
+                <div class="mc-cell"><i>持有</i><b>{{ row.holdDays }}天</b></div>
+                <div class="mc-cell">
+                  <i>卖价 × 量</i>
+                  <b v-if="row.lastExit">{{ row.lastExit.sellPrice }} × {{ qtyText(row.lastExit.sellQty) }}</b>
+                  <b v-else class="mut">{{ row.exitCount ? row.exitCount + ' 笔了结' : '—' }}</b>
+                </div>
+                <div class="mc-cell">
+                  <i>已实现</i>
+                  <b :class="row.realizedAmount === null ? 'mut' : pctClass(row.realizedAmount)">
+                    {{ row.realizedAmount === null ? (row.exitCount ? '缺成本/量' : '—') : yuan(row.realizedAmount) }}
+                  </b>
+                </div>
+                <div class="mc-cell">
+                  <i>纪律分</i>
+                  <b :class="row.lastScore == null ? 'mut' : scoreClass(row.lastScore)">{{ row.lastScore ?? '—' }}</b>
+                </div>
+              </div>
+              <div class="mc-act">
+                <el-button size="small" text type="primary" @click="toggleLife(row.stockCode)">
+                  {{ openLives.has(row.stockCode) ? '收起' : '展开' }}时间轴（{{ row.timeline.length }}）
+                </el-button>
+                <el-button v-if="row.status === '持仓'" size="small" plain type="warning" @click="openClearDialog(row)">编辑卖出</el-button>
+              </div>
+              <div class="mc-life" v-if="openLives.has(row.stockCode)">
+                <div class="mc-life-i" v-for="t in row.timeline" :key="t.id">
+                  <span class="d">{{ t.tradeDate }}</span>
+                  <span class="e" :class="lifeCls(t)">{{ lifeEvent(t) }}</span>
+                  <span class="p">{{ lifeNote(t) }}</span>
+                </div>
+                <div class="mini" v-if="row.lastRow.nextDayPlan">次日决策：{{ row.lastRow.nextDayPlan }}</div>
+              </div>
+            </div>
+          </div>
+        </template>
+        <el-table v-else :data="lifecycleRows" style="width: 100%" empty-text="台账还没有记录；在每日复盘页录入持仓后这里自动聚合">
           <el-table-column type="expand">
             <template #default="{ row }">
               <div class="life-wrap">
@@ -388,7 +591,44 @@
         <div class="note">近 {{ STAT_DAYS }} 日内 {{ exitPriced }} 笔有成交价 · 其余只知清仓不知价格</div>
       </div>
       <div class="sec-bd">
-        <el-table :data="exitRows" style="width: 100%" size="small" empty-text="没有卖出记录；在每日复盘页的持仓台账里填「卖价」后这里自动长出来">
+        <!-- 窄屏：一笔了结一卡。这张表是只读的（卖价在①②那两张表里改），所以卡里不放控件。 -->
+        <template v-if="isNarrow">
+          <div class="m-cards">
+            <div v-for="(row, i) in exitRows" :key="row.id || i" class="m-card">
+              <div class="mc-head">
+                <span class="mc-name">
+                  <span class="nm-text">{{ row.stockName }}</span>
+                  <em class="mc-code">{{ row.stockCode }} · 买入 {{ row.buyDate }}</em>
+                </span>
+                <el-tag :type="row.kind === '清仓' ? 'success' : 'warning'" size="small" effect="plain">{{ row.kind }}</el-tag>
+                <span class="mc-score" :class="row.real ? pctClass(row.real.pct) : 'mut'">
+                  {{ row.real ? fmtPct(row.real.pct) : '—' }}
+                </span>
+              </div>
+              <div class="mc-grid">
+                <div class="mc-cell"><i>卖出日</i><b>{{ row.tradeDate }}</b></div>
+                <div class="mc-cell"><i>持有</i><b>{{ row.holdDays }}天</b></div>
+                <div class="mc-cell"><i>成本基准</i><b>{{ row.basis ?? '—' }}</b></div>
+                <div class="mc-cell">
+                  <i>卖价 × 量</i>
+                  <b v-if="row.sellPrice">{{ row.sellPrice }} × {{ qtyText(row.sellQty) }}</b>
+                  <b v-else class="red">未填</b>
+                </div>
+                <div class="mc-cell wide">
+                  <i>已实现</i>
+                  <template v-if="row.real">
+                    <b :class="pctClass(row.real.pct)">{{ fmtPct(row.real.pct) }}</b>
+                    <span v-if="row.real.amount !== null" class="mini" :class="pctClass(row.real.amount)"> {{ yuan(row.real.amount) }}</span>
+                    <span v-else class="mini">缺卖出量</span>
+                  </template>
+                  <b v-else class="mut">{{ row.sellPrice ? '缺成本' : '只知清仓' }}</b>
+                </div>
+                <div class="mc-cell wide"><i>当天动作</i><b>{{ row.action || row.actualAction || '—' }}</b></div>
+              </div>
+            </div>
+          </div>
+        </template>
+        <el-table v-else :data="exitRows" style="width: 100%" size="small" empty-text="没有卖出记录；在每日复盘页的持仓台账里填「卖价」后这里自动长出来">
           <el-table-column prop="tradeDate" label="卖出日" width="100" />
           <el-table-column label="标的" min-width="120">
             <template #default="{ row }">
@@ -436,7 +676,7 @@
     <div class="sec" v-if="tab === 'stats' || tab === 'all'">
       <div class="sec-hd"><h2>📊 纪律统计与认知沉淀</h2><div class="note">近 {{ STAT_DAYS }} 个自然日 {{ statRows.length }} 行快照</div></div>
       <div class="sec-bd">
-        <div class="cards" style="margin-bottom: 0; grid-template-columns: repeat(5, 1fr)">
+        <div class="cards five" style="margin-bottom: 0">
           <div class="card">
             <div class="k">卖出端纪律分</div>
             <div class="v" :class="scoreClass(sellScore)">{{ sellScore == null ? '—' : sellScore }}</div>
@@ -474,9 +714,25 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { recordApi } from '../api/modules'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useTradingCalendar } from '../utils/tradingCalendar'
+import { useNarrow } from '../utils/narrowScreen'
 import { pnlOf, yuan, qtyText, realizedOf } from '../utils/money'
 
 const { loadTradingDays } = useTradingCalendar()
+
+/** 手机档：四张表换成卡片流。断点与本页底部那条 @media 必须同数（见 narrowScreen.js）。 */
+const { isNarrow } = useNarrow()
+
+/**
+ * 生命周期卡片的「展开时间轴」按 stockCode 记账。
+ * 桌面档用的是 el-table 的展开列，不读这个 Set——两边各开各的，互不影响。
+ */
+const openLives = ref(new Set())
+function toggleLife(code) {
+  const next = new Set(openLives.value)
+  if (next.has(code)) next.delete(code)
+  else next.add(code)
+  openLives.value = next
+}
 
 /** 页签：持仓中 / 已清仓 / 全部 / 纪律统计 */
 const TABS = [
@@ -1004,4 +1260,84 @@ onMounted(() => {
 .sn b { color: #e6ecf2; }
 .mini { font-size: 11px; color: #6e7681; }
 .next-plan { color: #ff9f45; }
+
+/* 卡片里的时间轴（生命周期的展开在窄屏是一个按钮 + 这一段）：一行一条快照，
+   日期固定宽、事件着色、注脚换行缩进到事件下面。 */
+.mc-life {
+  margin-top: 8px;
+  padding-top: 4px;
+  border-top: 1px solid #22303f;
+}
+.mc-life-i {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 6px 0;
+  border-bottom: 1px dashed #22303f;
+}
+.mc-life-i:last-of-type { border-bottom: none; }
+.mc-life-i .d { font-size: 11px; color: #6e7681; font-variant-numeric: tabular-nums; }
+.mc-life-i .e { font-size: 12.5px; font-weight: 600; }
+.mc-life-i .p { flex: 1 1 100%; font-size: 11px; color: #8899a6; }
+
+/* 卡片里的四档：.dec-cards 原本是 4 列（桌面整行宽），落到一张 366px 的卡里每格只有 80px，
+   「平开/低开」这种四字标签会断字 → 卡内降到 2 列。 */
+.m-card .dec-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* 「次日决策」那格在网格里靠 .mc-cell.wide 跨整行；脱离网格单独摆时自己补一条分隔线 */
+.m-card .plan-wide {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid #22303f;
+}
+
+/* ===== 手机档 =====
+   断点与 utils/narrowScreen.js 的 NARROW_MAX_PX 同数。
+   页签（.tab 是手写胶囊，不是 el-tabs）：四个标签 390 屏一行排不下（实测约 40×4+6×3=178，
+   加上「纪律统计」四字其实排得下，但 5px 14px 的内边距只有 22px 高——手指点不准），
+   抬到 34 高并让每个标签等分一行。
+   五张统计卡：repeat(5,1fr) 在 366 正文里每列 62px，「近7日 12 笔」那行会竖排折字，
+   改两列（第五张落单占半行，比五张全挤好读）。 */
+@media (max-width: 768px) {
+  .page-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .page-header h2 { font-size: 18px; }
+  .tabs { gap: 6px; }
+  .tab {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
+  }
+  .cards,
+  .cards.five {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .card { padding: 10px 12px; }
+  .card .v { font-size: 17px; }
+  /* 保存条：那一长句「将整日重写…」是必须读到的（写口的爆炸半径），不能省，
+     改成文案占满一行、两个按钮另起一行左对齐 */
+  .edit-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .edit-bar .mini { flex: 1 1 100%; }
+  .sec-hd {
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 9px 12px;
+  }
+  .sec-bd { padding: 10px 12px; }
+  .foot { padding: 8px 12px; line-height: 1.7; }
+  /* 次日决策行：左边 150px 定宽的标的一律让它占满整行，四档降到两列 */
+  .dec-row { flex-direction: column; gap: 8px; }
+  .dec-target { width: 100%; }
+  .dec-cards { grid-template-columns: repeat(2, 1fr); }
+}
 </style>
