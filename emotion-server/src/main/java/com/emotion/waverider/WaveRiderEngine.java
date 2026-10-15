@@ -749,8 +749,10 @@ public class WaveRiderEngine {
     /**
      * 补写候选票在 D+1 的实际表现。
      *
-     * <p>做成「跑当日选股前的前置步骤」而不是独立任务：漏跑一天的时候，
-     * 下一次运行会自己把前一天的账补上，不需要人去数漏了哪天。
+     * <p>调用方是两个：独立的 {@code waveRiderT1BackfillTask}（每交易日 20:30 往回扫 3 个明细日）
+     * 与管理页的 {@code POST /waverider/backfill}。这一步原先挂在 15:30 选股任务里当前置步骤，
+     * 想的是「漏跑一天下一次自己补上」，实测一行都没补上过——15:30 时 D+1 那根日线腾讯还没发布，
+     * {@link #upsertT1} 拿到 {@code openT1 == null} 就静默返回 false，跟排班漏跑没关系。
      *
      * <p>取价走 {@link DailyBarService}（落库缓存）：拉 [D, D+1] 两根<strong>同源前复权</strong> K 线，
      * 用 close(D) 与 open(D+1) 算跳空。相邻两日共享同一个复权因子，比值里会互相抵消，

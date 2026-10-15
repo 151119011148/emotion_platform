@@ -352,10 +352,10 @@
 
         <div v-if="!reviewPool.verifiedCount" class="empty">
           <template v-if="!reviewPool.t1Date">
-            {{ reviewPool.tradeDate }} 的次日还没产生，等它收盘才有得验
+            {{ reviewPool.tradeDate }} 的次日交易日还没到，等它收盘才有得验
           </template>
           <template v-else>
-            {{ reviewPool.t1Date }} 的日线还没回源，T+1 未补写
+            验证日 {{ reviewPool.t1Date }} 的行情已入库，是 T+1 回补还没跑——每交易日 20:30 补一次，跑完这里自动出数
           </template>
         </div>
       </template>
