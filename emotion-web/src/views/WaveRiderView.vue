@@ -71,7 +71,61 @@
              连板 60（表头 2 字 + 箭头，正好取到地板）  封单强度 84 → 96  得分 99 → 112
              警示 82（最长单标「一字断魂刀」76 + 6）→ 116，两标同时命中时 .alerts 折行
              名称/题材允许折行（.nm/.thm 都 flex-wrap），压不住就多折一行，不撑破表格。 -->
-      <div class="tbl">
+      <!-- 手机档：同一批 candidates 换成卡片流。八列列宽之和 954，而 390 屏上去掉外壳与
+           卡片内边距只剩约 340——这不是「抠像素能塞进去」的量级，所以不缩表，改读法：
+           一张卡一只票，把结论按「先名字、再板数与得分、再封单强度与仓位、最后警示」排下来。
+
+           刻意不放任何 hover 浮层，也刻意不放规则：触屏没有 hover，而桌面上那些浮层里装的是
+           得分构成条、逐项权重、仓位公式、判据阈值——那些本来就归 $canRule 管。
+           卡片只印结果。代码在桌面上藏在名称的 tooltip 里，手机上必须直接印出来：
+           盘中拿手机看完要照着敲进券商 App，看不到代码的候选等于没有候选。 -->
+      <div v-if="isNarrow" class="m-cards">
+        <div v-for="row in candidates" :key="row.code" class="m-card">
+          <div class="mc-head">
+            <span class="mc-rank">{{ row.rankNo }}</span>
+            <span class="mc-name">
+              <span class="nm-text" @click="goTianti(row)">{{ row.name }}</span>
+              <em class="mc-code">{{ row.code }}</em>
+            </span>
+            <span class="mc-board">{{ row.board }} 板</span>
+            <span class="mc-score">{{ pt(row.score) }}</span>
+          </div>
+          <div class="mc-tags">
+            <el-tag v-for="t in nodeTagsOf(row)" :key="t.kind" size="small" effect="dark"
+              :type="t.type">{{ t.text }}</el-tag>
+            <el-tag v-for="t in topThemes(row)" :key="t.name" size="small" effect="plain"
+              class="tag-theme">{{ t.name }}</el-tag>
+            <span v-if="restThemes(row).length" class="more">+{{ restThemes(row).length }}</span>
+            <span v-if="!nodeTagsOf(row).length && !topThemes(row).length" class="mut">
+              {{ row.topic || '—' }}
+            </span>
+          </div>
+          <div class="mc-grid">
+            <div class="mc-cell">
+              <i>封单强度</i>
+              <b>
+                <template v-if="sealRatio(row) != null">{{ sealRatio(row).toFixed(2) }}%</template>
+                <template v-else>—</template>
+                <em v-if="needQueue(row)" class="mc-queue">排队</em>
+              </b>
+            </div>
+            <div class="mc-cell">
+              <i>建议仓位</i>
+              <b class="pos">{{ posText(row.suggestPosition) }}</b>
+            </div>
+          </div>
+          <div v-if="row.alertFlag || row.riskFlag" class="mc-alerts">
+            <el-tag v-if="row.alertFlag" size="small" type="danger" effect="dark">
+              {{ alertText(row.alertFlag) }}
+            </el-tag>
+            <el-tag v-if="row.riskFlag" size="small" :type="riskType(row.riskFlag)" effect="dark">
+              {{ riskText(row.riskFlag) }}
+            </el-tag>
+          </div>
+        </div>
+      </div>
+
+      <div v-else class="tbl">
         <el-table :data="candidates" row-key="code" size="small" stripe :row-class-name="rowClass" style="width: 100%">
           <el-table-column prop="rankNo" label="#" width="40" align="center" />
           <el-table-column label="名称" width="216">
@@ -270,7 +324,58 @@
       </div>
 
       <template v-else>
-        <div class="tbl">
+        <!-- 手机档：复盘池读的是「昨天那批今天怎么样了」，所以卡片第一行就把结果说完
+             （晋级 / 未连板 / 待验证），第二行才是两个收益口径与跳空。
+             接盘收益在桌面上是加粗的那一列（排不到队时真正拿到的数），这里同样加粗。 -->
+        <div v-if="isNarrow" class="m-cards">
+          <div v-for="row in reviewPool.candidates" :key="row.code" class="m-card">
+            <div class="mc-head">
+              <span class="mc-rank">{{ row.rankNo }}</span>
+              <span class="mc-name">
+                <span class="nm-text" @click="goTianti(row, reviewPool.tradeDate)">{{ row.name }}</span>
+                <em class="mc-code">{{ row.code }}</em>
+              </span>
+              <span class="mc-board">{{ row.board }} 板</span>
+              <span v-if="!t1Of(row)" class="mc-wait">待验证</span>
+              <el-tag v-else-if="t1Of(row).promoted === 1" size="small" type="danger" effect="dark">晋级</el-tag>
+              <el-tag v-else size="small" type="success" effect="dark">未连板</el-tag>
+            </div>
+            <div class="mc-grid">
+              <div class="mc-cell">
+                <i>T+1 跳空</i>
+                <b :class="t1Of(row) && t1Of(row).gapPct != null ? cls(t1Of(row).gapPct) : 'mut'">
+                  {{ t1Of(row) ? pctOr(t1Of(row).gapPct) : '—' }}
+                </b>
+              </div>
+              <div class="mc-cell">
+                <i>打板收益</i>
+                <b :class="t1Of(row) && t1Of(row).t1ChangePct != null ? cls(t1Of(row).t1ChangePct) : 'mut'">
+                  {{ t1Of(row) ? pctOr(t1Of(row).t1ChangePct) : '—' }}
+                </b>
+              </div>
+              <div class="mc-cell">
+                <i>接盘收益</i>
+                <b class="mc-strong" :class="bPct(row) != null ? cls(bPct(row)) : 'mut'">
+                  {{ pctOr(bPct(row)) }}
+                </b>
+              </div>
+              <div class="mc-cell">
+                <i>建议仓位</i>
+                <b class="pos">{{ posText(row.suggestPosition) }}</b>
+              </div>
+            </div>
+            <div v-if="row.alertFlag || row.riskFlag" class="mc-alerts">
+              <el-tag v-if="row.alertFlag" size="small" type="danger" effect="dark">
+                {{ alertText(row.alertFlag) }}
+              </el-tag>
+              <el-tag v-if="row.riskFlag" size="small" :type="riskType(row.riskFlag)" effect="dark">
+                {{ riskText(row.riskFlag) }}
+              </el-tag>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="tbl">
           <el-table :data="reviewPool.candidates" row-key="code" size="small" stripe style="width: 100%">
             <el-table-column prop="rankNo" label="#" width="40" align="center" />
             <el-table-column label="名称" width="216">
@@ -491,10 +596,13 @@ import { waveriderApi } from '../api/modules'
 import { useTradingCalendar } from '../utils/tradingCalendar'
 import { useUserStore } from '../stores/user'
 import { canSeeRules } from '../utils/ruleVisibility'
+import { useNarrow } from '../utils/narrowScreen'
 
 const { cellClass, disabledDate, loadTradingDays } = useTradingCalendar()
 const router = useRouter()
 const userStore = useUserStore()
+/** 手机档：两张表换成卡片流。断点与下面那条 @media 必须同数（见 narrowScreen.js）。 */
+const { isNarrow } = useNarrow()
 
 const strategies = ref([])
 const strategyId = ref(null)
@@ -1499,5 +1607,46 @@ onMounted(async () => {
   --el-tag-bg-color: rgba(251, 191, 36, .12);
   --el-tag-border-color: rgba(251, 191, 36, .45);
   --el-tag-text-color: #fbbf24;
+}
+
+/* ===== 手机档：候选池 / 复盘池的卡片流 =====
+   卡片本体（.m-cards / .m-card / .mc-*）已上收到 App.vue 全局，和 D4、D10 共用一份长相；
+   这里只留本页窄屏特有的那几处摆位。桌面 1280/1440 的两表前三列对齐方案一行未动。 */
+
+/* 断点必须与 utils/narrowScreen.js 的 NARROW_MAX_PX 同数：模板分叉读那边、
+   这些样式读这里，两个数不一样就会出现「卡片视图配桌面内边距」的半套状态。 */
+@media (max-width: 768px) {
+  .page-head {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .page-head h2 {
+    font-size: 18px;
+  }
+  .toolbar {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+  /* 工具条上那两个控件写死了 200/170px，加上两个 .lab 一行就是 430px——
+     手机上靠 flex-wrap 折成三行太碎，让它们各自占满一行、标签与控件同一行。 */
+  .toolbar .lab {
+    flex: 0 0 auto;
+  }
+  .run-meta {
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+  /* 卡片内边距 20 → 12：390 屏上左右各省 8px，正文从 324 变 340。
+     改 Element 的 --el-card-padding 而不是硬覆盖 .el-card__body 的 padding，
+     权重稳（作用域属性天然高一级），也不会打到别处的 el-card。 */
+  .blk {
+    --el-card-padding: 12px;
+  }
+  /* 页脚那两段 .fn 是整块口径说明（两个收益公式、标签图例、D0 挂标规则、警示判据、
+     仓位公式……），已经归 $canRule 管，在 390 屏上要占三四屏。手机档只读结论，
+     这些留给桌面——不是删掉，窄屏不渲染而已。 */
+  .fn {
+    display: none;
+  }
 }
 </style>
