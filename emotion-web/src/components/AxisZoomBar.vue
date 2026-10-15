@@ -62,4 +62,13 @@ const buttons = computed(() => [
   opacity: 0.35;
   cursor: default;
 }
+/* 手机上这四个键是 30×22，拇指按不准（390 视口实测：D1 页面上唯一还不足 32px 的一组）。
+   抬到 40×34 与全站窄屏命中区同一档，一排四个 40×4+gap 仍放得进 375 的卡片。 */
+@media (max-width: 768px) {
+  .zb {
+    width: 40px;
+    height: 34px;
+    font-size: 14px;
+  }
+}
 </style>
