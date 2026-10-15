@@ -420,11 +420,11 @@ public class WaveRiderEngine {
         for (MarketStock m : picked) {
             pickedCodes.add(m.getCode());
         }
-        Map<String, BigDecimal> firstBoardMv = HighControlStock.firstBoardFloatMv(
+        Map<String, HighControlStock.Streak> streaks = HighControlStock.streaks(
                 marketStockMapper, pickedCodes, tradeDate);
         for (MarketStock m : picked) {
-            BigDecimal fbMv = firstBoardMv.get(m.getCode());
-            boolean highControl = HighControlStock.isHighControl(m, fbMv);
+            HighControlStock.Streak streak = streaks.get(m.getCode());
+            boolean highControl = HighControlStock.isHighControl(m, streak);
             double riskPenalty = riskPenalty(m, cfg, highControl);
             String riskFlag = riskFlag(m, cfg, riskPenalty, highControl);
             boolean isTopOfTopic = nz(m.getConsecutive()) >= topicTop.getOrDefault(topic(m), 0);
@@ -450,7 +450,7 @@ public class WaveRiderEngine {
             c.setPositionType(topic(m) + (isTopOfTopic ? " 最高板" : " " + nz(m.getConsecutive()) + " 板"));
             c.setScore(BigDecimal.valueOf(score).setScale(2, RoundingMode.HALF_UP));
             c.setRiskFlag(riskFlag);
-            c.setFilterDetailJson(filterDetail(m, cfg, fbMv, highControl, temperature, tempScale,
+            c.setFilterDetailJson(filterDetail(m, cfg, streak, highControl, temperature, tempScale,
                     scoreDetail(cfg, m, maxBoard, boardPart, isTopOfTopic, node, nodePart,
                             early, riskPenalty, riskFlag, score)));
             c.setCreatedAt(LocalDateTime.now());
@@ -632,8 +632,9 @@ public class WaveRiderEngine {
     /**
      * 高控庄票的扣分系数：普通风险项的两倍。
      *
-     * <p>和 YIZI_THIN 扣一样的分说不通——缩量独走连板＋首板日小市值＋一字锁死是「庄在里头」，
-     * 崩起来没有承接；缩量一字只是流动性差。判据更狠，扣分也得跟着更狠。
+     * <p>和 YIZI_THIN 扣一样的分说不通——缩量一字是「今天流动性差」，而高控庄是
+     * <strong>整段连板都靠一字锁着、成交额只有地量</strong>：庄在里头，崩起来没有承接。
+     * 判据更狠，扣分也得跟着更狠。
      *
      * <p>取 2 而不是别的数：整数倍好念（界面上就是「按两倍扣」），且在现行权重下
      * （W_risk=0.20、满分 1.10）扣掉 0.40、约占满分 36%，狠但还不至于把命中项全压成负分。
@@ -649,9 +650,10 @@ public class WaveRiderEngine {
      * <p>YIZI_THIN 的口径按 PRD：换手 &lt; 2% 且成交额低于下限——这是「缩量一字」，
      * 与「封单锁死」不是一回事：后者是买不进（出池），前者是流动性差（保留但折算仓位）。
      *
-     * <p>HIGH_CONTROL 的判据见 {@link HighControlStock}：连板≥2 + 换手&lt;5% +
-     * 首板日流通市值≤35亿 + 一字锁死。它要求换手&lt;5%，与「换手&gt;30%」互斥，
-     * 所以命中即走高档、不参与下面两条的相加与封顶。
+     * <p>HIGH_CONTROL 的判据见 {@link HighControlStock}：连板≥2 + 当日一字锁死 +
+     * 换手&lt;2% <strong>且</strong>成交额≤1亿 + 本段连板里≥2 天一字锁死 + 首板日流通市值≤35亿。
+     * 它的换手腿与 YIZI_THIN 同档、且与「换手&gt;30%」互斥，所以命中即走高档、
+     * 不参与下面两条的相加与封顶。
      *
      * <p>系数可以 &gt;1，得分因此可能为负。建议仓位那侧已有地板（{@code ratio<=0} 取 0.1），
      * 不会算出负仓位。
@@ -692,10 +694,11 @@ public class WaveRiderEngine {
 
     /** 过滤器逐条判定明细 + 得分构成。界面「点开追溯」看到的就是它。 */
     private String filterDetail(MarketStock m, WaveRiderConfig cfg,
-                                BigDecimal firstBoardFloatMv, boolean highControl,
+                                HighControlStock.Streak streak, boolean highControl,
                                 Double temperature, Double tempScale,
                                 Map<String, Object> scoreDetail) {
         Map<String, Object> d = new LinkedHashMap<>();
+        BigDecimal firstBoardFloatMv = streak == null ? null : streak.firstBoardFloatMv();
         d.put("code", m.getCode());
         d.put("board", m.getConsecutive());
         d.put("amount_yi", yi(m.getAmount()));
@@ -704,12 +707,16 @@ public class WaveRiderEngine {
         d.put("seal_lock_ratio", cfg.getSealLockRatio());
         d.put("turnover_rate", m.getTurnoverRate());
         d.put("first_seal_time", m.getFirstSealTime());
+        d.put("break_count", m.getBreakCount());
         d.put("industry", m.getIndustry());
         d.put("filter_st", cfg.isFilterSt());
         d.put("filter_min_amount_yi", cfg.getFilterMinAmount());
         d.put("entry_gap_max", cfg.getEntryGapMax());
         d.put("position_mode", cfg.getPositionMode());
         d.put("first_board_float_mv_yi", firstBoardFloatMv == null ? null : yi(firstBoardFloatMv));
+        // 高控庄票的持续性腿：本段连板追溯到的天数，以及其中一字锁死的天数（≥2 才算锁着）。
+        d.put("streak_days", streak == null ? 0 : streak.days());
+        d.put("streak_locked_days", streak == null ? 0 : streak.lockedDays());
         d.put("high_control", highControl);
         d.put("temperature", temperature);
         d.put("temperature_scale", tempScale);

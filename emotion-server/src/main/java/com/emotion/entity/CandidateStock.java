@@ -37,7 +37,7 @@ public class CandidateStock {
     public static final String RISK_HIGH_TURNOVER = "HIGH_TURNOVER";
     /** 龙头断板。 */
     public static final String RISK_DRAGON_DEAD = "DRAGON_DEAD";
-    /** 高控庄票：缩量独走连板 + 首板日小市值 + 一字锁死。 */
+    /** 高控庄票：持续缩量一字的小盘连板——判据见 {@link com.emotion.market.HighControlStock}。 */
     public static final String RISK_HIGH_CONTROL = "HIGH_CONTROL";
 
     /** 一字断魂刀：执行预警，不是风险扣分——见 {@link #alertFlag}。 */

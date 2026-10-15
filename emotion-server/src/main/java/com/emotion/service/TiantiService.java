@@ -148,12 +148,12 @@ public class TiantiService {
         for (MarketStock row : zt) {
             ztCodes.add(row.getCode());
         }
-        Map<String, BigDecimal> firstBoardMv = HighControlStock.firstBoardFloatMv(
+        Map<String, HighControlStock.Streak> highControlStreaks = HighControlStock.streaks(
                 marketStockMapper, ztCodes, date);
         List<TiantiVO.Level> levels = new ArrayList<>();
         for (int n = h; n >= 2; n--) {
             levels.add(level(n, h, zt, prevZT, prevBoard, todayZtByCode, todayZbByCode, todayDtByCode, snap,
-                    zong, zhongJun, kaWeiCode, fanBao, manualLeader, firstBoardMv));
+                    zong, zhongJun, kaWeiCode, fanBao, manualLeader, highControlStreaks));
         }
         // 最新交易日：三池都没覆盖到的失败股，用腾讯实时报价兜底当日涨跌幅（历史日快照回溯不了）
         fillGoneQuotes(date, levels);
@@ -707,7 +707,7 @@ public class TiantiService {
                                  PrdMetricsService.Snapshot snap,
                                  Set<String> zong, Set<String> zhongJun, String kaWeiCode, Set<String> fanBao,
                                  String manualLeader,
-                                 Map<String, BigDecimal> firstBoardMv) {
+                                 Map<String, HighControlStock.Streak> highControlStreaks) {
         TiantiVO.Level lvl = new TiantiVO.Level();
         lvl.setBoard(n);
         lvl.setLayerLabel(LAYER_LABELS[LadderMetricsService.layerIndex(n, h)]);
@@ -745,9 +745,10 @@ public class TiantiService {
             r.setSealForm(sealForm(row.getFirstSealTime(), row.getBreakCount()));
             r.setSealRatio(sealRatio(row.getSealAmount(), row.getAmount()));
             r.setOneWordKilling(isDuanDao(row, prevZT));
-            BigDecimal fbMv = firstBoardMv == null ? null : firstBoardMv.get(row.getCode());
-            r.setFirstBoardFloatMv(fbMv);
-            r.setHighControl(HighControlStock.isHighControl(row, fbMv));
+            HighControlStock.Streak streak = highControlStreaks == null
+                    ? null : highControlStreaks.get(row.getCode());
+            r.setFirstBoardFloatMv(streak == null ? null : streak.firstBoardFloatMv());
+            r.setHighControl(HighControlStock.isHighControl(row, streak));
             rows.add(r);
             if (prevN != null && prevN == n - 1) {
                 successCodes.add(r.getCode());

@@ -789,8 +789,8 @@ function failTitle(f) {
 
 /**
  * 两颗风险标签的悬浮文案：标签本身是结论，谁都能看；文案里是判据原文
- * （首封≤93030且0炸板、换手<5%、连板≥2），只给超管。普通用户返回空串，
- * 走的是仓库里已有的 `:title="cond ? '…' : ''"` 那套（DimRawBlock / HighEcoView）。
+ * （首封≤93030且0炸板、断魂刀换手<5%、高控庄票换手<2%＋成交≤1亿＋段内≥2天锁死、连板≥2），
+ * 只给超管。普通用户返回空串，走的是仓库里已有的 `:title="cond ? '…' : ''"` 那套（DimRawBlock / HighEcoView）。
  */
 function oneWordTip(r) {
   if (!canSeeRules()) return ''
@@ -798,7 +798,7 @@ function oneWordTip(r) {
 }
 function highControlTip(r) {
   if (!canSeeRules()) return ''
-  return `高控庄票：连板≥2 且 换手<5% 且 一字锁死(首封≤93030且0炸板)，首板日流通市值 ${r.firstBoardFloatMv != null ? yiText(r.firstBoardFloatMv) : '-'}亿`
+  return `高控庄票：连板≥2 且 当日一字锁死(首封≤93030且0炸板) 且 换手<2% 且 成交额≤1亿 且 本段连板里≥2 天一字锁死，首板日流通市值 ${r.firstBoardFloatMv != null ? yiText(r.firstBoardFloatMv) : '-'}亿，今日换手 ${r.turnoverRate ?? '-'}%`
 }
 
 /** 补 T00:00:00 按本地时区解析，否则 new Date('2026-09-04') 走 UTC 会少一天。 */
