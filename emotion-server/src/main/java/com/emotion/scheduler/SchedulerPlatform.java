@@ -20,6 +20,7 @@ import org.quartz.TriggerBuilder;
 import org.quartz.TriggerKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.ApplicationContext;
@@ -55,6 +56,14 @@ public class SchedulerPlatform implements ApplicationRunner {
     private static final String KEY_BEAN = "beanName";
     private static final String KEY_SOURCE = "source";
 
+    /**
+     * 本机跑不跑调度。生产保持默认 true；本地联调必须设 false ——
+     * 本地连的是同一个库，QRTZ_* 也是同一批表，两个进程一起调度会互相抢触发器，
+     * 抢输的那边按 misfire_policy=DO_NOTHING 直接不补，当天任务就哑了。
+     */
+    @Value("${scheduler.enabled:true}")
+    private boolean schedulerEnabled;
+
     private final Scheduler scheduler;
     private final SchedulerJobMapper jobMapper;
     private final SchedulerRunMapper runMapper;
@@ -72,6 +81,10 @@ public class SchedulerPlatform implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        if (!schedulerEnabled) {
+            log.info("定时任务平台未启用（scheduler.enabled=false）：不装载任务，不碰 QRTZ_*");
+            return;
+        }
         log.info("定时任务平台装载 {} 条任务", sync());
     }
 
@@ -82,7 +95,7 @@ public class SchedulerPlatform implements ApplicationRunner {
      */
     public int sync() {
         if (!ensureStarted()) {
-            log.error("Quartz 没起来，本次同步跳过——这一次的后果是所有任务都不跑");
+            log.error("调度器不可用（未启用或启动失败），本次同步跳过——后果是所有任务都不跑");
             return 0;
         }
         List<SchedulerJob> jobs = jobMapper.selectList(null);
@@ -115,6 +128,7 @@ public class SchedulerPlatform implements ApplicationRunner {
 
     /** 改 cron。先验证再写库，别把一个非法表达式存进去让 Quartz 在启动时才炸。 */
     public SchedulerJob updateCron(String jobName, String cron) {
+        requireSchedulerEnabled();
         SchedulerJob job = require(jobName);
         String expr = cron == null ? "" : cron.trim();
         if (expr.isEmpty() || !CronExpression.isValidExpression(expr)) {
@@ -132,6 +146,7 @@ public class SchedulerPlatform implements ApplicationRunner {
 
     /** 停用 / 启用。停用会把 Quartz 里的触发器一并摘掉，不只是改个状态位。 */
     public SchedulerJob updateEnabled(String jobName, boolean enabled) {
+        requireSchedulerEnabled();
         SchedulerJob job = require(jobName);
         job.setEnabled(enabled ? 1 : 0);
         jobMapper.updateById(job);
@@ -330,6 +345,9 @@ public class SchedulerPlatform implements ApplicationRunner {
      * 与其让每个操作方法各自踩一遍，不如在这里统一兜住并留下日志。
      */
     private boolean ensureStarted() {
+        if (!schedulerEnabled) {
+            return false;
+        }
         try {
             if (!scheduler.isStarted()) {
                 scheduler.start();
@@ -338,6 +356,14 @@ public class SchedulerPlatform implements ApplicationRunner {
         } catch (SchedulerException e) {
             log.error("Quartz 启动失败", e);
             return false;
+        }
+    }
+
+    /** 关掉调度时连「改 cron / 启停」也一并挡住：这两条都会写共享的 t_scheduler_job 和 QRTZ_*。 */
+    private void requireSchedulerEnabled() {
+        if (!schedulerEnabled) {
+            throw new IllegalStateException(
+                    "本机未启用调度平台（scheduler.enabled=false），不改动任务定义；要改请到生产上改");
         }
     }
 }
