@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.emotion.entity.DailyBar;
@@ -39,4 +40,15 @@ public interface DailyBarMapper extends BaseMapper<DailyBar> {
     /** 这只票的日 K 全清：除权导致旧价失效时用，下次查询自然回源重写。 */
     @org.apache.ibatis.annotations.Delete("DELETE FROM t_daily_bar WHERE symbol = #{symbol}")
     int deleteBySymbol(@Param("symbol") String symbol);
+
+    /**
+     * 严格早于某天的最后一根日 K，给分时图找「前一交易日收盘」当涨幅分母。
+     *
+     * <p>调用方必须自己核对返回的 {@code tradeDate} 是不是真的前一交易日：
+     * 这张表是按窗口懒填充的，取到一根十天前的柱子当昨收，画出来的就不是分时涨幅而是十天涨幅。
+     */
+    @Select("SELECT id, symbol, trade_date, open_price, close_price, high_price, low_price, fq_version, updated_at "
+            + "FROM t_daily_bar WHERE symbol = #{symbol} AND trade_date < #{date} "
+            + "ORDER BY trade_date DESC LIMIT 1")
+    DailyBar lastBefore(@Param("symbol") String symbol, @Param("date") java.time.LocalDate date);
 }

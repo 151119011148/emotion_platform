@@ -79,6 +79,8 @@ public class SurveillanceTrackVO {
     /** 累计涨幅曲线（≤5 只时返回）。 */
     @Data
     public static class Series {
+        /** 图例上印的是「名字(类别)」这一整串，所以代码必须单独给：没有它，图例那行个股点不开分时。 */
+        private String code;
         private String name;
         private List<BigDecimal> points = new ArrayList<>();
     }

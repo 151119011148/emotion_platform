@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.emotion.entity.StockMinute;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
+import java.time.LocalDate;
 import java.util.List;
 
 public interface StockMinuteMapper extends BaseMapper<StockMinute> {
@@ -28,4 +30,25 @@ public interface StockMinuteMapper extends BaseMapper<StockMinute> {
             + " cum_amount_yuan=VALUES(cum_amount_yuan)"
             + "</script>")
     int upsertBatch(@Param("rows") List<StockMinute> rows);
+
+    /**
+     * 一只票一天的分钟序列，升序。
+     *
+     * <p>读侧只认库：分时图是「看这一天怎么走的」，不是「取最新价」，
+     * 所以这里绝不在缺数时回源——上游只给当天，回源也拿不到这一天，只会把读接口挂在上游的超时上。
+     */
+    @Select("SELECT id, code, trade_date, minute, price, cum_volume_hand, cum_amount_yuan, created_at "
+            + "FROM t_stock_minute WHERE code = #{code} AND trade_date = #{date} ORDER BY minute")
+    List<StockMinute> selectDay(@Param("code") String code, @Param("date") LocalDate date);
+
+    /**
+     * 那天库里一共存了几只票的分时。零与非零要分开回答：
+     * 「这一天全市场都没抓」是永久缺失，「抓了 60 只但没有它」是名单没覆盖，两句不是一回事。
+     */
+    @Select("SELECT COUNT(DISTINCT code) FROM t_stock_minute WHERE trade_date = #{date}")
+    int countCodesOn(@Param("date") LocalDate date);
+
+    /** 库里存过分时的最早一天，用来把「早于本功能上线」说得有凭据。 */
+    @Select("SELECT MIN(trade_date) FROM t_stock_minute")
+    LocalDate firstStoredDate();
 }

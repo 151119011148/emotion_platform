@@ -412,6 +412,7 @@ public class SurveillanceTrackService {
         List<SurveillanceTrackVO.Series> series = new ArrayList<>();
         for (SurveillanceTrackVO.Item item : items) {
             SurveillanceTrackVO.Series s = new SurveillanceTrackVO.Series();
+            s.setCode(item.getCode());
             s.setName(item.getName() + "(" + item.getKind() + ")");
             BigDecimal cum = BigDecimal.ONE;
             List<BigDecimal> points = new ArrayList<>();

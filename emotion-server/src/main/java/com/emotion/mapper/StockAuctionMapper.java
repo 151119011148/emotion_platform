@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.emotion.entity.StockAuction;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
+import java.time.LocalDate;
 import java.util.List;
 
 public interface StockAuctionMapper extends BaseMapper<StockAuction> {
@@ -33,4 +35,20 @@ public interface StockAuctionMapper extends BaseMapper<StockAuction> {
             + "captured_at=VALUES(captured_at), snapshot_raw=VALUES(snapshot_raw)"
             + "</script>")
     int upsertBatch(@Param("rows") List<StockAuction> rows);
+
+    /**
+     * 一只票某天的竞价定格快照，没有就返回 null。
+     *
+     * <p>{@code (code, trade_date)} 是唯一键，所以最多一行，不需要排序兜底。
+     * 名字不能叫 {@code selectOne}：{@code BaseMapper} 已经有 {@code selectOne(Wrapper)}，
+     * MyBatis 按「接口全名＋方法名」绑语句，同名重载会让两条 SQL 抢一个 statement id。
+     */
+    @Select("SELECT id, code, name, trade_date, auction_price, prev_close, volume_hand, amount_wan, "
+            + "bid1_price, bid1_hand, ask1_price, ask1_hand, limit_up_price, captured_at, snapshot_raw, created_at "
+            + "FROM t_stock_auction WHERE code = #{code} AND trade_date = #{date}")
+    StockAuction selectForDate(@Param("code") String code, @Param("date") LocalDate date);
+
+    /** 那天抓了几只票的竞价：为 0 说明这一趟压根没跑（或不在 09:25–09:30 窗口内），与「跑了但没这只」不同。 */
+    @Select("SELECT COUNT(1) FROM t_stock_auction WHERE trade_date = #{date}")
+    int countCodesOn(@Param("date") LocalDate date);
 }

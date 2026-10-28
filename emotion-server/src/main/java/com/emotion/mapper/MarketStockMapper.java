@@ -58,6 +58,17 @@ public interface MarketStockMapper extends BaseMapper<MarketStock> {
     LocalDate prevDetailDate(@Param("date") LocalDate date);
 
     /**
+     * 这只票那天的任一池明细行，只为拿 {@code close_price + change_pct + name} 三样，所以哪个池都一样。
+     *
+     * <p>两个非空条件是查询的一部分而不是调用方的事：2026-08-03 之前的「名义天梯」行只有名称和板高，
+     * 收盘价与涨幅都是 NULL，放它进来就等于把「有涨幅可反推」这句话假报成真的。
+     */
+    @Select("SELECT id, trade_date, code, name, pool, market, close_price, change_pct "
+            + "FROM t_market_stock WHERE code = #{code} AND trade_date = #{date} "
+            + "AND close_price IS NOT NULL AND change_pct IS NOT NULL LIMIT 1")
+    MarketStock rowOfCodeOn(@Param("code") String code, @Param("date") LocalDate date);
+
+    /**
      * 某天涨停池∪炸板池的个股代码（去重，升序）。盘中数据任务定名单用它。
      *
      * <p>只取这两池、不取跌停池：分钟序列和竞价快照是为了看「活跃资金在哪」，
