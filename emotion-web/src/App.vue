@@ -1,6 +1,13 @@
 <template>
   <router-view />
+  <!-- 个股分时·竞价：全站只挂这一份，任何页面点到个股都由 utils/stockTape 把它打开。
+       它必须在全局样式层之后、且只此一处——十四个页面各挂一份就会有十四份图表实例和十四种空态长相。 -->
+  <StockTapeDialog />
 </template>
+
+<script setup>
+import StockTapeDialog from './components/StockTapeDialog.vue'
+</script>
 
 <style>
 /* ===== 节点类型语义色（破局节点 V34 ＋ 高低切分流）=====
@@ -521,5 +528,18 @@ body {
   margin-top: 10px;
   padding-top: 9px;
   border-top: 1px solid #22303f;
+}
+
+/* ===== 个股 → 分时弹窗的入口长相（全站一份） =====
+   十四个页面里"这是一只可以点的票"的提示必须同一个样子：光标、悬停下划线、颜色。
+   逐页 scoped 抄一遍就会有第十四种 hover 反馈，而且新页面一定会忘。
+   颜色沿用票名本身的颜色，只加下划线与光标——把它染成链接蓝，
+   读起来就像"点了会跳走"，而它打开的是同一只票的分时。 */
+.tape-link {
+  cursor: pointer;
+}
+.tape-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 </style>

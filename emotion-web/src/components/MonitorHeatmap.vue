@@ -47,7 +47,7 @@
           <tr v-for="(row, ri) in rows" :key="row.code + row.annDate">
             <td class="td-name">
               <div class="nm-line">
-                <span class="nm">{{ row.name }}</span>
+                <span class="nm tape-link" @click="openStockTape(row.code, row.name, date)">{{ row.name }}</span>
                 <el-tag :type="kindTag(row.kind)" size="small" effect="plain">{{ row.kind }}</el-tag>
               </div>
               <span class="nm-code">{{ row.code }}</span>
@@ -88,7 +88,7 @@
     <ul v-if="rows.length" class="mm-why">
       <li v-for="row in rows" :key="row.code + row.annDate + 'w'">
         <!-- 先给票名：脚注与上面的表按顺序对应，但十几只票时靠顺序去猜是哪只太费劲 -->
-        <span class="why-name">{{ row.name }}</span>
+        <span class="why-name tape-link" @click="openStockTape(row.code, row.name, date)">{{ row.name }}</span>
         <el-tag :type="toneTag(row.statusTone)" size="small" effect="dark">{{ row.status }}</el-tag>
         <span v-if="row.avoid" class="avoid-tag">🔥 绕异动</span>
         <span v-if="$canRule" class="why-text">{{ row.why }}</span>
@@ -122,7 +122,9 @@
         <div class="mm-list">
           <div v-for="s in chartSeries" :key="s.name + '-lg'" class="mm-lg-row">
             <i class="sw" :style="{ background: s.color }"></i>
-            <span class="lg-nm">{{ s.name }}</span>
+            <!-- 图例这一行是曲线唯一能点到个股的地方（线本身在 svg 里，没有逐只的可点区） -->
+            <span class="lg-nm" :class="{ 'tape-link': s.code }"
+              @click="s.code && openStockTape(s.code, s.name, date)">{{ s.name }}</span>
             <b class="lg-val" :class="chgClass(lastPct(s.points))">{{ signedPct(lastPct(s.points)) }}</b>
           </div>
         </div>
@@ -134,6 +136,7 @@
 <script setup>
 import { ref, watch, computed } from 'vue'
 import { reviewApi } from '../api/modules'
+import { openStockTape } from '../utils/stockTape'
 
 const props = defineProps({
   date: { type: String, required: true }

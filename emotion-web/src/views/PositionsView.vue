@@ -57,7 +57,7 @@
       <b>⚠ 待裁决（同步至仪表盘）：</b>
       <template v-for="(p, i) in pendingRows" :key="p.id">
         <span v-if="i"> · </span>
-        <span>{{ p.stockName }}（{{ p.nextDayPlan || '待定动作' }}，{{ p.tradeDate }}）</span>
+        <span><span class="tape-link" @click="openStockTape(p.stockCode, p.stockName, p.tradeDate)">{{ p.stockName }}</span>（{{ p.nextDayPlan || '待定动作' }}，{{ p.tradeDate }}）</span>
         <el-button size="small" type="primary" link class="alert-btn" @click="markExecuted(p)">标记执行</el-button>
       </template>
     </div>
@@ -79,7 +79,7 @@
             <div v-for="row in holdingRows" :key="row.id" class="m-card">
               <div class="mc-head">
                 <span class="mc-name">
-                  <span class="nm-text">{{ row.stockName }}</span>
+                  <span class="nm-text tape-link" @click="openStockTape(row.stockCode, row.stockName, latestDate)">{{ row.stockName }}</span>
                   <em class="mc-code">{{ row.stockCode }} · 买入 {{ row.tradeDate }}{{ row.industry ? ' · ' + row.industry : '' }}</em>
                 </span>
                 <span class="mc-board">{{ row.boardNum ? (row.boardNum > 1 ? row.boardNum + '板' : '首板') : '无板' }}</span>
@@ -153,7 +153,7 @@
           </el-table-column>
           <el-table-column label="代码/名称" min-width="130">
             <template #default="{ row }">
-              <div class="sn"><b>{{ row.stockName }}</b></div>
+              <div class="sn"><b class="tape-link" @click="openStockTape(row.stockCode, row.stockName, latestDate)">{{ row.stockName }}</b></div>
               <div class="mini">{{ row.stockCode }}</div>
             </template>
           </el-table-column>
@@ -240,7 +240,7 @@
             <div v-for="row in closedRows" :key="row.id" class="m-card">
               <div class="mc-head">
                 <span class="mc-name">
-                  <span class="nm-text">{{ row.stockName }}</span>
+                  <span class="nm-text tape-link" @click="openStockTape(row.stockCode, row.stockName, latestDate)">{{ row.stockName }}</span>
                   <em class="mc-code">{{ row.stockCode }}{{ row.industry ? ' · ' + row.industry : '' }} · {{ row.tradeDate }}</em>
                 </span>
                 <span class="mc-board">{{ row.boardNum ? (row.boardNum > 1 ? row.boardNum + '板' : '首板') : '无板' }}</span>
@@ -316,7 +316,7 @@
         </template>
         <el-table v-else :data="closedRows" style="width: 100%" empty-text="快照日无清仓记录">
           <el-table-column label="名称" min-width="100">
-            <template #default="{ row }"><b>{{ row.stockName }}</b></template>
+            <template #default="{ row }"><b class="tape-link" @click="openStockTape(row.stockCode, row.stockName, latestDate)">{{ row.stockName }}</b></template>
           </el-table-column>
           <el-table-column label="动作" min-width="110">
             <template #default="{ row }">
@@ -412,7 +412,7 @@
       <div class="sec-bd">
         <div class="dec-row" v-for="d in nextDayDecisions" :key="d.id">
           <div class="dec-target">
-            <b>{{ d.stockName }}</b>
+            <b class="tape-link" @click="openStockTape(d.stockCode, d.stockName, latestDate)">{{ d.stockName }}</b>
             <div class="mini">{{ d.industry || '' }} {{ d.boardNum ? (d.boardNum > 1 ? d.boardNum + '板' : '首板') : '' }}</div>
             <div class="mini" v-if="d.floatPct != null">浮动 {{ fmtPct(d.floatPct) }}</div>
           </div>
@@ -439,7 +439,7 @@
             <div v-for="row in lifecycleRows" :key="row.stockCode" class="m-card">
               <div class="mc-head">
                 <span class="mc-name">
-                  <span class="nm-text">{{ row.stockName }}</span>
+                  <span class="nm-text tape-link" @click="openStockTape(row.stockCode, row.stockName, row.lastRow.tradeDate)">{{ row.stockName }}</span>
                   <em class="mc-code">{{ row.stockCode }}{{ row.industry ? ' · ' + row.industry : '' }}{{ row.boardNum ? ' · ' + (row.boardNum > 1 ? row.boardNum + '板' : '首板') : '' }}</em>
                 </span>
                 <span class="mc-wait">{{ row.status }}</span>
@@ -487,7 +487,7 @@
             <template #default="{ row }">
               <div class="life-wrap">
                 <div class="life-head">
-                  <b>{{ row.stockName }} {{ row.stockCode }} · 全生命周期</b>
+                  <b><span class="tape-link" @click="openStockTape(row.stockCode, row.stockName, row.lastRow.tradeDate)">{{ row.stockName }}</span> {{ row.stockCode }} · 全生命周期</b>
                   <span class="mini">共 {{ row.timeline.length }} 条快照 · 最新：{{ row.lastRow.action || row.lastRow.status || '—' }}</span>
                 </div>
                 <div class="life">
@@ -510,7 +510,7 @@
           </el-table-column>
           <el-table-column label="标的" min-width="110">
             <template #default="{ row }">
-              <b>{{ row.stockName }}</b>
+              <b class="tape-link" @click="openStockTape(row.stockCode, row.stockName, row.lastRow.tradeDate)">{{ row.stockName }}</b>
               <div class="mini">{{ row.stockCode }}</div>
             </template>
           </el-table-column>
@@ -597,7 +597,7 @@
             <div v-for="(row, i) in exitRows" :key="row.id || i" class="m-card">
               <div class="mc-head">
                 <span class="mc-name">
-                  <span class="nm-text">{{ row.stockName }}</span>
+                  <span class="nm-text tape-link" @click="openStockTape(row.stockCode, row.stockName, row.tradeDate)">{{ row.stockName }}</span>
                   <em class="mc-code">{{ row.stockCode }} · 买入 {{ row.buyDate }}</em>
                 </span>
                 <el-tag :type="row.kind === '清仓' ? 'success' : 'warning'" size="small" effect="plain">{{ row.kind }}</el-tag>
@@ -632,7 +632,7 @@
           <el-table-column prop="tradeDate" label="卖出日" width="100" />
           <el-table-column label="标的" min-width="120">
             <template #default="{ row }">
-              <div class="sn"><b>{{ row.stockName }}</b></div>
+              <div class="sn"><b class="tape-link" @click="openStockTape(row.stockCode, row.stockName, row.tradeDate)">{{ row.stockName }}</b></div>
               <div class="mini">{{ row.stockCode }} · 买入 {{ row.buyDate }}</div>
             </template>
           </el-table-column>
@@ -715,6 +715,7 @@ import { recordApi } from '../api/modules'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useTradingCalendar } from '../utils/tradingCalendar'
 import { useNarrow } from '../utils/narrowScreen'
+import { openStockTape } from '../utils/stockTape'
 import { pnlOf, yuan, qtyText, realizedOf } from '../utils/money'
 
 const { loadTradingDays } = useTradingCalendar()

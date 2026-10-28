@@ -40,7 +40,7 @@
       <div class="pending-head">🔔 待裁决持仓 <span class="pending-count">{{ pendingList.length }} 条</span></div>
       <div v-for="p in pendingList" :key="p.id" class="pending-body">
         <div class="pending-title">
-          <b>{{ p.stockName }}</b> <span class="muted">{{ p.stockCode }}</span>
+          <b class="tape-link" @click="openStockTape(p.stockCode, p.stockName, p.tradeDate)">{{ p.stockName }}</b> <span class="muted tape-link" @click="openStockTape(p.stockCode, p.stockName, p.tradeDate)">{{ p.stockCode }}</span>
           <span v-if="p.boardNum" class="pending-board">{{ p.boardNum }}板</span>
           <span v-if="p.industry" class="pending-ind">{{ p.industry }}</span>
           <span class="pending-date">决策日 {{ (p.tradeDate || '').slice(5) }}</span>
@@ -62,7 +62,7 @@
       <div class="pending-head done-head">✅ 最近已裁决 <span class="pending-count">{{ executedList.length }} 条</span></div>
       <div v-for="p in executedList" :key="p.id" class="pending-body done-body">
         <div class="pending-title">
-          <b>{{ p.stockName }}</b> <span class="muted">{{ p.stockCode }}</span>
+          <b class="tape-link" @click="openStockTape(p.stockCode, p.stockName, p.tradeDate)">{{ p.stockName }}</b> <span class="muted tape-link" @click="openStockTape(p.stockCode, p.stockName, p.tradeDate)">{{ p.stockCode }}</span>
           <span class="done-act">{{ p.actualAction }}</span>
           <span class="pending-date">决策日 {{ (p.tradeDate || '').slice(5) }}</span>
         </div>
@@ -101,6 +101,7 @@ import { useScoringStore } from '../stores/scoring'
 import { stageColorOf, seqOnly, bandOfRecord } from '../utils/stages'
 import { useTemperatureBands } from '../utils/temperatureBands'
 import { canSeeRules } from '../utils/ruleVisibility'
+import { openStockTape } from '../utils/stockTape'
 import TemperatureChart from '../components/TemperatureChart.vue'
 import IndicatorCards from '../components/IndicatorCards.vue'
 import StageLocator from '../components/StageLocator.vue'

@@ -143,8 +143,8 @@
         <div v-if="!sealedRows.length" class="list-empty">当日没有封住的首板（或行情明细未回补，点每日复盘拉行情）</div>
         <div v-else class="chips">
           <div v-for="r in sealedRows" :key="r.code" class="chip">
-            <span class="chip-name">{{ r.name }}</span>
-            <span class="chip-code">{{ r.code }}</span>
+            <span class="chip-name tape-link" @click="openStockTape(r.code, r.name, date)">{{ r.name }}</span>
+            <span class="chip-code tape-link" @click="openStockTape(r.code, r.name, date)">{{ r.code }}</span>
             <span class="chip-industry" :class="{ 'in-main': r.inMain }">{{ r.industry || '—' }}</span>
             <el-tag v-if="r.pattern" size="small" :type="PATTERN_TYPE[r.pattern] || 'info'" effect="plain">
               {{ PATTERN_LABEL[r.pattern] || '—' }}
@@ -171,8 +171,8 @@
         <div v-else-if="!bombedRows.length" class="list-empty">当日没有首板炸板（或昨日明细未回补）</div>
         <div v-else class="chips">
           <div v-for="r in bombedRows" :key="r.code" class="chip chip-fail">
-            <span class="chip-name">{{ r.name }}</span>
-            <span class="chip-code">{{ r.code }}</span>
+            <span class="chip-name tape-link" @click="openStockTape(r.code, r.name, date)">{{ r.name }}</span>
+            <span class="chip-code tape-link" @click="openStockTape(r.code, r.name, date)">{{ r.code }}</span>
             <span class="chip-industry" :class="{ 'in-main': r.inMain }">{{ r.industry || '—' }}</span>
             <span :class="pctClass(r.changePct)" class="chip-pct">{{ r.changePct == null ? '—' : signed(r.changePct) + '%' }}</span>
             <span v-if="r.pullbackPct != null" class="chip-pullback">回撤 -{{ Number(r.pullbackPct).toFixed(2) }}%</span>
@@ -191,6 +191,7 @@ import { prdApi, recordApi } from '../api/modules'
 import { signed, fiveDimBandClassOf } from '../utils/scores'
 import { useTradingCalendar } from '../utils/tradingCalendar'
 import { canSeeRules } from '../utils/ruleVisibility'
+import { openStockTape } from '../utils/stockTape'
 import { useScoringStore } from '../stores/scoring'
 import DimScoreCurve from '../components/DimScoreCurve.vue'
 import DimIntroTip from '../components/DimIntroTip.vue'

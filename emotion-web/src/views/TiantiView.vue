@@ -165,7 +165,7 @@
         <div class="leader-pill" :class="{ set: !!leader.code }">
           <span class="leader-label">总龙头</span>
           <template v-if="leader.code">
-            <span class="leader-name">{{ leader.name }}·{{ leader.code }}</span>
+            <span class="leader-name tape-link" @click="openStockTape(leader.code, leader.name, date)">{{ leader.name }}·{{ leader.code }}</span>
             <template v-if="userStore.isSuperAdmin">
               <el-button size="small" link @click="leaderOpen = true">改</el-button>
               <el-button size="small" link type="danger" @click="clearLeader">✕</el-button>
@@ -203,7 +203,7 @@
             </div>
             <div class="chips">
               <div v-for="r in lvl.rows" :key="r.code" class="chip" :class="[roleChipClass(r.role), { 'chip-highlight': r.code === highlightCode }]" :data-code="r.code">
-                <span class="chip-name">{{ r.name }}</span>
+                <span class="chip-name tape-link" @click="openStockTape(r.code, r.name, date)">{{ r.name }}</span>
                 <el-tag v-if="r.role" size="small" :type="ROLE_TYPE[r.role] || 'info'" effect="dark">{{ r.role }}</el-tag>
                 <el-tag v-if="breakTagOf(r.code)" size="small" :type="breakTagOf(r.code).type" effect="dark"
                   :title="`破壁判定（${date}）：${breakTagOf(r.code).text}`">
@@ -241,7 +241,7 @@
                 </div>
                 <template v-if="lowFailExpanded">
                   <div v-for="f in lvl.failed" :key="'f' + f.code" class="chip chip-fail" :title="failTitle(f)">
-                    <span class="chip-name">{{ f.name }}</span>
+                    <span class="chip-name tape-link" @click="openStockTape(f.code, f.name, date)">{{ f.name }}</span>
                     <el-tag size="small" :type="FAIL_TYPE[f.todayStatus] || 'info'" effect="plain">
                       {{ FAIL_LABEL[f.todayStatus] || '未触板' }}
                     </el-tag>
@@ -256,7 +256,7 @@
               <template v-if="lvl.board >= 3">
                 <div v-for="f in (lvl.failed || [])" :key="'f' + f.code" class="chip chip-fail"
                   :title="failTitle(f)">
-                  <span class="chip-name">{{ f.name }}</span>
+                  <span class="chip-name tape-link" @click="openStockTape(f.code, f.name, date)">{{ f.name }}</span>
                   <el-tag size="small" :type="FAIL_TYPE[f.todayStatus] || 'info'" effect="plain">
                     {{ FAIL_LABEL[f.todayStatus] || '未触板' }}
                   </el-tag>
@@ -332,6 +332,7 @@ import { prdApi, leaderApi, recordApi } from '../api/modules'
 import { signed, fiveDimBandClassOf } from '../utils/scores'
 import { useTradingCalendar } from '../utils/tradingCalendar'
 import { canSeeRules } from '../utils/ruleVisibility'
+import { openStockTape } from '../utils/stockTape'
 import { useScoringStore } from '../stores/scoring'
 import { useUserStore } from '../stores/user'
 import BreakDetailPanel from '../components/BreakDetailPanel.vue'

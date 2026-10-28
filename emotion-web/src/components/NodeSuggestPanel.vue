@@ -40,7 +40,12 @@
 
     <p class="anchor" v-if="$canRule && s && s.anchor && s.anchor.name">
       锚定龙头：你写的「{{ s.anchor.input || '—' }}」→ 匹配到
-      {{ s.anchor.name }}（{{ s.anchor.code }}）{{ s.anchor.industry ? ' · ' + s.anchor.industry : '' }}，
+      <!-- 分时要看的是它最后一次涨停那天，不是今天：判据读的就是那一天的盘口 -->
+      <span v-if="s.anchor.lastLimitDate" class="tape-link"
+        @click="openStockTape(s.anchor.code, s.anchor.name, s.anchor.lastLimitDate)">
+        {{ s.anchor.name }}（{{ s.anchor.code }}）</span>
+      <template v-else>{{ s.anchor.name }}（{{ s.anchor.code }}）</template>
+      {{ s.anchor.industry ? ' · ' + s.anchor.industry : '' }}，
       最后一次涨停 {{ s.anchor.lastLimitDate || '—' }}
       <template v-if="s.anchor.lastConsecutive">（{{ s.anchor.lastConsecutive }}板）</template>。
       不是这一只的话别说采纳，先把名字改对再复算。
@@ -53,7 +58,12 @@
       <p class="basis" v-if="$canRule">判据：{{ s.promotion.threshold }}</p>
       <el-table v-if="s.promotion.items && s.promotion.items.length" :data="s.promotion.items"
         size="small" max-height="260" class="cands">
-        <el-table-column prop="name" label="名称" width="110" />
+        <!-- 逐只候选要能点开分时：判据说的是它们晋没晋级，而「那天它到底怎么走的」是这张表答不了的 -->
+        <el-table-column label="名称" width="110">
+          <template #default="{ row }">
+            <span class="tape-link" @click="openStockTape(row.code, row.name, s.candidateDate)">{{ row.name }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="code" label="代码" width="80" />
         <el-table-column prop="industry" label="行业" width="100" />
         <el-table-column label="T+1" width="70">
@@ -85,7 +95,9 @@
     </el-collapse>
 
     <p class="note" v-if="s && s.nodeStock">
-      节点票 {{ s.nodeStock }}{{ s.nodeStockMaxBoard ? `（最高 ${s.nodeStockMaxBoard} 板）` : '' }}
+      节点票 <!-- 后端给的是「名称(代码)」这一整串（与节点表同一格式），拆出代码才点得开分时 -->
+      <span class="tape-link" @click="openStockTape(splitStock(s.nodeStock).code, splitStock(s.nodeStock).name, s.candidateDate)">{{ s.nodeStock }}</span>
+      {{ s.nodeStockMaxBoard ? `（最高 ${s.nodeStockMaxBoard} 板）` : '' }}
     </p>
     <p class="hint" v-if="$canRule">
       采纳只写这一条节点自己算出来的那几格——高低切是状态与晋级那一组，破壁两行是状态与续板判定那一组，
@@ -105,6 +117,8 @@ import { ref, computed, watch } from 'vue'
 import { nodeApi } from '../api/modules'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '../stores/user'
+import { openStockTape } from '../utils/stockTape'
+import { splitStock } from '../utils/nodeTracks'
 
 const props = defineProps({
   node: { type: Object, required: true }

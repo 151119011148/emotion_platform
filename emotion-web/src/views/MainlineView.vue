@@ -115,7 +115,7 @@
         <div class="dragon-card" v-if="vo.dragon">
           <div class="dragon-line">
             <el-tag type="danger" effect="dark" size="small">总龙头</el-tag>
-            <span class="dragon-name">{{ vo.dragon.name || '—' }}</span>
+            <span class="dragon-name tape-link" @click="openStockTape(vo.dragon.code, vo.dragon.name, date)">{{ vo.dragon.name || '—' }}</span>
             <span class="dragon-code">{{ vo.dragon.code }}</span>
             <el-tag size="small" effect="plain">{{ vo.dragon.industry || '行业未登记' }}</el-tag>
             <span class="dragon-board">{{ nz(vo.dragon.board) }} 板</span>
@@ -141,7 +141,7 @@
             <!-- 窄屏：这张表五列约 470px，390 屏上要靠横向滚，改成一票一行；行业在表里是一列，这里退成名字后面的灰字 -->
             <div v-else-if="isNarrow" class="m-card">
               <div class="mc-line" v-for="row in vo.zhongJun" :key="row.code">
-                <span class="nm">{{ row.name }}<em class="cd">{{ row.code }}{{ row.industry ? ' · ' + row.industry : '' }}</em></span>
+                <span class="nm tape-link" @click="openStockTape(row.code, row.name, date)">{{ row.name }}<em class="cd">{{ row.code }}{{ row.industry ? ' · ' + row.industry : '' }}</em></span>
                 <span class="n">{{ nz(row.board) }}板</span>
                 <span class="n" :class="pctClass(row.changePct)">
                   {{ row.changePct == null ? '—' : signed(row.changePct) + '%' }}
@@ -150,7 +150,11 @@
             </div>
             <el-table v-else :data="vo.zhongJun" size="small">
               <el-table-column prop="code" label="代码" width="90" />
-              <el-table-column prop="name" label="名称" width="110" />
+              <el-table-column label="名称" width="110">
+                <template #default="{ row }">
+                  <span class="tape-link" @click="openStockTape(row.code, row.name, date)">{{ row.name }}</span>
+                </template>
+              </el-table-column>
               <el-table-column prop="industry" label="行业" min-width="110" show-overflow-tooltip />
               <el-table-column prop="board" label="连板" width="70" align="center" />
               <el-table-column label="涨跌" width="100" align="right">
@@ -167,7 +171,7 @@
             <h4>跟风 <span class="sub">日内核心内涨停 {{ vo.genFengCount ?? '—' }} 只</span></h4>
             <div class="ka-wei" v-if="vo.kaWei">
               <el-tag type="warning" effect="dark" size="small">卡位</el-tag>
-              <span class="member-name">{{ vo.kaWei.name }}</span>
+              <span class="member-name tape-link" @click="openStockTape(vo.kaWei.code, vo.kaWei.name, date)">{{ vo.kaWei.name }}</span>
               <span class="member-code">{{ vo.kaWei.code }}</span>
               <el-tag size="small" effect="plain">{{ vo.kaWei.industry || '—' }}</el-tag>
               <span>{{ nz(vo.kaWei.board) }} 板</span>
@@ -181,7 +185,7 @@
               <div class="fanbao-row">
                 <span v-for="f in vo.fanBao" :key="f.code" class="fanbao-item">
                   <el-tag type="info" effect="dark" size="small">反包</el-tag>
-                  {{ f.name }}（{{ f.code }}）
+                  <span class="tape-link" @click="openStockTape(f.code, f.name, date)">{{ f.name }}</span>（{{ f.code }}）
                 </span>
               </div>
             </template>
@@ -221,7 +225,7 @@
               </div>
               <div class="mc-cell wide">
                 <i>板块龙头</i>
-                <b v-if="row.leader">{{ row.leader.name }}（{{ row.leader.code }} · {{ nz(row.leader.board) }}板）</b>
+                <b v-if="row.leader"><span class="tape-link" @click="openStockTape(row.leader.code, row.leader.name, date)">{{ row.leader.name }}</span>（{{ row.leader.code }} · {{ nz(row.leader.board) }}板）</b>
                 <b v-else class="mut">—</b>
               </div>
             </div>
@@ -257,7 +261,7 @@
           <el-table-column label="板块龙头" min-width="180">
             <template #default="{ row }">
               <template v-if="row.leader">
-                {{ row.leader.name }}（{{ row.leader.code }} · {{ nz(row.leader.board) }}板）
+                <span class="tape-link" @click="openStockTape(row.leader.code, row.leader.name, date)">{{ row.leader.name }}</span>（{{ row.leader.code }} · {{ nz(row.leader.board) }}板）
               </template>
               <span v-else class="missing">—</span>
             </template>
@@ -300,7 +304,7 @@
               <div class="mc-cell wide"><i>关联板块</i><b>{{ (row.industries || []).join(' + ') || '—' }}</b></div>
               <div class="mc-cell wide">
                 <i>题材龙头</i>
-                <b v-if="row.leader">{{ row.leader.name }}（{{ row.leader.code }} · {{ nz(row.leader.board) }}板）</b>
+                <b v-if="row.leader"><span class="tape-link" @click="openStockTape(row.leader.code, row.leader.name, date)">{{ row.leader.name }}</span>（{{ row.leader.code }} · {{ nz(row.leader.board) }}板）</b>
                 <b v-else class="mut">—</b>
               </div>
             </div>
@@ -345,7 +349,7 @@
           </el-table-column>
           <el-table-column label="题材龙头" min-width="160">
             <template #default="{ row }">
-              <template v-if="row.leader">{{ row.leader.name }}（{{ row.leader.code }} · {{ nz(row.leader.board) }}板）</template>
+              <template v-if="row.leader"><span class="tape-link" @click="openStockTape(row.leader.code, row.leader.name, date)">{{ row.leader.name }}</span>（{{ row.leader.code }} · {{ nz(row.leader.board) }}板）</template>
               <span v-else class="missing">—</span>
             </template>
           </el-table-column>
@@ -372,6 +376,7 @@ import { ref, watch, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { prdApi, recordApi } from '../api/modules'
 import { signed } from '../utils/scores'
+import { openStockTape } from '../utils/stockTape'
 import { useTradingCalendar } from '../utils/tradingCalendar'
 import { useNarrow } from '../utils/narrowScreen'
 import { canSeeRules } from '../utils/ruleVisibility'

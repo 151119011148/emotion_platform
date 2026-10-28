@@ -170,7 +170,7 @@
         <div class="dragon-card" v-if="ml?.dragon">
           <div class="dragon-line">
             <el-tag type="danger" effect="dark" size="small">总龙头</el-tag>
-            <span class="dragon-name">{{ ml.dragon.name || '—' }}</span>
+            <span class="dragon-name tape-link" @click="openStockTape(ml.dragon.code, ml.dragon.name, date)">{{ ml.dragon.name || '—' }}</span>
             <span class="dragon-code">{{ ml.dragon.code }}</span>
             <el-tag size="small" effect="plain">{{ ml.dragon.industry || '行业未登记' }}</el-tag>
             <span class="dragon-board">{{ nz(ml.dragon.board) }} 板</span>
@@ -201,7 +201,9 @@
           </div>
           <div class="stat">
             <span class="stat-label">卡位</span>
-            <span class="stat-value kw">{{ ml?.kaWei?.name || '—' }}</span>
+            <!-- 卡位可以缺席（他题材高标没有），缺席时这格只剩一个「—」，不该画成可点 -->
+            <span class="stat-value kw" :class="{ 'tape-link': ml?.kaWei }"
+              @click="ml?.kaWei && openStockTape(ml.kaWei.code, ml.kaWei.name, date)">{{ ml?.kaWei?.name || '—' }}</span>
             <span class="stat-sub">
               <template v-if="ml?.kaWei">{{ ml.kaWei.sealed === false ? '今日炸板' : '封住' }} · {{ nz(ml.kaWei.board) }} 板</template>
               <template v-else>他题材高标缺席</template>
@@ -224,6 +226,7 @@ import { useRouter } from 'vue-router'
 import { marketApi, recordApi, prdApi } from '../api/modules'
 import { useScoringStore } from '../stores/scoring'
 import { signed } from '../utils/scores'
+import { openStockTape } from '../utils/stockTape'
 
 const props = defineProps({
   date: { type: String, required: true },

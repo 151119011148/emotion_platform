@@ -58,7 +58,7 @@
         <div v-for="a in anchorItems" :key="a.id" class="anchor-card">
           <div class="anchor-line">
             <el-tag type="danger" effect="dark" size="small">{{ a.roleLabel || '阵眼' }}</el-tag>
-            <span class="anchor-name">{{ a.name }}</span>
+            <span class="anchor-name tape-link" @click="openStockTape(a.code, a.name, date)">{{ a.name }}</span>
             <span class="anchor-code">{{ a.code }}</span>
             <el-tag size="small" effect="plain">{{ a.industry || '行业未登记' }}</el-tag>
             <span class="anchor-board">{{ a.consecutive == null ? '—' : a.consecutive + ' 板' }}</span>
@@ -209,7 +209,7 @@
             <el-table :data="monitorRows" size="small" :empty-text="'当前筛选下无在列监管股，勾掉「只看高位」看全部 ' + monitored.length + ' 家'">
               <el-table-column label="股票" min-width="132">
                 <template #default="{ row }">
-                  <span class="sp-name">{{ row.name }}</span><span class="sp-code">{{ row.code }}</span>
+                  <span class="sp-name tape-link" @click="openStockTape(row.code, row.name, date)">{{ row.name }}</span><span class="sp-code">{{ row.code }}</span>
                 </template>
               </el-table-column>
               <el-table-column label="行业" min-width="100">
@@ -328,6 +328,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { d5Api, recordApi, anchorsApi, reviewApi } from '../api/modules'
 import { signed } from '../utils/scores'
+import { openStockTape } from '../utils/stockTape'
 import { useTradingCalendar } from '../utils/tradingCalendar'
 import { useUserStore } from '../stores/user'
 import DimScoreCurve from '../components/DimScoreCurve.vue'

@@ -199,7 +199,7 @@
               </div>
               <div class="chips">
                 <div v-for="r in lvl.rows || []" :key="r.code" class="chip" :class="roleChipClass(r.role)">
-                  <span class="chip-name">{{ r.name }}</span>
+                  <span class="chip-name tape-link" @click="openStockTape(r.code, r.name, form.tradeDate)">{{ r.name }}</span>
                   <el-tag v-if="r.role" size="small" :type="ROLE_TYPE[r.role] || 'info'" effect="dark">{{ r.role }}</el-tag>
                   <el-tag v-if="r.manualLeader" size="small" type="warning" effect="dark">总龙头</el-tag>
                   <span v-if="r.pattern" class="ts-pattern" :class="patternClass(r.pattern)">{{ patternText(r.pattern) }}</span>
@@ -209,7 +209,7 @@
                 <!-- 晋级失败并入同层：服务端口径只在 n≥3 层给名单，2 板走首板生态页 -->
                 <template v-if="lvl.board >= 3">
                   <div v-for="f in lvl.failed || []" :key="'f' + f.code" class="chip chip-fail" :title="failTitle(f)">
-                    <span class="chip-name">{{ f.name }}</span>
+                    <span class="chip-name tape-link" @click="openStockTape(f.code, f.name, form.tradeDate)">{{ f.name }}</span>
                     <el-tag size="small" :type="FAIL_TYPE[f.todayStatus] || 'info'" effect="plain">
                       {{ FAIL_LABEL[f.todayStatus] || '未触板' }}
                     </el-tag>
@@ -249,7 +249,7 @@
             <div v-if="!(shouban.sealed || []).length" class="list-empty">当日没有封住的首板（或行情明细未回补，点一键拉取）</div>
             <div v-else class="chips">
               <div v-for="r in shouban.sealed" :key="r.code" class="chip">
-                <span class="chip-name">{{ r.name }}</span>
+                <span class="chip-name tape-link" @click="openStockTape(r.code, r.name, form.tradeDate)">{{ r.name }}</span>
                 <span class="chip-code">{{ r.code }}</span>
                 <span class="chip-industry" :class="{ 'in-main': r.inMain }">{{ r.industry || '—' }}</span>
                 <el-tag v-if="r.pattern" size="small" :type="SB_PATTERN_TYPE[r.pattern] || 'info'" effect="plain">
@@ -282,7 +282,7 @@
         <div v-if="(d5high.anchor && d5high.anchor.items || []).length" class="anchor-grid">
           <div v-for="it in d5high.anchor.items" :key="it.id" class="anchor-card">
             <div class="anchor-line1">
-              <b>{{ it.name }}</b>
+              <b class="tape-link" @click="openStockTape(it.code, it.name, form.tradeDate)">{{ it.name }}</b>
               <span v-if="it.roleLabel" class="role-tag">{{ it.roleLabel }}</span>
             </div>
             <div class="anchor-line2">
@@ -297,7 +297,11 @@
 
         <div class="d5-subtitle">监管池（{{ (d5high.monitorPool || []).length }} 家）</div>
         <el-table v-if="(d5high.monitorPool || []).length" :data="d5high.monitorPool" size="small" class="dim-table">
-          <el-table-column label="名称" prop="name" min-width="92" />
+          <el-table-column label="名称" min-width="92">
+            <template #default="{ row }">
+              <span class="tape-link" @click="openStockTape(row.code, row.name, form.tradeDate)">{{ row.name }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="行业" prop="industry" min-width="92" />
           <el-table-column label="连板" prop="consecutive" width="60" align="center" />
           <el-table-column label="类型" width="88">
@@ -335,7 +339,7 @@
         <div v-if="pendingCarry.length" class="pend-block">
           <div class="pend-head">⚠️ 昨日遗留决策（{{ pendingCarryDate }} 写，今日执行）</div>
           <div v-for="p in pendingCarry" :key="p.id" class="pend-row">
-            <span class="pend-stock"><b>{{ p.stockName }}</b> <span class="muted">{{ p.stockCode }}</span>
+            <span class="pend-stock"><b class="tape-link" @click="openStockTape(p.stockCode, p.stockName, (p.tradeDate || '').slice(0, 10))">{{ p.stockName }}</b> <span class="muted">{{ p.stockCode }}</span>
               <span v-if="p.boardNum" class="pend-board">{{ p.boardNum }}板</span>
               <span v-if="p.industry" class="pend-ind">{{ p.industry }}</span></span>
             <span class="pend-plan">
@@ -559,7 +563,11 @@
         :empty-text="importLoading ? '加载中…' : '该来源当天没有可带入的标的'" @selection-change="onImportSelect">
         <el-table-column type="selection" width="42" />
         <el-table-column label="代码" prop="code" width="80" />
-        <el-table-column label="名称" prop="name" min-width="110" />
+        <el-table-column label="名称" min-width="110">
+          <template #default="{ row }">
+            <span class="tape-link" @click="row.date && openStockTape(row.code, row.name, row.date)">{{ row.name }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="板块" prop="industry" width="96" />
         <el-table-column label="板数" prop="boardNum" width="60" />
         <el-table-column label="股数" prop="quantity" width="72" />
@@ -629,6 +637,7 @@ import { useTradingCalendar } from '../utils/tradingCalendar'
 import { useScoringStore } from '../stores/scoring'
 import { useUserStore } from '../stores/user'
 import { bandOfPoint } from '../utils/stages'
+import { openStockTape } from '../utils/stockTape'
 import { pnlOf, yuan, realizedOf } from '../utils/money'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import EditableStatCard from '../components/EditableStatCard.vue'
@@ -1317,7 +1326,8 @@ async function loadImportCandidates() {
         if (!last || (r.tradeDate || '').slice(0, 10) !== last) continue
         if (r.status === '今日清仓' || !r.stockCode || seen[r.stockCode]) continue
         seen[r.stockCode] = 1
-        out.push({ code: r.stockCode, name: r.stockName, industry: r.industry || '', boardNum: r.boardNum || null, quantity: r.quantity || null })
+        // date 带着这行是从哪天取的：分时要点开那一天的盘口才对得上，池子和阵眼取的是当天
+        out.push({ code: r.stockCode, name: r.stockName, industry: r.industry || '', boardNum: r.boardNum || null, quantity: r.quantity || null, date: last })
       }
       importCandidates.value = out
     } else if (importSource.value === 'pool') {
@@ -1325,7 +1335,7 @@ async function loadImportCandidates() {
       const out = []
       for (const tier of (res?.data?.ladder || [])) {
         for (const s of (tier.stocks || [])) {
-          out.push({ code: s.code, name: s.name, industry: s.industry || '', boardNum: tier.board || null })
+          out.push({ code: s.code, name: s.name, industry: s.industry || '', boardNum: tier.board || null, date })
         }
       }
       importCandidates.value = out
@@ -1333,7 +1343,7 @@ async function loadImportCandidates() {
       const res = await anchorsApi.config(date).catch(() => null)
       importCandidates.value = (res?.data || [])
         .filter(a => a.stockCode)
-        .map(a => ({ code: a.stockCode, name: a.stockName || '', industry: '', boardNum: null }))
+        .map(a => ({ code: a.stockCode, name: a.stockName || '', industry: '', boardNum: null, date }))
     }
   } finally { importLoading.value = false }
 }

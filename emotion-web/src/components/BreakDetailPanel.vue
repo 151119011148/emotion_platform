@@ -6,7 +6,8 @@
         {{ eventText }}
       </span>
       <span class="day">{{ date }}</span>
-      <span class="subject" v-if="d && d.subject">
+      <span class="subject tape-link" v-if="d && d.subject"
+        @click="openStockTape(d.subject.code, d.subject.name, date)">
         {{ d.subject.name }}（{{ d.subject.code }}）{{ d.subject.board != null ? d.subject.board + '板' : '' }}
       </span>
       <span class="spacer"></span>
@@ -25,7 +26,10 @@
       <template v-else>追 {{ dash(ceilingShown) }} 板破壁线</template>
       <template v-if="d.lineOriginDate">
         · 这条线由 {{ d.lineOriginDate }} 的
-        {{ d.lineOriginStock ? d.lineOriginStock.name : '—' }} 立起
+        <span v-if="d.lineOriginStock" class="tape-link"
+          @click="openStockTape(d.lineOriginStock.code, d.lineOriginStock.name, d.lineOriginDate)">
+          {{ d.lineOriginStock.name }}</span>
+        <template v-else>—</template> 立起
       </template>
       <template v-if="d.oldDragonHeight != null">｜挂账旧龙 {{ d.oldDragonHeight }} 板</template>
       <el-tag v-if="d.chaos" size="small" type="warning" effect="plain">钉线倒计时</el-tag>
@@ -95,10 +99,12 @@
 
     <div class="stocks" v-if="a && ((a.firstStocks && a.firstStocks.length) || (a.followStocks && a.followStocks.length))">
       <span class="cell-label">助攻名单</span>
-      <el-tag v-for="s in a.firstStocks" :key="'f' + s.code" size="small" type="success" effect="plain">
+      <el-tag v-for="s in a.firstStocks" :key="'f' + s.code" size="small" type="success" effect="plain"
+        class="tape-link" @click="openStockTape(s.code, s.name, date)">
         {{ s.name }}·首板
       </el-tag>
-      <el-tag v-for="s in a.followStocks" :key="'k' + s.code" size="small" effect="plain">
+      <el-tag v-for="s in a.followStocks" :key="'k' + s.code" size="small" effect="plain"
+        class="tape-link" @click="openStockTape(s.code, s.name, date)">
         {{ s.name }}·{{ s.board }}板
       </el-tag>
     </div>
@@ -124,6 +130,7 @@ import { ref, computed, watch } from 'vue'
 import { prdApi, nodeApi } from '../api/modules'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '../stores/user'
+import { openStockTape } from '../utils/stockTape'
 
 const props = defineProps({
   date: { type: String, required: true }

@@ -84,7 +84,7 @@
           <div class="mc-head">
             <span class="mc-rank">{{ row.rankNo }}</span>
             <span class="mc-name">
-              <span class="nm-text" @click="goTianti(row)">{{ row.name }}</span>
+              <span class="nm-text tape-link" @click="openStockTape(row.code, row.name, date)">{{ row.name }}</span>
               <em class="mc-code">{{ row.code }}</em>
             </span>
             <span class="mc-board">{{ row.board }} 板</span>
@@ -135,7 +135,7 @@
                   <template #content>
                     <div>代码 {{ row.code }}</div>
                   </template>
-                  <span class="nm-text" @click="goTianti(row)">{{ row.name }}</span>
+                  <span class="nm-text tape-link" @click="openStockTape(row.code, row.name, date)">{{ row.name }}</span>
                 </el-tooltip>
                 <span class="nm-tags">
                   <el-tag v-for="t in nodeTagsOf(row)" :key="t.kind" size="small" effect="dark"
@@ -332,7 +332,7 @@
             <div class="mc-head">
               <span class="mc-rank">{{ row.rankNo }}</span>
               <span class="mc-name">
-                <span class="nm-text" @click="goTianti(row, reviewPool.tradeDate)">{{ row.name }}</span>
+                <span class="nm-text tape-link" @click="openStockTape(row.code, row.name, reviewPool.tradeDate)">{{ row.name }}</span>
                 <em class="mc-code">{{ row.code }}</em>
               </span>
               <span class="mc-board">{{ row.board }} 板</span>
@@ -384,7 +384,7 @@
                   <template #content>
                     <div>代码 {{ row.code }}</div>
                   </template>
-                  <span class="nm-text" @click="goTianti(row, reviewPool.tradeDate)">{{ row.name }}</span>
+                  <span class="nm-text tape-link" @click="openStockTape(row.code, row.name, reviewPool.tradeDate)">{{ row.name }}</span>
                 </el-tooltip>
               </template>
             </el-table-column>
@@ -590,16 +590,15 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { waveriderApi } from '../api/modules'
+import { openStockTape } from '../utils/stockTape'
 import { useTradingCalendar } from '../utils/tradingCalendar'
 import { useUserStore } from '../stores/user'
 import { canSeeRules } from '../utils/ruleVisibility'
 import { useNarrow } from '../utils/narrowScreen'
 
 const { cellClass, disabledDate, loadTradingDays } = useTradingCalendar()
-const router = useRouter()
 const userStore = useUserStore()
 /** 手机档：两张表换成卡片流。断点与下面那条 @media 必须同数（见 narrowScreen.js）。 */
 const { isNarrow } = useNarrow()
@@ -630,15 +629,6 @@ const NODE_KIND_TYPE = { NODE_STOCK: 'danger', ANCHOR: 'warning', D0_CAND: 'info
 const nodeTagCount = computed(
   () => candidates.value.filter((c) => c.nodeTags && c.nodeTags.length).length
 )
-
-/**
- * 跳「连板天梯」看这只票的上下文。{@code on} 是<b>这一行所属的交易日</b>，必须显式传：
- * 复盘池那些行属于更早的候选日，跟着页面当前的 date 走会跳到错的那一天，
- * 而跳错和跳对在页面上长得一样，只能靠传参避免。
- */
-function goTianti(row, on) {
-  router.push({ path: '/tianti', query: { date: on || date.value, code: row.code } })
-}
 
 /**
  * 同一角色可能命中多条节点事件（一只票既当过甲节点的节点票、又是乙节点的 D0 候选），

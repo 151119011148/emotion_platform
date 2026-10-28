@@ -108,7 +108,7 @@
         <el-table-column label="锚定龙头" min-width="126" show-overflow-tooltip>
           <template #default="{ row }">
             <div class="nc">
-              <span>{{ row.anchorName || row.anchorStock || '—' }}</span>
+              <span class="tape-link" @click.stop="openStockTape(row.anchorCode || splitStock(row.anchorStock).code, row.anchorName || splitStock(row.anchorStock).name, row.d0Date)">{{ row.anchorName || row.anchorStock || '—' }}</span>
               <el-tag size="small" type="success" v-if="row.anchorRoleLabel">{{ row.anchorRoleLabel }}</el-tag>
               <span class="nboard" v-if="row.anchorMaxBoard">{{ row.anchorMaxBoard }}板</span>
               <span class="nc-theme" v-if="row.theme">· {{ row.theme }}</span>
@@ -118,7 +118,8 @@
         <el-table-column label="节点票" min-width="146" show-overflow-tooltip>
           <template #default="{ row }">
             <div class="node-stock">
-              <div class="ns-name" :title="row.nodeStock || ''">{{ row.nodeStock || '—' }}</div>
+              <div class="ns-name tape-link" :title="row.nodeStock || ''"
+                @click.stop="openStockTape(splitStock(row.nodeStock).code, splitStock(row.nodeStock).name, row.d0Date)">{{ row.nodeStock || '—' }}</div>
               <div class="ns-meta" v-if="row.surveillance || row.nodeStockStatus">
                 <el-tag v-if="row.surveillance" type="danger" size="small" class="ns-tag" title="SEVERE/EXCH 监管">⚠ 监管</el-tag>
                 <el-tag v-if="row.nodeStockStatus" size="small" class="ns-tag"
@@ -327,7 +328,8 @@ import { useTradingCalendar } from '../utils/tradingCalendar'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import NodeSuggestPanel from '../components/NodeSuggestPanel.vue'
 import BoardHeightCurve from '../components/BoardHeightCurve.vue'
-import { buildNodeTracks } from '../utils/nodeTracks'
+import { buildNodeTracks, splitStock } from '../utils/nodeTracks'
+import { openStockTape } from '../utils/stockTape'
 import { useUserStore } from '../stores/user'
 
 const { disabledDate, cellClass, loadTradingDays } = useTradingCalendar()

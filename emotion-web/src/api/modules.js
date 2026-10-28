@@ -195,6 +195,18 @@ export const marketApi = {
   scoreContext: (date) => api.get('/market/score-context', { params: { date }, timeout: 60000 })
 }
 
+/**
+ * 个股分时：分钟序列 + 集合竞价快照。
+ *
+ * <p>只读库、不回源（上游的分钟线只给当天那一天，历史补不回来），所以这条一定在
+ * 10s 默认超时内回来，缺数由响应里的 {@code available=false + emptyReason} 说话，
+ * 不用弹红条——「这一天没抓」是数据状态，不是请求失败。
+ */
+export const stockTapeApi = {
+  tape: (code, date) =>
+    api.get('/stock-tape', { params: { code, date }, skipErrorToast: true })
+}
+
 export const importApi = {
   // 复盘页底部那块只读明细。md 导入本身还有四个端点（POST /records/import、
   // /import/template、/import/export），页面撤了但契约没撤，要用走 curl。
