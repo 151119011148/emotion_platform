@@ -17,10 +17,14 @@
 #   3) 已有 deploy/init_full.sql（全量数据库初始化脚本，自带 CREATE DATABASE）
 #
 # 环境变量
-#   ALINUX_HOST        服务器公网 IP           默认 47.117.110.143
+#   ALINUX_HOST        服务器公网 IP           【必填】；也可写在本机 deploy/alinux/deploy.env
 #   ALINUX_SSH_USER    登录用户名              默认 root
 #   ALINUX_SSH_PASS    登录密码                【必填】
 #   ALINUX_MYSQL_PASS  服务器 MySQL root 密码   可选；为空则尝试从服务器 /root/mysql_pass.txt 读
+#   EMOTION_DB_HOST    服务器上后端连 MySQL 用哪个主机   默认 localhost（库就在同一台机器上）
+#   EMOTION_DB_PORT    上面那个端口                       默认 3306
+#                      这两个只决定④步生成给**生产**用的那份配置里的 url；本机联调不受影响
+#                      （本机读的是环境变量 ${MYSQL_IP:localhost} 或你自己那份未入库的 application-local.yml）。
 #   SKIP_DB_INIT       可选；=1 跳过③整库导入，只发代码。init_full.sql 对每张表都
 #                      DROP TABLE IF EXISTS，跑了就把线上数据退回那份 dump 的快照时刻，
 #                      纯代码/无表结构变更的发版应该设这个（④仍会解析 MySQL 密码）
@@ -30,6 +34,7 @@
 #
 # 用法
 #   ALINUX_SSH_PASS='你的密码' bash deploy/alinux/deploy.sh
+#   （主机地址从本机 deploy/alinux/deploy.env 读；不给这份文件就得在命令行一起导出 ALINUX_HOST）
 #
 # 流程（幂等，可重复执行）
 #   ① 本机构建后端 fat jar + 前端 dist
@@ -42,17 +47,33 @@
 set -euo pipefail
 
 # ---------------- 配置区（环境变量覆盖） ----------------
-SERVER_IP="${ALINUX_HOST:-47.117.110.143}"
+BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPTS_DIR="$BASE_DIR/scripts"
+CONFIG_DIR="$BASE_DIR/config"
+
+# 服务器地址不进仓库：先看环境变量 ALINUX_HOST，再看本机那一份 deploy/alinux/deploy.env
+#（被 .gitignore 挡住，只在跑部署的这台机器上）。两者都没有就停住——
+# 留一个"默认 IP"等于任何一份拷贝都能往那台机器上推代码。
+if [ -f "$BASE_DIR/deploy.env" ]; then
+  set -a; . "$BASE_DIR/deploy.env"; set +a
+fi
+SERVER_IP="${ALINUX_HOST:?服务器地址没配：导出 ALINUX_HOST，或在本机 deploy/alinux/deploy.env 里写一行 ALINUX_HOST=...（见 deploy.env.example）}"
 SSH_USER="${ALINUX_SSH_USER:-root}"
 SSH_PASS="${ALINUX_SSH_PASS:?必须设置 ALINUX_SSH_PASS（服务器 SSH 登录密码）}"
 MYSQL_PASS="${ALINUX_MYSQL_PASS:-}"
+# ④ 步生成给生产用的那份配置里，后端连 MySQL 用哪个地址。默认库就在同一台机器上。
+# 校验形状：这两个值要经 sed 进 yml，让它带 `/`、`&` 或换行就能改写整份配置。
+DB_HOST="${EMOTION_DB_HOST:-localhost}"
+DB_PORT="${EMOTION_DB_PORT:-3306}"
+# die() 还没定义（在下面的函数区），这里直接自己退出。
+printf '%s' "$DB_HOST" | grep -qE '^[A-Za-z0-9._-]+$' || {
+  echo "[ERROR] EMOTION_DB_HOST 形状不对：'$DB_HOST'（只允许字母数字和 . _ -）" >&2; exit 1; }
+printf '%s' "$DB_PORT" | grep -qE '^[0-9]+$' || {
+  echo "[ERROR] EMOTION_DB_PORT 不是数字：'$DB_PORT'" >&2; exit 1; }
 
 REMOTE_APP=/opt/emotion/app      # 后端 jar + application-local.yml 目录
 REMOTE_WEB=/var/www/emotion-web  # 前端静态页根目录
 
-BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPTS_DIR="$BASE_DIR/scripts"
-CONFIG_DIR="$BASE_DIR/config"
 PROJECT_ROOT="$(cd "$BASE_DIR/../.." && pwd)"    # emotion 项目根
 INIT_SQL="$BASE_DIR/../init_full.sql"            # deploy/init_full.sql
 
@@ -193,9 +214,20 @@ render_local_yml() {
   # 分隔符仍用 /：所以 MYSQL_PASS 不能含 / 与 &（README 已写死这条约束）。
   # 渲染在 mac 上跑（BSD sed）：BSD sed 遇到第一个脚本之后就不再接参数，
   # 所以两条表达式必须挂在同一个 -E 下面写成 -e ... -e ...，否则第二条会被当成文件名。
-  sed -E -e "s/^([[:space:]]*password:[[:space:]]*)__MYSQL_PASSWORD__[[:space:]]*$/\1$MYSQL_PASS/" \
-         -e "s/^([[:space:]]*secret:[[:space:]]*)__JWT_SECRET__[[:space:]]*$/\1$JWT_SECRET/" \
+  # url 那条按整行锚定（`url: jdbc:mysql://占位:占位/...`），所以模板头部注释里写的
+  # __MYSQL_HOST__ 只是名字，不会被换成真值——和口令/密钥同一套纪律。
+  sed -E -e "s|^([[:space:]]*url:[[:space:]]*)jdbc:mysql://__MYSQL_HOST__:__MYSQL_PORT__|\1jdbc:mysql://$DB_HOST:$DB_PORT|" \
+         -e "s/^([[:space:]]*password:[[:space:]]*)__MYSQL_PASSWORD__[[:space:]]*\$/\1$MYSQL_PASS/" \
+         -e "s/^([[:space:]]*secret:[[:space:]]*)__JWT_SECRET__[[:space:]]*\$/\1$JWT_SECRET/" \
       "$CONFIG_DIR/application-local.yml.template" > "$TMP_DIR/application-local.yml"
+
+  # 占位符没被换掉＝④ 步会把一份字面量 __MYSQL_HOST__ 的配置推上线，
+  # 后端连库直接崩。锚定式最容易坏（模板那行改了写法就悄悄不匹配），所以在这里数一遍。
+  if grep -qE '^[[:space:]]*url:.*__MYSQL_(HOST|PORT)__' "$TMP_DIR/application-local.yml"; then
+    die "生成的 application-local.yml 里 url 行的库地址占位符没被替换，已中止，不上传这份配置"
+  fi
+  grep -q "jdbc:mysql://$DB_HOST:$DB_PORT/" "$TMP_DIR/application-local.yml" \
+    || die "生成的 application-local.yml 里没有 jdbc:mysql://$DB_HOST:$DB_PORT/，④ 步中止"
 
   # 真值在这份文件里各只允许出现一次。多出来的那一份一定在注释里，
   # 而它马上就会被上传成一个全世界可读的文件——宁可发版在这里停住。

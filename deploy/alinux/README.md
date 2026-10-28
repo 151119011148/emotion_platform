@@ -30,9 +30,10 @@ deploy/alinux/
 # 1) 前置：本机装 expect，装好 mvn 和一个可用 node
 brew install expect   # macOS
 
-# 2) 一键部署（必填 SSH 密码；MySQL 密码缺省读服务器 /root/mysql_pass.txt）
+# 2) 一键部署（必填 SSH 密码和目标主机；MySQL 密码缺省读服务器 /root/mysql_pass.txt）
+#    主机也可以不进命令行：cp deploy.env.example deploy.env，填 ALINUX_HOST=<公网IP>
 ALINUX_SSH_PASS='把服务器登录密码填这里' \
-ALINUX_HOST=47.117.110.143 \
+ALINUX_HOST='<服务器公网IP>' \
 bash deploy/alinux/deploy.sh
 ```
 

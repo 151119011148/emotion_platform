@@ -14,7 +14,7 @@
 #   bash backfill.sh <TOKEN> <LOG_FILE> <BASE_URL> <DATE...>
 #     TOKEN    JWT 令牌
 #     LOG_FILE 结果追加写到此文件
-#     BASE_URL 后端地址，服务器本机 http://127.0.0.1:8080，公网 http://47.117.110.143
+#     BASE_URL 后端地址，服务器本机 http://127.0.0.1:8080，公网 http://<服务器IP>
 #     DATE...  要回补的交易日，形如 2026-09-23，可多个
 #
 # 完成判定：fetch 接口是 SSE，编排结束才 complete；脚本改为后台触发 fetch，

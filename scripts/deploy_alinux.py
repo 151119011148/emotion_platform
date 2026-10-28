@@ -3,7 +3,7 @@
 emotion 发版到阿里云（本机没有 expect，用 paramiko 顶替 deploy/alinux/scripts/*.exp）。
 
 用法（密码从环境变量进，不落盘、不进命令行历史）：
-  PYTHONIOENCODING=utf-8 python scripts/deploy_alinux.py --host 47.117.110.143 --user root
+  PYTHONIOENCODING=utf-8 python scripts/deploy_alinux.py --host <公网IP> --user root
   SSH 密码从环境变量 EMOTION_SSH_PASS 读；没有则交互式提示（getpass，不回显）。
 
 做什么：
@@ -66,11 +66,14 @@ def run(c, cmd, desc=''):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--host', default=os.environ.get('ALINUX_HOST', '47.117.110.143'))
+    ap.add_argument('--host', default=os.environ.get('ALINUX_HOST', ''))
     ap.add_argument('--user', default=os.environ.get('ALINUX_SSH_USER', 'root'))
     ap.add_argument('--skip-backend', action='store_true')
     ap.add_argument('--skip-frontend', action='store_true')
     a = ap.parse_args()
+    # 主机不写死在脚本里：--host 或环境变量 ALINUX_HOST，二者皆空就停，宁可不动机器
+    if not a.host:
+        sys.exit('主机没给：--host <公网IP>，或导出 ALINUX_HOST（deploy.sh 也读这个）')
 
     jar = find_jar()
     if not jar:

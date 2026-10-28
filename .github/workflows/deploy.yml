@@ -6,7 +6,7 @@ name: deploy
 # 触发：push 到 main，或手动在 Actions 页面点 "Run workflow"。
 #
 # 需要在 GitHub 仓库 Settings → Secrets → Actions 里配置：
-#   ALINUX_HOST        服务器公网 IP      （如 47.117.110.143）
+#   ALINUX_HOST        服务器公网 IP      （GitHub Actions secret）
 #   ALINUX_SSH_USER    登录用户名         （root）
 #   ALINUX_SSH_PASS    登录密码           【必填，alinux 走密码 SSH（expect 能读 password 登录）】
 #   ALINUX_MYSQL_PASS  服务器 MySQL root 密码（可选；留空则自动读服务器 /root/mysql_pass.txt）

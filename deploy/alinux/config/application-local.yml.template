@@ -14,6 +14,8 @@
 #   /opt/emotion/app/application-local.yml   （和 emotion-server.jar 同目录）
 #
 # 占位符（由 deploy.sh 用 sed 替换）：
+#   __MYSQL_HOST__      -> 服务器那端连 MySQL 用的主机，取环境变量 EMOTION_DB_HOST（缺省 localhost）
+#   __MYSQL_PORT__      -> 端口，取 EMOTION_DB_PORT（缺省 3306）
 #   __MYSQL_PASSWORD__  -> 服务器 MySQL root 密码（每次发版现取）
 #   __JWT_SECRET__      -> JWT 签名密钥。**不再每次新生成**：复用服务器上的
 #                          /opt/emotion/app/jwt.secret（600，不进 git），那个文件缺失时
@@ -24,7 +26,10 @@
 spring:
   datasource:
     # 覆盖 application.yml 里的 ${MYSQL_PASSWORD:} 空值。
-    # 服务器上数据库名固定 emotion_dashboard，用户 root，主机 localhost（本机），不用重复配。
+    # 库地址**显式写在这里**，不靠 jar 的 ${MYSQL_IP:localhost} 默认值：
+    # 那两个占位符由 deploy.sh 从本机 deploy.env 的 EMOTION_DB_HOST / EMOTION_DB_PORT 渲染，
+    # 服务器上的库在哪台机器、哪个端口，看一眼这份生成出来的文件就知道，不用猜。
+    url: jdbc:mysql://__MYSQL_HOST__:__MYSQL_PORT__/emotion_dashboard?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     password: __MYSQL_PASSWORD__
     # 覆盖 jar 里的 Hikari 默认值（默认 maximumPoolSize=10，且 minimumIdle 不写就等于它）。
     hikari:
