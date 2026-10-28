@@ -39,11 +39,30 @@ public class TencentClient {
     private static final DateTimeFormatter QUOTE_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
 
     private static final int IDX_CODE = 2;
+    private static final int IDX_NAME = 1;
     private static final int IDX_PREV_CLOSE = 4;
     private static final int IDX_QUOTE_TIME = 30;
     private static final int IDX_CHANGE_PCT = 32;
     private static final int IDX_AMOUNT_WAN = 37;
     private static final int MIN_FIELD_COUNT = 38;
+
+    /**
+     * 竞价快照要用的字段位。2026-10-28 拿百洋股份(002696)那行 88 段逐个对过：
+     * 现价 11.77 / 昨收 10.70 / 今开 10.74 / 成交量 1124824 手 / 买一 11.77×3911 手 /
+     * 卖一 11.77×0 手 / 成交额 120210 万 / 涨停 11.77 对 10.70×1.1 ✓ / 跌停 9.63 对 10.70×0.9 ✓。
+     *
+     * <p>第 47 段已经在 {@link #MIN_FIELD_COUNT} 之外，而每一行是否真有 48 段以上取决于上游当天
+     * 给的是什么品种，所以读这些位子必须按行长度兜底——读越界只会拿到 null，
+     * 不能让整次快照（包括已经拿到的溢价样本）跟着一起崩。
+     */
+    private static final int IDX_LAST_PRICE = 3;
+    private static final int IDX_OPEN_PRICE = 5;
+    private static final int IDX_VOLUME_HAND = 6;
+    private static final int IDX_BID1_PRICE = 9;
+    private static final int IDX_BID1_HAND = 10;
+    private static final int IDX_ASK1_PRICE = 19;
+    private static final int IDX_ASK1_HAND = 20;
+    private static final int IDX_LIMIT_UP = 47;
 
     /** 日 K 每行 [日期,开,收,高,低,量,{},换手,成交额(万),..]。 */
     private static final int IDX_KLINE_CLOSE = 2;
@@ -63,6 +82,8 @@ public class TencentClient {
     private final String shIndex;
     private final String szIndex;
     private final String klineUrl;
+    /** 分钟序列接口。与日 K 同一个主机（proxy.finance.qq.com），那个域在本机实测可达。 */
+    private final String minuteUrl;
     private final int dayAmountBars;
     /** gtimg 码 → t_index_close.index_code。顺序就是导出文档里那五行的顺序。 */
     private final Map<String, String> indexCloseCodes;
@@ -74,6 +95,7 @@ public class TencentClient {
                          @Value("${market.tencent.sh-index:sh000001}") String shIndex,
                          @Value("${market.tencent.sz-index:sz399001}") String szIndex,
                          @Value("${market.tencent.kline-url:https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get}") String klineUrl,
+                         @Value("${market.tencent.minute-url:https://proxy.finance.qq.com/ifzqgtimg/appstock/app/minute/query}") String minuteUrl,
                          @Value("${market.tencent.day-amount-bars:12}") int dayAmountBars,
                          @Value("${market.tencent.index-close-codes:"
                                  + DEFAULT_INDEX_CLOSE_CODES + "}") String indexCloseCodes) {
@@ -83,6 +105,7 @@ public class TencentClient {
         this.shIndex = shIndex;
         this.szIndex = szIndex;
         this.klineUrl = klineUrl;
+        this.minuteUrl = minuteUrl;
         this.dayAmountBars = Math.max(2, dayAmountBars);
         this.indexCloseCodes = parseIndexCloseCodes(indexCloseCodes);
     }
@@ -188,12 +211,30 @@ public class TencentClient {
             StockQuote quote = new StockQuote();
             quote.setSymbol(symbol);
             quote.setCode(f[IDX_CODE]);
+            quote.setName(f[IDX_NAME]);
             quote.setChangePct(toDecimal(f[IDX_CHANGE_PCT]));
             quote.setPrevClose(toDecimal(f[IDX_PREV_CLOSE]));
             quote.setAmountWan(toDecimal(f[IDX_AMOUNT_WAN]));
             quote.setQuoteDate(toDate(f[IDX_QUOTE_TIME]));
+            // 竞价快照要用的几段。逐段按长度取：老响应短于 48 段时拿到 null，
+            // 而不是让整批快照（包括已经拿到的溢价样本）跟着越界异常一起没。
+            quote.setLastPrice(toDecimal(at(f, IDX_LAST_PRICE)));
+            quote.setOpenPrice(toDecimal(at(f, IDX_OPEN_PRICE)));
+            quote.setVolumeHand(toLong(at(f, IDX_VOLUME_HAND)));
+            quote.setBid1Price(toDecimal(at(f, IDX_BID1_PRICE)));
+            quote.setBid1Hand(toLong(at(f, IDX_BID1_HAND)));
+            quote.setAsk1Price(toDecimal(at(f, IDX_ASK1_PRICE)));
+            quote.setAsk1Hand(toLong(at(f, IDX_ASK1_HAND)));
+            quote.setLimitUpPrice(toDecimal(at(f, IDX_LIMIT_UP)));
+            quote.setQuoteTime(at(f, IDX_QUOTE_TIME));
+            quote.setRawPayload(line.substring(open + 1, close));
             sink.put(symbol, quote);
         }
+    }
+
+    /** 越界与空串都给 null：盘口字段位在不同品种上长度不一，缺就是缺。 */
+    private static String at(String[] fields, int index) {
+        return fields == null || index < 0 || index >= fields.length ? null : fields[index];
     }
 
     private static String extractSymbol(String line) {
@@ -267,6 +308,136 @@ public class TencentClient {
     public BigDecimal dayAmountBillion(String symbol, LocalDate date) {
         String url = klineUrl + "?param=" + symbol + ",day," + date + "," + date + "," + dayAmountBars + ",qfq";
         return parseDayAmount(fetcher.getText(url), symbol, date);
+    }
+
+    /**
+     * 当天的分钟序列。一票一次请求（这个接口不接多代码），所以调用方是一趟循环。
+     *
+     * <p><strong>只有当天</strong>：实测 2026-10-28 请求返回 {@code date=20261028}、267 根、
+     * 首根 0930、末根 1530。过完今晚这一天的序列就永久取不到了，所以它必须由排班每天抓，
+     * 而不能等到要用的时候再回源——这一条就是 {@code stockMinutePullTask} 存在的全部理由。
+     *
+     * <p>每根是「HHMM 价格 累计量(手) 累计额(元)」，累计口径原样交出，差分留给读侧。
+     * 空响应／结构不对／date 缺失一律返回空序列（{@link HttpFetcher} 的约定：失败收敛成 null，
+     * 一只票拉挂不该让整趟循环停摆），由调用方决定在报文里点名。
+     */
+    public MinuteSeries minuteSeries(String gtimgCode) {
+        if (gtimgCode == null || gtimgCode.isEmpty()) {
+            return MinuteSeries.empty();
+        }
+        return parseMinuteSeries(fetcher.getText(minuteUrl + "?code=" + gtimgCode), gtimgCode);
+    }
+
+    /** 包级可见：单测直接喂存下来的响应，不联网。 */
+    MinuteSeries parseMinuteSeries(String body, String symbol) {
+        if (body == null || body.trim().isEmpty()) {
+            return MinuteSeries.empty();
+        }
+        try {
+            JsonNode root = mapper.readTree(body);
+            JsonNode payload = root.path("data").path(symbol).path("data");
+            JsonNode rows = payload.path("data");
+            LocalDate date = toDecimalDate(payload.path("date").asText(null));
+            if (!rows.isArray() || rows.size() == 0) {
+                return MinuteSeries.empty();
+            }
+            List<MinuteTick> ticks = new ArrayList<MinuteTick>();
+            for (JsonNode row : rows) {
+                MinuteTick tick = parseTick(row.asText(null), date);
+                if (tick != null) {
+                    ticks.add(tick);
+                }
+            }
+            return new MinuteSeries(date, ticks);
+        } catch (Exception e) {
+            log.warn("分钟序列解析失败 symbol={} 原因={}", symbol, e.getClass().getSimpleName());
+            return MinuteSeries.empty();
+        }
+    }
+
+    /**
+     * 一根：{@code "0930 10.74 42064 45176736.00"}。
+     *
+     * <p>时间或价格解不出来就整根丢弃而不是补 0：一根假的 0 价会画成断崖，
+     * 而少一根只是那一分钟没采样，读侧差分照样连贯。
+     */
+    static MinuteTick parseTick(String raw, LocalDate date) {
+        if (raw == null) {
+            return null;
+        }
+        String[] parts = raw.trim().split("\\s+");
+        if (parts.length < 2) {
+            return null;
+        }
+        Integer minute = toMinute(parts[0]);
+        BigDecimal price = toDecimal(parts[1]);
+        if (minute == null || price == null) {
+            return null;
+        }
+        return new MinuteTick(minute, price,
+                parts.length > 2 ? toLong(parts[2]) : null,
+                parts.length > 3 ? toDecimal(parts[3]) : null);
+    }
+
+    /** {@code "0930"}（也可能带秒 {@code "093000"}）→ 930。 */
+    static Integer toMinute(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String digits = raw.trim().replaceAll("[^0-9]", "");
+        if (digits.length() == 6) {
+            digits = digits.substring(0, 4);
+        }
+        if (digits.length() != 4) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(digits);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** {@code "20261028"} → LocalDate；解不出来给 null，让调用方去判「这不是今天的序列」。 */
+    static LocalDate toDecimalDate(String raw) {
+        return toDate(raw);
+    }
+
+    /** 一天的分钟序列：日期 ＋ 逐根。空响应用 {@link #empty()}。 */
+    public static class MinuteSeries {
+        private final LocalDate date;
+        private final List<MinuteTick> ticks;
+
+        public MinuteSeries(LocalDate date, List<MinuteTick> ticks) {
+            this.date = date;
+            this.ticks = ticks == null ? new ArrayList<MinuteTick>() : ticks;
+        }
+
+        public static MinuteSeries empty() {
+            return new MinuteSeries(null, new ArrayList<MinuteTick>());
+        }
+
+        public LocalDate getDate() {
+            return date;
+        }
+
+        public List<MinuteTick> getTicks() {
+            return ticks;
+        }
+
+        public boolean isEmpty() {
+            return ticks.isEmpty();
+        }
+    }
+
+    /** 一根分钟线。量与额都是累计值。 */
+    @lombok.Data
+    @lombok.AllArgsConstructor
+    public static class MinuteTick {
+        private final Integer minute;
+        private final BigDecimal price;
+        private final Long cumVolumeHand;
+        private final BigDecimal cumAmountYuan;
     }
 
     /**
@@ -408,6 +579,12 @@ public class TencentClient {
         }
     }
 
+    /** 量都是「手」这种整数，取不出来就交 null，别让一个坏字段把整只票的快照丢掉。 */
+    private static Long toLong(String raw) {
+        BigDecimal dec = toDecimal(raw);
+        return dec == null ? null : dec.longValue();
+    }
+
     private static LocalDate toDate(String raw) {
         if (raw == null || raw.trim().length() < 8) {
             return null;
@@ -425,10 +602,28 @@ public class TencentClient {
         /** 带市场前缀的代码，如 sh000001 / sz002909。 */
         private String symbol;
         private String code;
+        private String name;
         private BigDecimal changePct;
         private BigDecimal prevClose;
         private BigDecimal amountWan;
         private LocalDate quoteDate;
+
+        // ---- 竞价快照用的几段（溢价/成交额那套老调用方不读，留着为 null 无碍）----
+        /** 现价：09:26 抓到就是竞价成交价（= 当天开盘价）。 */
+        private BigDecimal lastPrice;
+        private BigDecimal openPrice;
+        /** 累计成交量(手)：09:30 前只有竞价，故它就是竞价量。 */
+        private Long volumeHand;
+        private BigDecimal bid1Price;
+        private Long bid1Hand;
+        private BigDecimal ask1Price;
+        private Long ask1Hand;
+        /** 当日涨停价，用来判「竞价即涨停」。 */
+        private BigDecimal limitUpPrice;
+        /** 第 30 段原文（yyyyMMddHHmmss），落库只信 capturedAt，这个用来核对。 */
+        private String quoteTime;
+        /** 整行 ~ 载荷原文，字段解释变了靠它重算。 */
+        private String rawPayload;
     }
 
     /** 池子里的行 → 腾讯代码。quotes() 返回的 map 以此值为 key，反查也用它。 */

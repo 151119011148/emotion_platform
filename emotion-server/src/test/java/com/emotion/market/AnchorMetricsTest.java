@@ -30,7 +30,8 @@ class AnchorMetricsTest {
 
     private final TencentClient client = new TencentClient(null, "http://qt.gtimg.cn", 50,
             "sh000001", "sz399001",
-            "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get", 12,
+            "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get",
+            "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/minute/query", 12,
             TencentClient.DEFAULT_INDEX_CLOSE_CODES);
 
     /** 真实存档按线上路径解析：涨幅由前一根收盘推出，第一根没有前收。 */

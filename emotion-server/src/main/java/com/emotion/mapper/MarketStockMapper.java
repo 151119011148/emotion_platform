@@ -57,6 +57,17 @@ public interface MarketStockMapper extends BaseMapper<MarketStock> {
     @Select("SELECT DISTINCT trade_date FROM t_market_stock WHERE trade_date < #{date} ORDER BY trade_date DESC LIMIT 1")
     LocalDate prevDetailDate(@Param("date") LocalDate date);
 
+    /**
+     * 某天涨停池∪炸板池的个股代码（去重，升序）。盘中数据任务定名单用它。
+     *
+     * <p>只取这两池、不取跌停池：分钟序列和竞价快照是为了看「活跃资金在哪」，
+     * 跌停票的盘口结构没有可读的东西，而每多一只票就多一次上游请求。
+     * 炸板票恰恰是最该看的——它的分时能看出是几点几分开的板。
+     */
+    @Select("SELECT DISTINCT code FROM t_market_stock "
+            + "WHERE trade_date=#{date} AND pool IN ('ZT','ZB') ORDER BY code")
+    List<String> listHotCodes(@Param("date") LocalDate date);
+
     /** [from,to] 区间内有盘面明细的交易日，升序；题材持续天数回看用它定窗口内每日是否有数据。 */
     @Select("SELECT DISTINCT trade_date FROM t_market_stock "
             + "WHERE trade_date <= #{to} AND trade_date >= #{from} ORDER BY trade_date")
