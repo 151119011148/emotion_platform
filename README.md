@@ -41,17 +41,18 @@ mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS emotion_dashboard DEFAULT CHAR
 
 ### 1. 放好本地凭据（不这一步起不来）
 
-`application.yml` 里只有占位（`password: ${MYSQL_PASSWORD:}`、`secret: ${JWT_SECRET:}`），真值走 Spring 的 profile 文档，未入库。
+`application.yml` 里只有占位（`${MYSQL_IP:localhost}`、`password: ${MYSQL_PASSWORD:}`、`secret: ${JWT_SECRET:}`）。**仓库里没有任何真值，也没有任何机器地址**——库在哪台机器、口令是什么，都由你启动时给。
 
 ```bash
 cd emotion-server
-cp application-local.yml application-local.yml
-# 改里面的 datasource.password 与 jwt.secret
+# 方式一：环境变量直接给（库不在本机时再加 MYSQL_IP）
+MYSQL_PASSWORD='你的口令' JWT_SECRET='至少256位的一把钥匙' mvn spring-boot:run
+# 方式二：自己写一份 application-local.yml（这个文件名已在 .gitignore 里，永远进不了仓库）
 ```
 
-文件必须放在 **`emotion-server/` 这一层**（模块根），不是 `src/main/resources/`：Spring Boot 默认会搜 `file:./`，IDE 与 `java -jar` 的工作目录都是它；放进 `src/main/resources` 则会被 Maven 抄进 `target/classes` 和打出来的 jar，等于换个地方泄露。
+方式二的文件必须放在 **`emotion-server/` 这一层**（模块根），不是 `src/main/resources/`：Spring Boot 默认会搜 `file:./`，IDE 与 `java -jar` 的工作目录都是它；放进 `src/main/resources` 则会被 Maven 抄进 `target/classes` 和打出来的 jar，等于换个地方泄露。
 
-没有这个文件时的表现是**启动即失败**，报在 `jwtUtil` 上：
+两种都没给时的表现是**启动即失败**，报在 `jwtUtil` 上：
 
 ```
 io.jsonwebtoken.security.WeakKeyException: The specified key byte array is 0 bits

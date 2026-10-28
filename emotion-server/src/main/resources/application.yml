@@ -2,7 +2,8 @@ server:
   port: 8080
 
 spring:
-  # 真实口令在同模块根的 application-local.yml（未入库，见 application-local.yml）。
+  # 真值不进仓库：环境变量 MYSQL_IP / MYSQL_PASSWORD / JWT_SECRET，或在本机自己放一份
+  # application-local.yml（.gitignore 已经挡住这份文件名，仓库里再也没有它）。见 README「二、后端 1」。
   # 走 profile 文档而不是 spring.config.import：导入的那份优先级低于本文件，占位会反过来盖掉真值。
   # additional-location: 覆盖多种工作目录场景（IDE 启动在项目根 / 命令行 cd emotion-server / java -jar 所在目录）
   config:
