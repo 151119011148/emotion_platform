@@ -45,4 +45,50 @@ public class CycleService {
     public StageAdviceVO getAdvice(String stage) {
         return ADVICE_MAP.getOrDefault(stage, ADVICE_MAP.get("修复"));
     }
+
+    /**
+     * 页面展示带名 → 上面那张表的阶段名。
+     *
+     * <p>两套词表本来不是一回事：库里那套是引擎按绝对阈值落的 7 档
+     * （冰点/修复/启动/发酵/高潮/分歧/退潮 ＋ "退潮(强制)"），
+     * 前端读时重切只有 5 条带（冰点/退潮/混沌/发酵/沸点，按可比样本分位线切）。
+     * 仪表盘上的建议要跟的是**页面上那条带**，所以在这里做一次对位。
+     *
+     * <p>{@code 混沌 → 修复} 这条是权宜：P25–P75 那一整段在库里对应修复/启动/分歧三档，
+     * 没有哪一份文案能代表它，先吃「修复」（小仓试错 1-3成）。换文案是策略决定，不在这张表里自己改。
+     */
+    private static final Map<String, String> BAND_TO_STAGE = new HashMap<>();
+
+    static {
+        BAND_TO_STAGE.put("冰点", "冰点");
+        BAND_TO_STAGE.put("退潮", "退潮");
+        BAND_TO_STAGE.put("退潮(强制)", "退潮");
+        BAND_TO_STAGE.put("混沌", "修复");
+        BAND_TO_STAGE.put("发酵", "发酵");
+        BAND_TO_STAGE.put("沸点", "高潮");
+    }
+
+    /**
+     * 按带名出建议。标题印的是**带名**，不是库里的阶段名——
+     * 否则曲线上标着沸点，这块写「操作建议 · 高潮」，看起来又像两处口径打架。
+     *
+     * <p>缺维的日子前端不重切带，直接把落库标签印出来（{@code utils/stages.js#bandOfRecord}），
+     * 那些标签就是上面 7 档的本名，所以查不到对位时先按本名直接查一次。
+     *
+     * @return 认不出来的带名返回 null，让调用方走「不给建议」那一支；
+     *         绝不退化成 getAdvice 那种「查不到就当修复」，那等于把未知串读成一次建仓指令。
+     */
+    public StageAdviceVO adviceForBand(String band) {
+        if (band == null) {
+            return null;
+        }
+        String name = band.trim();
+        String stage = BAND_TO_STAGE.get(name);
+        StageAdviceVO mapped = stage == null ? ADVICE_MAP.get(name) : ADVICE_MAP.get(stage);
+        if (mapped == null) {
+            return null;
+        }
+        return new StageAdviceVO(name, mapped.getTone(), mapped.getPosition(),
+                mapped.getAction(), mapped.getWarning());
+    }
 }

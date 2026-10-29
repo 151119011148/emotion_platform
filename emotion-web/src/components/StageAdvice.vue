@@ -28,7 +28,7 @@
     </div>
   </div>
   <div class="stage-advice empty" v-else>
-    <p>暂无数据，请先录入今日指标</p>
+    <p>暂无数据，请先录入当日指标</p>
   </div>
 </template>
 

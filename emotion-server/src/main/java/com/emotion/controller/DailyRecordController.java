@@ -113,18 +113,41 @@ public class DailyRecordController {
     }
 
     /**
-     * 操作建议：阶段 → 基调／仓位／动作／警示的映射，就是策略本身，只对超管开放。
+     * 操作建议：带／阶段 → 基调／仓位／动作／警示的映射，就是策略本身，只对超管开放。
      * 缺维那一支的文案还直接把 {@code MIN_DIMS_FOR_STAGE} 这个阈值印了出来。
      * 前端 Dashboard 对普通用户根本不发这个请求（见 {@code loadAdvice}），所以这里抛业务异常不会弹红条。
+     *
+     * <p>{@code band} 是<b>页面上那条带名</b>（前端读时重切的结果，可能是相对带，也可能是缺维日
+     * 回落的落库标签）。建议跟着它走，不然点某天冰点、这块还印着今天的「持股为主 7成-满仓」。
+     * 传了 band 就不再查库——带名本身已经由那天的记录算出来了。
+     * {@code date} 只在 band 为空时用来定位「数据不足／未录入」讲的是哪一天，带了它就只查那一天。
      */
     @GetMapping("/advice")
-    public ApiResponse<StageAdviceVO> getAdvice() {
+    public ApiResponse<StageAdviceVO> getAdvice(@RequestParam(required = false) String band,
+                                                @RequestParam(required = false) String date) {
         AuthContext.requireSuperAdmin("查看操作建议");
-        DailyRecord today = dailyRecordService.getToday();
-        if (today == null || isBlank(today.getStage())) {
-            // 当日没复盘时回落到最近一条，和仪表盘头部卡片保持同一口径
-            List<DailyRecord> latest = dailyRecordService.getLatest(1);
-            today = latest.isEmpty() ? null : latest.get(0);
+        if (!isBlank(band)) {
+            StageAdviceVO advice = cycleService.adviceForBand(band);
+            if (advice != null) {
+                return ApiResponse.ok(advice);
+            }
+            // 前端发来一个认不出的带名：宁可这一格空着，也不按「修复」那份文案给建议
+            return ApiResponse.ok(new StageAdviceVO(band.trim(), "不给出建议", "-",
+                    "页面显示的这一档没有对应的操作建议",
+                    "带名口径可能改过而这里没跟上，先别按这一格决策。"));
+        }
+        DailyRecord today;
+        if (isBlank(date)) {
+            today = dailyRecordService.getToday();
+            if (today == null || isBlank(today.getStage())) {
+                // 当日没复盘时回落到最近一条，和仪表盘头部卡片保持同一口径
+                List<DailyRecord> latest = dailyRecordService.getLatest(1);
+                today = latest.isEmpty() ? null : latest.get(0);
+            }
+        } else {
+            // 指定了 date 就不回落：点的那天缺维，答案就该是「这一天数据不足」，
+            // 而不是把最近一条的阶段搬到它身上。
+            today = dailyRecordService.getByDate(parse(date));
         }
         if (today != null && !isBlank(today.getStage())) {
             return ApiResponse.ok(cycleService.getAdvice(today.getStage()));

@@ -86,7 +86,7 @@
     <div class="bottom-row" :class="{ solo: !$canRule }">
       <StageLocator :stage="currentStage" :direction="headRecord?.stageDirection" :record="headRecord" />
       <!-- 操作建议整块是「阶段 → 基调/仓位/动作/警示」的映射，就是策略本身，只对超管显示。
-           闸在这里而不是组件根元素：StageAdvice 内部还有一条 v-else 的「暂无数据，请先录入今日指标」，
+           闸在这里而不是组件根元素：StageAdvice 内部还有一条 v-else 的「暂无数据，请先录入当日指标」，
            只闸 v-if 那一支会让普通用户读到一句假的空状态（2651291 就是这颗配对之外的分支漏了）。 -->
       <StageAdvice v-if="$canRule" :advice="advice" :record="headRecord" />
     </div>
@@ -241,16 +241,33 @@ async function loadAdvice() {
   // 也免得后端那道 requireSuperAdmin 换回一条业务异常——try/catch 吞得掉异常，
   // 吞不掉 api/index.js 拦截器弹的那条红。
   if (!canSeeRules()) return
+  const key = adviceKey.value
+  if (!key) return
   try {
-    const res = await recordApi.getAdvice()
+    // 把页面上那条带名交给后端做对位：点某天冰点就要吃冰点那份文案。
+    // 在这里不发「按今天算」的请求——那正是点历史日还印着今天满仓的原因。
+    const res = await recordApi.getAdvice(currentStage.value, headRecord.value?.tradeDate)
+    // 连着点两天时，先发后到的旧回答不许盖上来：认一次主语，对不上就丢
+    if (adviceKey.value !== key) return
     advice.value = res.data
   } catch (e) { /* ignore */ }
 }
 
+/* 建议跟着头部那条记录走：换日期（点曲线／回今天）就重新取一次。
+   key 里带上带名，同一天改判或重算后也会刷新；headRecord 还是 null（没读回来）时不发请求，
+   那时页面顶部本来就是 "--"，让 StageAdvice 印它自己的空态。 */
+const adviceKey = computed(() => {
+  const d = headRecord.value?.tradeDate
+  return d ? `${d}|${currentStage.value}` : null
+})
+watch(adviceKey, (k) => { if (k) loadAdvice() }, { immediate: true })
+
 /* 角色可能在挂载之后才翻转：子组件的 onMounted 早于 Layout 的 loadMe()，
    刚被提升的超管那一刻读到的还是 localStorage 里的 USER，上面那次 loadAdvice 直接跳过了。
-   不补这一趟，StageAdvice 渲染出来就是那句假的「暂无数据，请先录入今日指标」。 */
-watch(canSeeRules, (on) => { if (on && !advice.value) loadAdvice() })
+   不补这一趟，StageAdvice 渲染出来就是那句假的「暂无数据，请先录入当日指标」。
+   但记录也读回来了才补：headRecord 还空着时发出去的就是「按今天算」的请求，
+   那正是这次要修掉的口径，等上面那条 key 的 watch 变化再发。 */
+watch(canSeeRules, (on) => { if (on && !advice.value && adviceKey.value) loadAdvice() })
 
 /* 外溢①：🔔 待裁决持仓——最近未执行决策列表（最多 5 条），早上第一眼看到 */
 const pendingList = ref([])
@@ -324,7 +341,6 @@ onMounted(() => {
   scoring.load()
   loadHead().then(loadDay)
   loadCurve()
-  loadAdvice()
   loadPending()
   loadExecuted()
 })

@@ -74,7 +74,8 @@ export const recordApi = {
   // config 可选：后台静默取数（算分位带那条）要能压掉红条
   getRange: (start, end, config) => api.get('/records/range', { params: { start, end }, ...config }),
   getLatest: (days = 20) => getLatest(days),
-  getAdvice: () => api.get('/records/advice'),
+  // band=页面上那条带名：建议跟着点到的那一天走，不传后端就退回「按今天算」的老口径
+  getAdvice: (band, date) => api.get('/records/advice', { params: { band, date } }),
   getCurve: (days = 20) => api.get('/records/curve', { params: { days } }),
   // 只重算那一天。行情字段有改动后想立刻看分数落点时用得上
   recalc: (date) => api.post('/records/recalc', null, { params: { date }, timeout: 25000 }),
