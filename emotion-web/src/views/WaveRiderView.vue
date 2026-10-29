@@ -48,7 +48,7 @@
         <div class="blk-head">
           <span>候选池</span>
           <span class="blk-sub" v-if="candidates.length">
-            共 {{ candidates.length }} 只<template v-if="nodeTagCount">（其中来自节点追踪 {{ nodeTagCount }} 只）</template>
+            共 {{ candidates.length }} 只<template v-if="nodeTagCount">（其中来自节点追踪 {{ nodeTagCount }} 只）</template><template v-if="firstBoardCount">（其中年线首板 {{ firstBoardCount }} 只）</template>
             · 组合总仓位 {{ totalPosition }}%<template v-if="$canRule">
             · 按「封单强度」<b>降序</b>排列，封单越强越靠前（打板口径下唯一跨档单调的正向因子）
             · 题材取 <b>通达信概念板块</b>，按当日该题材的涨停家数降序</template>
@@ -91,6 +91,9 @@
             <span class="mc-score">{{ pt(row.score) }}</span>
           </div>
           <div class="mc-tags">
+            <el-tag v-if="firstBoardTag(row)" size="small" effect="dark" :type="firstBoardTag(row).type">
+              {{ firstBoardTag(row).text }}
+            </el-tag>
             <el-tag v-for="t in nodeTagsOf(row)" :key="t.kind" size="small" effect="dark"
               :type="t.type">{{ t.text }}</el-tag>
             <el-tag v-for="t in topThemes(row)" :key="t.name" size="small" effect="plain"
@@ -138,6 +141,8 @@
                   <span class="nm-text tape-link" @click="openStockTape(row.code, row.name, date)">{{ row.name }}</span>
                 </el-tooltip>
                 <span class="nm-tags">
+                  <el-tag v-if="firstBoardTag(row)" size="small" effect="dark" :type="firstBoardTag(row).type"
+                    :title="firstBoardTag(row).title">{{ firstBoardTag(row).text }}</el-tag>
                   <el-tag v-for="t in nodeTagsOf(row)" :key="t.kind" size="small" effect="dark"
                     :type="t.type" :title="t.title">{{ t.text }}</el-tag>
                 </span>
@@ -630,6 +635,11 @@ const nodeTagCount = computed(
   () => candidates.value.filter((c) => c.nodeTags && c.nodeTags.length).length
 )
 
+const firstBoardCount = computed(
+  () => candidates.value.filter((c) => c.hitPrinciplesJson
+    && c.hitPrinciplesJson.indexOf('FIRST_BOARD') >= 0).length
+)
+
 /**
  * 同一角色可能命中多条节点事件（一只票既当过甲节点的节点票、又是乙节点的 D0 候选），
  * 合成一个标签显示数量，来源明细放在悬浮里——列宽有限，塞不下每条事件的 D0 与状态。
@@ -659,6 +669,22 @@ function nodeTagsOf(row) {
       title
     }
   })
+}
+
+/**
+ * 「年线首板」来源标记：与身位清单并行的另一条来源（1 板、站上年线、题材在当天天梯里空白），
+ * 后端在候选行上打 hitPrinciplesJson=["FIRST_BOARD"]。判据原文（250 日、概念口径）只给超管。
+ */
+function firstBoardTag(row) {
+  const j = row && row.hitPrinciplesJson
+  if (!j || j.indexOf('FIRST_BOARD') < 0) return null
+  return {
+    text: '年线首板',
+    type: 'success',
+    title: canSeeRules()
+      ? `首板（1 板）：收盘价站上 250 日均线（含当日），且自身通达信概念在当天连板天梯（2 板及以上）里一个都没有。\n来自 D6 首板生态「年线独苗」，15:30 选股任务落库`
+      : '来自首板生态的题材空白首板'
+  }
 }
 
 /**

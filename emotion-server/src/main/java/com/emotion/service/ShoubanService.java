@@ -13,6 +13,7 @@ import java.util.Map;
 import org.springframework.stereotype.Service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.emotion.entity.FirstBoardScreen;
 import com.emotion.entity.MarketStock;
 import com.emotion.mapper.MarketStockMapper;
 import com.emotion.market.StockPatterns;
@@ -32,10 +33,15 @@ public class ShoubanService {
 
     private final MarketStockMapper marketStockMapper;
     private final IndustryClassifyService industryClassify;
+    /** 首板「站上年线 + 题材在天梯里没有」的判定留档，只读。 */
+    private final FirstBoardScreenService screenService;
 
-    public ShoubanService(MarketStockMapper marketStockMapper, IndustryClassifyService industryClassify) {
+    public ShoubanService(MarketStockMapper marketStockMapper,
+                          IndustryClassifyService industryClassify,
+                          FirstBoardScreenService screenService) {
         this.marketStockMapper = marketStockMapper;
         this.industryClassify = industryClassify;
+        this.screenService = screenService;
     }
 
     public ShoubanVO vo(LocalDate requested) {
@@ -81,7 +87,62 @@ public class ShoubanService {
         vo.setBombed(bombed);
 
         vo.setSummary(summary(firstRows, bombed.size(), prevAvailable));
+        applyScreen(vo, firstRows, date);
         return vo;
+    }
+
+    /**
+     * 把 15:30 落好的首板筛选留档并到封住名单上（<strong>只读库，一次查询，不回源</strong>）：
+     * 年线要逐只拉一年日 K，这份成本只在选股链路里付，页面看的是结果。
+     *
+     * <p>当天没算过时 {@code screenAvailable=false} 且各行 {@code screened=null}——
+     * 界面据此说「还没判」，而不是把「没有行」印成「一只都不合格」。
+     */
+    private void applyScreen(ShoubanVO vo, List<MarketStock> firstRows, LocalDate date) {
+        List<FirstBoardScreen> rows = screenService.list(date);
+        vo.setScreenedCount(rows.size());
+        vo.setScreenAvailable(!rows.isEmpty());
+        if (rows.isEmpty()) {
+            vo.setScreenPassedCount(0);
+            return;
+        }
+        Map<String, FirstBoardScreen> byCode = new HashMap<>();
+        for (FirstBoardScreen r : rows) {
+            byCode.put(r.getCode(), r);
+            if (Boolean.TRUE.equals(r.getPassed())) {
+                vo.setScreenPassedCount(vo.getScreenPassedCount() == null ? 1 : vo.getScreenPassedCount() + 1);
+            }
+            if (vo.getLadderConceptCount() == null && r.getLadderConcepts() != null) {
+                vo.setLadderConceptCount(r.getLadderConcepts());
+            }
+        }
+        for (ShoubanVO.Row row : vo.getSealed()) {
+            FirstBoardScreen r = byCode.get(row.getCode());
+            if (r == null) {
+                continue;
+            }
+            row.setScreened(true);
+            row.setScreenPassed(r.getPassed());
+            row.setScreenReason(r.getReason());
+            row.setClosePrice(r.getClosePrice());
+            row.setMa250(r.getMa250());
+            row.setAboveMaPct(r.getAbovePct());
+            row.setConcepts(splitConcepts(r.getConcepts()));
+        }
+    }
+
+    /** 留档里的题材是逗号分隔的字符串（判据输入原样存），下发给前端切成数组。 */
+    private static List<String> splitConcepts(String csv) {
+        List<String> out = new ArrayList<>();
+        if (csv == null || csv.trim().isEmpty()) {
+            return out;
+        }
+        for (String part : csv.split(",")) {
+            if (!part.trim().isEmpty()) {
+                out.add(part.trim());
+            }
+        }
+        return out;
     }
 
     /** 纯 T 日汇总：封板/炸板率、一字占比、均封单、题材聚集（与 LadderMetricsService 同口径）。 */

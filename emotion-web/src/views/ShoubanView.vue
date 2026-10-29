@@ -133,6 +133,44 @@
       <p v-else class="signal-empty">两维都出分后计算背离度……</p>
     </section>
 
+    <!-- 年线独苗：T 日首板 ∩ 站上年线 ∩ 自己的概念一个都没出现在当天连板天梯里。
+         判据原文（250 日、概念口径、两条的交并）只给超管；名单与读数是结果，谁都能看。 -->
+    <section class="block list-block">
+      <div class="block-head list-head" @click="screenOpen = !screenOpen">
+        <h3>年线独苗 <span class="fold-tag ok-tag">{{ screenOpen ? '收起 ▲' : '展开 ▼' }}</span></h3>
+        <span v-if="screenReady" class="list-count ok-text">{{ screenedPassed.length }} 只</span>
+        <span v-else class="list-count muted-text">未判</span>
+      </div>
+      <div v-show="screenOpen" class="list-body">
+        <!-- 未判／判了零只都要说清楚：这块的空有三种，静默折叠等于让「没有」看起来像「坏了」 -->
+        <div v-if="!screenReady" class="list-empty">
+          当日还没判。年线要逐只拉一年日 K，只有 15:30 选股任务算得动，本页只读留档
+        </div>
+        <div v-else-if="!screenedPassed.length" class="list-empty">
+          {{ $canRule
+            ? `已判 ${nz(vo.screenedCount)} 只首板，没有一只同时站上年线且题材在天梯里空白`
+            : `已判 ${nz(vo.screenedCount)} 只首板，没有符合条件的` }}
+        </div>
+        <div v-else class="chips">
+          <div v-for="r in screenedPassed" :key="r.code" class="chip chip-screen">
+            <span class="chip-name tape-link" @click="openStockTape(r.code, r.name, date)">{{ r.name }}</span>
+            <span class="chip-code tape-link" @click="openStockTape(r.code, r.name, date)">{{ r.code }}</span>
+            <span class="chip-industry" :class="{ 'in-main': r.inMain }">{{ r.industry || '—' }}</span>
+            <span class="chip-concepts">{{ conceptText(r.concepts) }}</span>
+            <span class="chip-above">年线上方 {{ signedNum(r.aboveMaPct) }}%</span>
+            <span class="chip-line">收盘 {{ numText(r.closePrice) }} / 年线 {{ numText(r.ma250) }}</span>
+            <span v-if="r.sealAmount != null" class="chip-seal">封单 {{ moneyText(r.sealAmount) }}</span>
+            <el-tag v-if="r.pattern" size="small" :type="PATTERN_TYPE[r.pattern] || 'info'" effect="plain">
+              {{ PATTERN_LABEL[r.pattern] || '—' }}
+            </el-tag>
+          </div>
+        </div>
+        <p class="screen-foot" v-if="$canRule && screenReady && vo.ladderConceptCount != null">
+          当天 {{ nz(vo.ladderConceptCount) }} 个题材由连板股占着，首板的题材撞上任何一个就出局
+        </p>
+      </div>
+    </section>
+
     <!-- 封住 / 未封住：默认折叠，点击展开；chip 样式与连板天梯一致 -->
     <section class="block list-block">
       <div class="block-head list-head" @click="sealedOpen = !sealedOpen">
@@ -216,11 +254,28 @@ const curveRows = ref([])
 const scoreOpen = ref(false)
 const sealedOpen = ref(false)
 const bombedOpen = ref(false)
+// 年线独苗是这页的结论位，不是附属明细：默认展开
+const screenOpen = ref(true)
 
 const summary = computed(() => vo.value?.summary || null)
 const sealedRows = computed(() => vo.value?.sealed || [])
 const bombedRows = computed(() => vo.value?.bombed || [])
 const prevReady = computed(() => vo.value?.prevAvailable === true)
+
+/* ---- 年线独苗：判据在 15:30 选股链路里算好落库，这里只读 ---- */
+const screenReady = computed(() => vo.value?.screenAvailable === true)
+const screenedPassed = computed(() => sealedRows.value.filter((r) => r.screenPassed === true))
+
+/** 概念一行摆不下：前两条点名，其余只报只数。 */
+function conceptText(list) {
+  const arr = list || []
+  if (!arr.length) return '无题材'
+  return arr.slice(0, 2).join('/') + (arr.length > 2 ? ` 等${arr.length}题材` : '')
+}
+function numText(v) {
+  if (v == null || Number.isNaN(Number(v))) return '—'
+  return Number(v).toFixed(2)
+}
 
 /* ---- 首板生态打分明细：score-detail first 维 eval 树（纯 T 日） ---- */
 const firstDim = computed(() => (scoring.detail?.dims || []).find((d) => d.key === 'first') || null)
@@ -482,6 +537,14 @@ watch(date, load)
 .chip.chip-fail { opacity: .55; background: #0d1117; border-color: #3a4450; border-style: dashed; }
 .chip-fail .chip-name { color: #94a3b8; font-weight: 500; }
 .chip-pullback { color: #fca5a5; font-size: 11px; }
+
+/* 年线独苗：绿边区别于封住/未封住两表 */
+.chip-screen { border-color: #2f5a4a; background: rgba(110, 231, 183, .05); }
+.chip-concepts { color: #7dd3fc; font-size: 11px; }
+.chip-above { color: #6ee7b7; font-size: 11px; font-weight: 600; }
+.chip-line { color: #7c8794; font-size: 11px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.muted-text { color: #6b7c8c; }
+.screen-foot { margin: 10px 0 0; font-size: 11px; color: #6b7c8c; }
 .ok-text { color: #6ee7b7; }
 .bad-text { color: #fca5a5; }
 .in-main { color: #fbbf24; }
