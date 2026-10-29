@@ -30,6 +30,14 @@ public class CandidateStock {
 
     public static final String PRINCIPLE_POSITION = "POSITION";
     public static final String PRINCIPLE_NODE = "NODE";
+    /**
+     * 第二条候选来源：题材在当日连板天梯里一只都没有、且收盘站上 250 日均线的首板。
+     *
+     * <p>与 {@link #PRINCIPLE_POSITION} 是<strong>并列的来源标记</strong>而不是同一件事的程度差异：
+     * 身位说的是「题材已有梯队、抢里面的高度」，这一路说的是「题材还没有梯队」。
+     * 判据与取数见 {@code FirstBoardScreenService}，接入点见 {@code WaveRiderEngine#firstBoardSource}。
+     */
+    public static final String PRINCIPLE_FIRST_BOARD = "FIRST_BOARD";
 
     /** 一字缩量：封单占成交额过高，次日大概率一字开盘买不进。 */
     public static final String RISK_YIZI_THIN = "YIZI_THIN";

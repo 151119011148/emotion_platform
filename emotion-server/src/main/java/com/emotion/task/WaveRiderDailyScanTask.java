@@ -7,6 +7,7 @@ import com.emotion.mapper.TradingHolidayMapper;
 import com.emotion.market.MarketDataException;
 import com.emotion.scheduler.ManagedTask;
 import com.emotion.scheduler.TaskResult;
+import com.emotion.service.FirstBoardScreenService;
 import com.emotion.service.MarketDailyStore;
 import com.emotion.service.MarketDataService;
 import com.emotion.vo.MarketSnapshotVO;
@@ -52,17 +53,20 @@ public class WaveRiderDailyScanTask implements ManagedTask {
     private final MarketDataService marketDataService;
     private final MarketDailyStore marketDailyStore;
     private final WaveRiderEngine engine;
+    private final FirstBoardScreenService screenService;
 
     public WaveRiderDailyScanTask(StrategyMapper strategyMapper,
                                   TradingHolidayMapper tradingHolidayMapper,
                                   MarketDataService marketDataService,
                                   MarketDailyStore marketDailyStore,
-                                  WaveRiderEngine engine) {
+                                  WaveRiderEngine engine,
+                                  FirstBoardScreenService screenService) {
         this.strategyMapper = strategyMapper;
         this.tradingHolidayMapper = tradingHolidayMapper;
         this.marketDataService = marketDataService;
         this.marketDailyStore = marketDailyStore;
         this.engine = engine;
+        this.screenService = screenService;
     }
 
     @Override
@@ -90,6 +94,18 @@ public class WaveRiderDailyScanTask implements ManagedTask {
         int scanned = 0;
         int candidates = 0;
         StringBuilder detail = new StringBuilder();
+
+        // 首板筛选（题材空白 + 站上年线）算在跑策略<b>之前</b>、一天一次：
+        // 每只都要拉一年日 K，让每个策略各拉一遍同一天是纯浪费；而 D9 引擎与 D6 页面都只读它的留档。
+        // 失败只记日志不往外抛——少一天年线留档只是 D6 空一节、D9 少一路来源，
+        // 把选股整趟带崩是 D9 空一节，两者代价不对等。
+        try {
+            int screened = screenService.screen(today).size();
+            detail.append("首板筛选").append(screened).append("只；");
+        } catch (RuntimeException e) {
+            log.warn("首板筛选失败（不影响选股）：{}", e.toString());
+            detail.append("首板筛选失败；");
+        }
 
         for (Strategy s : strategies) {
             try {

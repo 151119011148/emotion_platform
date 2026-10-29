@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.emotion.entity.CandidateStock;
 import com.emotion.entity.CandidateT1;
 import com.emotion.entity.DailyRecord;
+import com.emotion.entity.FirstBoardScreen;
 import com.emotion.entity.MarketStock;
 import com.emotion.entity.NodeDetect;
 import com.emotion.entity.NodeEvent;
@@ -20,6 +21,7 @@ import com.emotion.mapper.NodeDetectMapper;
 import com.emotion.mapper.StockMapper;
 import com.emotion.mapper.StrategyRunMapper;
 import com.emotion.service.DailyBarService;
+import com.emotion.service.FirstBoardScreenService;
 import com.emotion.service.NodeService;
 import com.emotion.service.WaveRiderConfigService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -87,6 +89,8 @@ public class WaveRiderEngine {
     private final DailyBarService dailyBarService;
     /** 节点票身份的唯一出处：与策略选股页那个「节点票」标共用一套匹配，见 {@link #build}。 */
     private final NodeService nodeService;
+    /** 首板来源（题材空白 + 站上年线）的判定留档，只读表：判据见 {@link #firstBoardSource}。 */
+    private final FirstBoardScreenService screenService;
     private final ObjectMapper objectMapper;
 
     public WaveRiderEngine(WaveRiderConfigService configService,
@@ -99,6 +103,7 @@ public class WaveRiderEngine {
                            DailyRecordMapper dailyRecordMapper,
                            DailyBarService dailyBarService,
                            NodeService nodeService,
+                           FirstBoardScreenService screenService,
                            ObjectMapper objectMapper) {
         this.configService = configService;
         this.marketStockMapper = marketStockMapper;
@@ -110,6 +115,7 @@ public class WaveRiderEngine {
         this.dailyRecordMapper = dailyRecordMapper;
         this.dailyBarService = dailyBarService;
         this.nodeService = nodeService;
+        this.screenService = screenService;
         this.objectMapper = objectMapper;
     }
 
@@ -251,26 +257,8 @@ public class WaveRiderEngine {
         }
         funnel.put("连板≥" + cfg.getMinBoardCount(), step.size());
 
-        // ---- ST
-        if (cfg.isFilterSt()) {
-            step = keep(step, m -> m.getName() != null && !isSt(m.getName()));
-            funnel.put("剔除ST", step.size());
-        }
-
-        // ---- 次新（t_stock.listed_at 为 NULL 时不剔，拿不到数据不算不达标）
-        Map<String, Stock> dict = loadDict(step);
-        if (cfg.getFilterNewStockDays() > 0) {
-            final LocalDate ref = tradeDate;
-            step = keep(step, m -> {
-                Stock s = dict.get(m.getCode());
-                if (s == null || s.getListedAt() == null) {
-                    return true;
-                }
-                return s.getListedAt().plusDays(cfg.getFilterNewStockDays()).isBefore(ref)
-                        || s.getListedAt().plusDays(cfg.getFilterNewStockDays()).isEqual(ref);
-            });
-            funnel.put("剔除次新", step.size());
-        }
+        // ---- ST / 次新（两个来源共用的两道闸，见 {@link #filterStAndNew}）
+        step = filterStAndNew(step, cfg, tradeDate, funnel);
 
         // ---- 封单锁死：只标记，不剔除。
         // 226 个样本按 封单额÷成交额 分五档，以 T 日涨停价为买点（本策略的真实买点）时，
@@ -305,7 +293,7 @@ public class WaveRiderEngine {
         }
 
         List<CandidateStock> rows = build(strategyId, tradeDate, runId, cfg, picked,
-                temperature, tempScale);
+                temperature, tempScale, null, null);
 
         // ---- 清单长度上限（相对当日涨停池）。
         // 必须放在【排序之后】截断。放在排序之前，砍掉的是「题材遍历顺序靠后」的票——
@@ -319,7 +307,142 @@ public class WaveRiderEngine {
             }
             funnel.put("清单上限", rows.size());
         }
+
+        // ---- 第二条来源：题材空白 + 站上年线的首板，追加在身位清单之后
+        if (cfg.isIncludeFirstBoard() && cfg.getFirstBoardLimit() > 0) {
+            List<CandidateStock> extra = firstBoardSource(strategyId, tradeDate, runId, cfg,
+                    pool, rows, temperature, tempScale, funnel, warnings);
+            for (int i = 0; i < extra.size(); i++) {
+                CandidateStock c = extra.get(i);
+                c.setRankNo(rows.size() + i + 1);
+                rows.add(c);
+            }
+        }
         return rows;
+    }
+
+    /**
+     * 与来源无关的两道闸：ST、次新。身位与首板两条来源共用——
+     * 它们问的是「这只票能不能碰」，不是「它属于哪一路候选」。
+     *
+     * <p>次新口径原样保留：{@code t_stock.listed_at} 为 NULL 时<strong>不剔</strong>，拿不到数据不算不达标。
+     *
+     * @param funnel 非 {@code null} 时把两道闸各自的剩余数记进漏斗（身位那批用的历史键名不变）
+     */
+    private List<MarketStock> filterStAndNew(List<MarketStock> step, WaveRiderConfig cfg,
+                                             LocalDate tradeDate, Map<String, Integer> funnel) {
+        List<MarketStock> out = step;
+        if (cfg.isFilterSt()) {
+            out = keep(out, m -> m.getName() != null && !isSt(m.getName()));
+            if (funnel != null) {
+                funnel.put("剔除ST", out.size());
+            }
+        }
+        Map<String, Stock> dict = loadDict(out);
+        if (cfg.getFilterNewStockDays() > 0) {
+            final LocalDate ref = tradeDate;
+            out = keep(out, m -> {
+                Stock s = dict.get(m.getCode());
+                if (s == null || s.getListedAt() == null) {
+                    return true;
+                }
+                return s.getListedAt().plusDays(cfg.getFilterNewStockDays()).isBefore(ref)
+                        || s.getListedAt().plusDays(cfg.getFilterNewStockDays()).isEqual(ref);
+            });
+            if (funnel != null) {
+                funnel.put("剔除次新", out.size());
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 首板来源：当天涨停的首板里，<strong>题材在连板天梯里一只都没有</strong>、且收盘
+     * <strong>站上 250 日均线</strong>的那批。
+     *
+     * <p>判据不在引擎里算：它要逐只拉一年日 K，15:30 一趟就是几十次上游往返。算的地方是
+     * {@code FirstBoardScreenService}，由选股任务在跑策略<strong>之前</strong>把当天判定落进
+     * {@code t_first_board_screen}，这里只读表——读侧不联网，定时跑与手工试跑才走的是同一条路。
+     *
+     * <p>当天没算过（表里零行）记一条 {@code NO_FIRST_BOARD_SCREEN} 告警，身位那批照常产出：
+     * 首板是一路加法，不是前面那道闸。
+     *
+     * <p><strong>追加而不是混排</strong>：身位清单的名额（{@code max_select_rate}）、排序与仓位分母
+     * 都按它们自己的口径走完，首板接在尾巴上、用自己的 {@code first_board_limit} 计名额。
+     * 两边共用一个帽只会互相顶名额，而那是两个不同的问题。
+     */
+    private List<CandidateStock> firstBoardSource(Long strategyId, LocalDate tradeDate, Long runId,
+                                                  WaveRiderConfig cfg, List<MarketStock> pool,
+                                                  List<CandidateStock> mainRows,
+                                                  Double temperature, Double tempScale,
+                                                  Map<String, Integer> funnel, List<String> warnings) {
+        List<FirstBoardScreen> screened = screenService.listPassed(tradeDate);
+        funnel.put("首板(题材空白+年线)", screened.size());
+        if (screened.isEmpty()) {
+            warnings.add("NO_FIRST_BOARD_SCREEN");
+            return new ArrayList<>();
+        }
+        Map<String, String> conceptsByCode = new HashMap<>();
+        for (FirstBoardScreen s : screened) {
+            conceptsByCode.put(s.getCode(), s.getConcepts());
+        }
+        List<MarketStock> step = new ArrayList<>();
+        for (MarketStock m : pool) {
+            if (conceptsByCode.containsKey(m.getCode())) {
+                step.add(m);
+            }
+        }
+        step = filterStAndNew(step, cfg, tradeDate, null);
+        funnel.put("首板剔ST/次新", step.size());
+        if (step.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // 高度对着当日整个涨停池的最高板算，仓位分母对着身位清单的最高分算：
+        // 首板因此拿到的是「1 板相对 H 板」那一小截高度分，而不是自组内 1/1 的满分。
+        int dayMaxBoard = 0;
+        for (MarketStock m : pool) {
+            dayMaxBoard = Math.max(dayMaxBoard, nz(m.getConsecutive()));
+        }
+        Double denom = null;
+        for (CandidateStock c : mainRows) {
+            if (c.getScore() != null && (denom == null || c.getScore().doubleValue() > denom)) {
+                denom = c.getScore().doubleValue();
+            }
+        }
+
+        List<CandidateStock> rows = build(strategyId, tradeDate, runId, cfg, step,
+                temperature, tempScale, dayMaxBoard, denom);
+        if (rows.size() > cfg.getFirstBoardLimit()) {
+            rows = new ArrayList<>(rows.subList(0, cfg.getFirstBoardLimit()));
+            warnings.add("FIRST_BOARD_TRUNCATED");
+        }
+        // build() 打的是身位那套标记，这一段把来源换成首板自己的：标记与题材列表都取筛选留档的原值
+        for (int i = 0; i < rows.size(); i++) {
+            CandidateStock c = rows.get(i);
+            c.setHitPrinciplesJson("[\"" + CandidateStock.PRINCIPLE_FIRST_BOARD + "\"]");
+            c.setPositionType("题材空白首板");
+            c.setConceptsJson(conceptsJson(conceptsByCode.get(c.getCode())));
+        }
+        funnel.put("首板上限", rows.size());
+        return rows;
+    }
+
+    /** 逗号分隔的题材转 JSON 数组；简称里本不该有引号与反斜杠，真出现了按字面转义，别拼出坏 JSON。 */
+    private static String conceptsJson(String csv) {
+        if (csv == null || csv.trim().isEmpty()) {
+            return "[]";
+        }
+        StringBuilder sb = new StringBuilder("[");
+        String[] parts = csv.split(",");
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append('"').append(parts[i].trim().replace("\\", "\\\\").replace("\"", "\\\""))
+                    .append('"');
+        }
+        return sb.append(']').toString();
     }
 
     /**
@@ -389,10 +512,17 @@ public class WaveRiderEngine {
      * 两者只在算仓位与写追溯明细时用得上——<strong>不参与算分</strong>（§12.4.3：温度是市场级变量，
      * 同日全部候选共享同一取值，对「选哪只」没有区分度）。拿不到温度时两者都为 {@code null}，
      * 此时仓位一律置空而不是按 0 处理。
+     *
+     * <p>{@code forcedMaxBoard} / {@code positionDenom} 只在首板来源那一次调用上给值（判据见
+     * {@link #firstBoardSource}）：首板的高度要对着<b>当日最高板</b>算，而不是对着自己这一组里
+     * 最高的 1 板算——后者等于给首板发满分的高度项。仓位分母同理取身位清单的最高分，
+     * 两个来源共用一把尺，同时保证身位那批的分数与仓位一个字节都不变。
+     * 两者为 {@code null} 时按原来的方式从本组内自算。
      */
     private List<CandidateStock> build(Long strategyId, LocalDate tradeDate, Long runId,
                                        WaveRiderConfig cfg, List<MarketStock> picked,
-                                       Double temperature, Double tempScale) {
+                                       Double temperature, Double tempScale,
+                                       Integer forcedMaxBoard, Double positionDenom) {
         if (picked.isEmpty()) {
             return new ArrayList<>();
         }
@@ -405,6 +535,9 @@ public class WaveRiderEngine {
         int maxBoard = 0;
         for (MarketStock m : picked) {
             maxBoard = Math.max(maxBoard, nz(m.getConsecutive()));
+        }
+        if (forcedMaxBoard != null && forcedMaxBoard > maxBoard) {
+            maxBoard = forcedMaxBoard;
         }
         // 题材内最高板：身位描述与「是不是身位股」都看它
         Map<String, Integer> topicTop = new HashMap<>();
@@ -458,6 +591,7 @@ public class WaveRiderEngine {
         }
 
         // 建议仓位：等权基准 × (分数/最高分) × 温度系数，带风险标记的再折半
+        double positionMax = positionDenom == null ? maxScore : positionDenom;
         for (int i = 0; i < rows.size(); i++) {
             CandidateStock c = rows.get(i);
             if (tempScale == null) {
@@ -465,7 +599,7 @@ public class WaveRiderEngine {
                 // 行本身照常产出——温度只是仓位的调节项，不是候选池的前置条件。
                 continue;
             }
-            double ratio = maxScore > 0 ? scores.get(i) / maxScore : 1.0;
+            double ratio = positionMax > 0 ? scores.get(i) / positionMax : 1.0;
             if (ratio <= 0) {
                 // 分数为负说明风险扣分吃掉了全部加成，给个地板而不是 0——
                 // 仓位 0 在界面上和「没选中」长得一样，容易误读。

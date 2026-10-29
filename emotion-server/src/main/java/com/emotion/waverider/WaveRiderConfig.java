@@ -83,6 +83,27 @@ public class WaveRiderConfig {
     @JsonProperty("degrade_board_threshold")
     private int degradeBoardThreshold = 4;
 
+    // ---------------------------------------------------------------- 首板来源
+    /**
+     * 是否把「题材空白 + 站上年线」的首板并入候选清单。
+     *
+     * <p>它与 {@code min_board_count} 是<strong>两条并行的来源</strong>，不是把门槛放到 1：
+     * 身位板要的是「题材已有梯队、抢里面的高度」，这一路要的是「题材还没有梯队、它是新开的那一口」。
+     * 把 {@code min_board_count} 调成 1 只会让所有首板涌进身位清单，把这两件事搅在一起。
+     *
+     * <p>判据与取数在 {@code FirstBoardScreenService}，结果落 {@code t_first_board_screen}，
+     * 引擎只读表不回源。
+     */
+    @JsonProperty("include_first_board")
+    private boolean includeFirstBoard = true;
+
+    /**
+     * 首板来源最多进几只。<strong>独立于</strong> {@code max_select_rate}——后者是身位清单的名额上限，
+     * 两边共用一个帽会让首板把身位板顶出去（反之亦然），而那是两个不同的问题。
+     */
+    @JsonProperty("first_board_limit")
+    private int firstBoardLimit = 3;
+
     // ---------------------------------------------------------------- 节点票
     /** 自动扫描最近 N 个交易日内的潜在节点。 */
     @JsonProperty("node_scan_window")
@@ -300,6 +321,10 @@ public class WaveRiderConfig {
         }
         if (maxSamePosition < 1) {
             errs.add("max_same_position 应 ≥ 1，实得：" + maxSamePosition);
+        }
+        if (firstBoardLimit < 0 || firstBoardLimit > 10) {
+            errs.add("first_board_limit 应在 0~10，实得：" + firstBoardLimit
+                    + "（0＝关掉首板来源，与 include_first_board=false 等效）");
         }
         if (maxPositionPerStock <= 0 || maxPositionPerStock > 1) {
             errs.add("max_position_per_stock 应在 (0,1]，实得：" + maxPositionPerStock);
